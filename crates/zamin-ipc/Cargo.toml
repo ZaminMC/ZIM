@@ -1,0 +1,19 @@
+[package]
+name = "zamin-ipc"
+description = "Zamin Protocol local transports: framed connections over named pipes and Unix sockets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+zamin-protocol = { path = "../zamin-protocol" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
