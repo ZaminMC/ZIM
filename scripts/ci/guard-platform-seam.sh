@@ -17,9 +17,12 @@ fail() {
 }
 
 # 1. cfg(windows) / cfg(unix) / cfg(target_os) outside the platform seam.
-#    Production src trees only — tests are deliberately exempt (see header).
+#    Production src trees only. Test code is deliberately exempt (see
+#    header): files named tests.rs are test-only modules; platform-
+#    conditional integration tests live under crates/*/tests/.
 cfg_hits=$(grep -rnE '#\[cfg\((windows|unix|target_os)' \
     --include='*.rs' crates/*/src crates/testing/*/src apps/*/src 2>/dev/null \
+    | grep -v '/src/.*/tests\.rs:' \
     | grep -v '^crates/zamin-core/src/platform/' \
     | grep -v '^crates/zamin-ipc/src/' \
     || true)

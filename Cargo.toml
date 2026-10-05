@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/zamin-protocol",
     "crates/zamin-ipc",
+    "crates/zamin-core",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tracing = "0.1"
+toml = "0.8"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
