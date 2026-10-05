@@ -58,7 +58,8 @@ impl Spawned {
 
 /// Per-spawn operations. The daemon owns the child; killing is explicit and
 /// tree-wide (ADR-0005), never a side effect of a handle being dropped.
-pub trait SpawnHandle: Send {
+/// `Sync` so an actor holding a handle can be awaited from any worker.
+pub trait SpawnHandle: Send + Sync {
     fn pid(&self) -> u32;
     /// The piped child process: stdin/stdout/stderr and exit waiting.
     fn child(&mut self) -> &mut tokio::process::Child;

@@ -10,6 +10,9 @@ pub enum CoreError {
     #[error("server id {id:?} is invalid: {reason}")]
     InvalidServerId { id: String, reason: String },
 
+    #[error("the server requires EULA acceptance at {path:?}")]
+    NeedsEula { path: PathBuf },
+
     #[error("server {id:?} is not registered")]
     ServerNotRegistered { id: String },
 

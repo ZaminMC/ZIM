@@ -112,6 +112,16 @@ pub struct ServerIdParams {
     pub server_id: String,
 }
 
+/// One console line to the server's stdin (terminal input). No response
+/// body beyond acceptance; output arrives on the logs stream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StdinParams {
+    pub request_id: Uuid,
+    pub server_id: String,
+    pub line: String,
+}
+
 /// Result of start/stop/restart/kill: the accepted state transition has begun.
 /// Outcomes arrive as `server.state_changed` events.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

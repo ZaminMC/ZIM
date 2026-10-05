@@ -27,6 +27,7 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0200;
 struct JobHandle(HANDLE);
 
 unsafe impl Send for JobHandle {}
+unsafe impl Sync for JobHandle {}
 
 impl Drop for JobHandle {
     fn drop(&mut self) {

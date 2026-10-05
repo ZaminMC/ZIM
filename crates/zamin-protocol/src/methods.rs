@@ -12,6 +12,7 @@ pub const SERVER_START: &str = "server.start";
 pub const SERVER_STOP: &str = "server.stop";
 pub const SERVER_RESTART: &str = "server.restart";
 pub const SERVER_KILL: &str = "server.kill";
+pub const SERVER_STDIN: &str = "server.stdin";
 
 pub const JOBS_LIST: &str = "jobs.list";
 pub const JOBS_GET: &str = "jobs.get";

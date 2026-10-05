@@ -1,0 +1,35 @@
+[package]
+name = "zamind"
+description = "The Zamin daemon: owns server supervision and state, serves the Zamin Protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "zamind"
+path = "src/main.rs"
+
+[dependencies]
+zamin-protocol = { path = "../zamin-protocol" }
+zamin-ipc = { path = "../zamin-ipc" }
+zamin-core = { path = "../zamin-core" }
+tokio = { workspace = true }
+futures-util = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+bytes = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

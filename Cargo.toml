@@ -4,6 +4,8 @@ members = [
     "crates/zamin-protocol",
     "crates/zamin-ipc",
     "crates/zamin-core",
+    "crates/zamind",
+    "crates/testing/fake-mc-server",
 ]
 
 [workspace.package]

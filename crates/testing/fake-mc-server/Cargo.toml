@@ -1,0 +1,17 @@
+[package]
+name = "fake-mc-server"
+description = "Deterministic Paper-lifecycle mimic for supervisor tests; no Java required"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "fake-mc-server"
+path = "src/main.rs"

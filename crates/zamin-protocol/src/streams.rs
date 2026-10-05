@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::jobs::{Job, JobOutcome, JobProgress};
-use crate::server::{ServerDetails, ServerState};
+use crate::server::ServerState;
 use crate::ProtocolError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -41,8 +41,9 @@ pub struct SubscribeParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventsSnapshot {
-    /// Full current truth: every server and its state (ADR-0006).
-    pub servers: Vec<ServerDetails>,
+    /// Full current truth to reconcile against: every registered server
+    /// with its identity and lifecycle state (ADR-0006).
+    pub servers: Vec<crate::server::ServerSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

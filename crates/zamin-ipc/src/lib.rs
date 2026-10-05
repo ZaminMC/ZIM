@@ -22,7 +22,7 @@ mod platform;
 mod platform;
 
 pub use client::connect;
-pub use connection::Connection;
+pub use connection::{Connection, ConnectionReadHalf, ConnectionWriteHalf};
 pub use endpoint::Endpoint;
 pub use error::IpcError;
 pub use server::IpcServer;

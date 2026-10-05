@@ -15,6 +15,19 @@ pub enum Endpoint {
 }
 
 impl Endpoint {
+    /// Parse a daemon `--endpoint` argument: a pipe name on Windows, a
+    /// socket path on Unix. Lives here so callers stay platform-neutral.
+    pub fn from_daemon_arg(value: &str) -> Endpoint {
+        #[cfg(windows)]
+        {
+            Endpoint::WindowsPipe(value.to_owned())
+        }
+        #[cfg(unix)]
+        {
+            Endpoint::UnixSocket(PathBuf::from(value))
+        }
+    }
+
     /// The per-user default endpoint for this machine's OS.
     pub fn default_endpoint() -> Endpoint {
         #[cfg(windows)]

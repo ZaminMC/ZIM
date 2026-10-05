@@ -56,7 +56,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | Namespace | Methods |
 |---|---|
 | `daemon` | `daemon.hello`, `daemon.status` |
-| `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill` |
+| `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream) |
 | `jobs` | `jobs.list`, `jobs.get`, `jobs.cancel` |
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
 | `logs` | `logs.range` (file-backed historical read) |

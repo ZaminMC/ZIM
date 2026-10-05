@@ -19,6 +19,18 @@ pub struct Connection {
     framed: Framed<BoxedIo, LengthDelimitedCodec>,
 }
 
+/// Write half of a split connection. Senders serialize through it; the
+/// read half belongs to the session loop, so a parked receive never blocks
+/// notification delivery.
+pub struct ConnectionWriteHalf {
+    sink: futures_util::stream::SplitSink<Framed<BoxedIo, LengthDelimitedCodec>, Bytes>,
+}
+
+/// Read half of a split connection: owned exclusively by the session loop.
+pub struct ConnectionReadHalf {
+    stream: futures_util::stream::SplitStream<Framed<BoxedIo, LengthDelimitedCodec>>,
+}
+
 fn codec() -> LengthDelimitedCodec {
     LengthDelimitedCodec::builder()
         .little_endian()
@@ -50,6 +62,36 @@ impl Connection {
     /// Receive the next frame. `None` means the peer closed the connection.
     pub async fn recv(&mut self) -> Result<Option<Bytes>, IpcError> {
         match self.framed.next().await {
+            Some(Ok(bytes)) => Ok(Some(bytes.freeze())),
+            Some(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => {
+                Err(IpcError::FrameTooLarge)
+            }
+            Some(Err(e)) => Err(e.into()),
+            None => Ok(None),
+        }
+    }
+
+    /// Split into independently usable halves: many senders behind one
+    /// write half, one reader on the read half.
+    pub fn split(self) -> (ConnectionWriteHalf, ConnectionReadHalf) {
+        let (sink, stream) = self.framed.split();
+        (ConnectionWriteHalf { sink }, ConnectionReadHalf { stream })
+    }
+}
+
+impl ConnectionWriteHalf {
+    pub async fn send(&mut self, payload: Bytes) -> Result<(), IpcError> {
+        if payload.len() > zamin_protocol::framing::MAX_FRAME_LENGTH {
+            return Err(IpcError::FrameTooLarge);
+        }
+        self.sink.send(payload).await?;
+        Ok(())
+    }
+}
+
+impl ConnectionReadHalf {
+    pub async fn recv(&mut self) -> Result<Option<Bytes>, IpcError> {
+        match self.stream.next().await {
             Some(Ok(bytes)) => Ok(Some(bytes.freeze())),
             Some(Err(e)) if e.kind() == std::io::ErrorKind::InvalidData => {
                 Err(IpcError::FrameTooLarge)
