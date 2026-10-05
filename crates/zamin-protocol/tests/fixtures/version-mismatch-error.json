@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": "PROTOCOL_VERSION_UNSUPPORTED",
+    "message": "Daemon speaks protocol 1; client requested protocol 99."
+  }
+}

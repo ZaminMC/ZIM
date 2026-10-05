@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "daemon.hello",
+  "params": {
+    "protocol": 1,
+    "client": { "name": "zamin-cli", "version": "0.1.0" }
+  }
+}

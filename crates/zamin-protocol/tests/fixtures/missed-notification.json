@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "streams.notification",
+  "params": {
+    "stream": "logs",
+    "serverId": "production",
+    "seq": 48212,
+    "payload": { "kind": "missed", "missed": 128 }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "method": "streams.notification",
+  "params": {
+    "stream": "logs",
+    "serverId": "production",
+    "seq": 48211,
+    "payload": {
+      "kind": "logs",
+      "batch": [
+        {
+          "tsMs": 1730803278123,
+          "level": "info",
+          "thread": "Server thread",
+          "line": "Done (3.214s)! For help, type \"help\""
+        },
+        {
+          "tsMs": 1730803279456,
+          "level": "warn",
+          "line": "Can't keep up! Is the server overloaded?"
+        }
+      ]
+    }
+  }
+}

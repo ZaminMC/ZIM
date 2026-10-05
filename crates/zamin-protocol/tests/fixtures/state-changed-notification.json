@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "streams.notification",
+  "params": {
+    "stream": "events",
+    "serverId": "production",
+    "seq": 48210,
+    "payload": {
+      "kind": "event",
+      "event": {
+        "type": "serverStateChanged",
+        "serverId": "production",
+        "from": "starting",
+        "to": "running",
+        "reason": "startup-validated"
+      }
+    }
+  }
+}

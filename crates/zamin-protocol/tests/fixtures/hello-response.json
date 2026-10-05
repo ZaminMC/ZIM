@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocol": 1,
+    "protocolMin": 1,
+    "protocolMax": 1,
+    "daemon": { "name": "zamind", "version": "0.1.0" },
+    "capabilities": ["server.lifecycle", "streams", "jobs"]
+  }
+}

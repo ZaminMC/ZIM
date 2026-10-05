@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "method": "streams.notification",
+  "params": {
+    "stream": "events",
+    "seq": 48213,
+    "payload": {
+      "kind": "event",
+      "event": {
+        "type": "jobCompleted",
+        "jobId": "018f3d2a-7c1b-7000-8000-00000000abcd",
+        "outcome": "succeeded"
+      }
+    }
+  }
+}

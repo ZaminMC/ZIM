@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "method": "server.get",
+  "params": { "serverId": "production", "futureField": { "x": 1 } },
+  "extraTopLevel": true
+}

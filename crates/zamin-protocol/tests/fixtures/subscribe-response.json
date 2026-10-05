@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "result": {
+    "subscriptionId": "s-1",
+    "cursor": { "seq": 48210 },
+    "snapshot": {
+      "servers": [
+        { "serverId": "production", "displayName": "Production", "state": "running" }
+      ]
+    }
+  }
+}

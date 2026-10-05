@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "error": {
+    "code": "PORT_IN_USE",
+    "message": "Port 25565 is already in use by server 'production'.",
+    "context": { "port": 25565, "heldByServerId": "production" },
+    "remediation": ["choose_another_port", "stop_managed_server"]
+  }
+}
