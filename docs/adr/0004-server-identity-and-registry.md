@@ -19,7 +19,7 @@ Servers must be addressable by stable identity across Panel restarts, daemon res
 
 - Moving a server directory on disk requires re-linking through the UI/CLI (explicit, not silent).
 - A `serverId` collision between registry and marker is an error surfaced to the client, never auto-resolved.
-- Absolute paths never cross the protocol; only the daemon and registry know `rootPath`.
+- Absolute paths never cross the protocol **with one exception**: `server.register` carries `rootPath`, because binding a user-chosen directory is the bootstrap act itself; the daemon canonicalizes it immediately, and every subsequent operation addresses the server by `serverId`. Only the daemon and registry retain `rootPath` afterwards.
 
 ## Alternatives considered
 
