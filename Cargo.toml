@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zamin-protocol",
+    "crates/zamin-ipc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "Apache-2.0"
+repository = "https://github.com/ZaminMC/ZaminPanel"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v7", "serde"] }
+bytes = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "process", "fs", "signal"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+tracing = "0.1"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

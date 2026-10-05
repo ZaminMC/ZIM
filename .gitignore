@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / Panel UI
+node_modules/
+apps/panel/dist/
+apps/panel/src-tauri/target/
+*.tsbuildinfo
+
+# Test and benchmark output
+/perf-results/
+*.profraw
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# OS and editor state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
