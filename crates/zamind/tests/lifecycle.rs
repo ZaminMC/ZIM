@@ -326,3 +326,106 @@ async fn java_incompatible_preflight_is_typed() {
         .await
         .expect("server reaches running with satisfied requirement");
 }
+
+/// Wire robustness (JSON-RPC 2.0 §4): explicit `id: null` requests stay
+/// legal, unreadable ids answer PROTOCOL_INVALID_REQUEST with a null id,
+/// unknown methods answer PROTOCOL_METHOD_NOT_FOUND, and notifications
+/// never draw a reply.
+#[tokio::test(flavor = "multi_thread")]
+async fn wire_robustness_null_ids_invalid_requests_and_unknown_methods() {
+    let data_dir = scoped_dir("data-wire-robustness");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("wire-robustness");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+
+    use bytes::Bytes;
+    use serde_json::Value;
+
+    async fn send_raw(client: &mut common::Client, value: serde_json::Value) {
+        let payload = serde_json::to_vec(&value).unwrap();
+        client
+            .connection
+            .send(Bytes::from(payload))
+            .await
+            .expect("send raw frame");
+    }
+
+    // 1. `id: null` is a legal request; the response echoes the null id.
+    send_raw(
+        &mut client,
+        json!({"jsonrpc": "2.0", "id": null, "method": methods::DAEMON_STATUS}),
+    )
+    .await;
+    let frame = next_response_frame(&mut client).await;
+    let value: Value = serde_json::from_slice(&frame).unwrap();
+    assert!(
+        value["id"].is_null(),
+        "response must echo the null id: {value}"
+    );
+    assert!(
+        value["result"].is_object(),
+        "status result present: {value}"
+    );
+
+    // 2. An unreadable id (an object) is a PROTOCOL_INVALID_REQUEST replied
+    //    with a null id — never silence, never a guessed id.
+    send_raw(
+        &mut client,
+        json!({"jsonrpc": "2.0", "id": {"bad": true}, "method": methods::DAEMON_STATUS}),
+    )
+    .await;
+    let frame = next_response_frame(&mut client).await;
+    let value: Value = serde_json::from_slice(&frame).unwrap();
+    assert!(
+        value["id"].is_null(),
+        "error reply carries id: null: {value}"
+    );
+    assert_eq!(value["error"]["code"], "PROTOCOL_INVALID_REQUEST");
+
+    // 3. Unknown method → PROTOCOL_METHOD_NOT_FOUND (not INTERNAL_ERROR).
+    let error = client
+        .request(
+            methods::JOBS_GET,
+            json!({"jobId": "00000000-0000-0000-0000-000000000000"}),
+        )
+        .await
+        .expect_err("jobs.get is not implemented yet");
+    assert_eq!(error["code"], "PROTOCOL_METHOD_NOT_FOUND");
+
+    // 4. A notification (method, no id) gets NO reply: the next response on
+    //    the wire must belong to the request that follows it.
+    send_raw(
+        &mut client,
+        json!({"jsonrpc": "2.0", "method": methods::SERVER_LIST, "params": {}}),
+    )
+    .await;
+    client.next_id = 40;
+    let status = client
+        .request(methods::DAEMON_STATUS, json!({}))
+        .await
+        .expect("request after a notification gets exactly its own response");
+    assert!(status["servers"].is_u64());
+}
+
+/// Receive frames, skipping stream notifications, until a JSON-RPC response
+/// arrives. This connection holds no subscriptions, so this is only ever
+/// the reply to the request just sent.
+async fn next_response_frame(client: &mut common::Client) -> bytes::Bytes {
+    use serde_json::Value;
+    use zamin_protocol::envelope::IncomingMessage;
+    loop {
+        let frame = client
+            .connection
+            .recv()
+            .await
+            .expect("recv")
+            .expect("connection open");
+        let value: Value = serde_json::from_slice(&frame).unwrap();
+        if matches!(
+            IncomingMessage::parse(&value),
+            Some(IncomingMessage::Response(_))
+        ) {
+            return frame;
+        }
+    }
+}

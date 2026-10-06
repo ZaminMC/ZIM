@@ -95,12 +95,14 @@ async fn session_loop(
         let value: serde_json::Value = match serde_json::from_slice(&frame) {
             Ok(value) => value,
             Err(e) => {
+                // JSON-RPC 2.0 §4.1: an unreadable id is replied to with a
+                // Null id, never a guessed one.
                 outbound
                     .reply(Response::err(
-                        RequestId::Number(0),
+                        RequestId::Null,
                         ProtocolError::new(
-                            ErrorCode::InternalError,
-                            format!("Unparseable message: {e}."),
+                            ErrorCode::ProtocolInvalidRequest,
+                            format!("The message is not valid JSON: {e}."),
                         ),
                     ))
                     .await;
@@ -109,8 +111,25 @@ async fn session_loop(
         };
 
         let Some(IncomingMessage::Request(request)) = IncomingMessage::parse(&value) else {
-            // v0 has client→daemon requests only; client notifications are
-            // reserved for future terminal input and are dropped here.
+            let has_method = value.get("method").is_some();
+            let has_id_key = value.get("id").is_some();
+            if has_method && has_id_key {
+                // It *tried* to be a request but the id is unreadable (e.g.
+                // an object or a float). JSON-RPC 2.0 §4.1: reply with a
+                // typed error carrying a Null id. Genuine notifications
+                // (method without id) get no reply, per JSON-RPC §4.2.
+                outbound
+                    .reply(Response::err(
+                        RequestId::Null,
+                        ProtocolError::new(
+                            ErrorCode::ProtocolInvalidRequest,
+                            "The request id must be a number or a string.",
+                        ),
+                    ))
+                    .await;
+            }
+            // Anything else (notifications, responses, stray shapes) is not
+            // ours to judge; v0 has client→daemon requests only.
             continue;
         };
 
@@ -387,8 +406,8 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
         other => Response::err(
             id,
             ProtocolError::new(
-                ErrorCode::InternalError,
-                format!("Method {other:?} is not implemented by this daemon build."),
+                ErrorCode::ProtocolMethodNotFound,
+                format!("Method {other:?} does not exist in this daemon's protocol surface."),
             ),
         ),
     }

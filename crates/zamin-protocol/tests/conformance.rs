@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use zamin_protocol::envelope::{IncomingMessage, RequestId};
+use zamin_protocol::envelope::{IncomingMessage, Request, RequestId, Response};
 use zamin_protocol::error::ErrorCode;
 use zamin_protocol::handshake::HelloResult;
 use zamin_protocol::jobs::JobOutcome;
@@ -226,4 +226,35 @@ fn unknown_fields_are_ignored() {
         .parse_params::<zamin_protocol::server::GetServerParams>()
         .unwrap();
     assert_eq!(params.server_id, "production");
+}
+
+#[test]
+fn null_request_id_round_trips() {
+    // JSON-RPC 2.0: an id that cannot be read is replied to as Null, and an
+    // explicit `"id": null` request stays a legal request.
+    let raw = json!({"jsonrpc": "2.0", "id": null, "method": methods::DAEMON_STATUS});
+    let parsed: Request = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(parsed.id, RequestId::Null);
+    let re_sent = serde_json::to_value(&parsed).unwrap();
+    assert_eq!(re_sent, raw, "Null id must serialize back as null");
+
+    let response = Response::ok(RequestId::Null, json!({}));
+    let wire = serde_json::to_value(&response).unwrap();
+    assert_eq!(wire["id"], Value::Null, "error replies carry id: null");
+}
+
+#[test]
+fn new_protocol_error_codes_serialize_to_registered_strings() {
+    // Stable code registry (protocol spec §4): PROTOCOL_* codes added for
+    // wire robustness keep their SCREAMING_SNAKE_CASE spellings.
+    let invalid = ProtocolError::new(
+        ErrorCode::ProtocolInvalidRequest,
+        "The request id must be a number or a string.",
+    );
+    let wire = serde_json::to_value(&invalid).unwrap();
+    assert_eq!(wire["code"], "PROTOCOL_INVALID_REQUEST");
+
+    let not_found = ProtocolError::new(ErrorCode::ProtocolMethodNotFound, "No such method.");
+    let wire = serde_json::to_value(&not_found).unwrap();
+    assert_eq!(wire["code"], "PROTOCOL_METHOD_NOT_FOUND");
 }

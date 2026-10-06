@@ -7,12 +7,16 @@ use serde_json::Value;
 pub const JSONRPC_VERSION: &str = "2.0";
 
 /// Request id: u64 or string on the wire. Clients use monotonically
-/// increasing integers.
+/// increasing integers. `Null` exists for error replies to malformed
+/// requests whose id could not be read (JSON-RPC 2.0 §4.1: "If there was an
+/// error in detecting the id in the Request object (e.g. Parse error/Invalid
+/// Request), it MUST be Null.").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RequestId {
     Number(u64),
     String(String),
+    Null,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -12,6 +12,8 @@ use serde_json::Value;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     ProtocolVersionUnsupported,
+    ProtocolInvalidRequest,
+    ProtocolMethodNotFound,
     DaemonBusy,
     ServerNotFound,
     ServerIdExists,
@@ -40,6 +42,8 @@ impl ErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             ErrorCode::ProtocolVersionUnsupported => "PROTOCOL_VERSION_UNSUPPORTED",
+            ErrorCode::ProtocolInvalidRequest => "PROTOCOL_INVALID_REQUEST",
+            ErrorCode::ProtocolMethodNotFound => "PROTOCOL_METHOD_NOT_FOUND",
             ErrorCode::DaemonBusy => "DAEMON_BUSY",
             ErrorCode::ServerNotFound => "SERVER_NOT_FOUND",
             ErrorCode::ServerIdExists => "SERVER_ID_EXISTS",
