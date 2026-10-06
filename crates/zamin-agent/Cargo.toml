@@ -1,0 +1,35 @@
+[package]
+name = "zamin-agent"
+description = "ZaminAgent — the remote bridge: TLS + token auth for protocol clients reaching the local daemon (ADR-0011)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "zamin_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zaminagent"
+path = "src/main.rs"
+
+[dependencies]
+zamin-protocol = { path = "../zamin-protocol" }
+zamin-ipc = { path = "../zamin-ipc" }
+zamin-core = { path = "../zamin-core" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rcgen = { workspace = true }
+ring = { workspace = true }
+
+[lints]
+workspace = true

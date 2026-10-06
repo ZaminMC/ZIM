@@ -7,7 +7,8 @@
 ## 1. Transport
 
 - A Zamin Protocol connection is a **byte stream** carrying length-prefixed UTF-8 JSON messages: `u32` little-endian byte count, then the message.
-- Local transports: Windows named pipe (per-user name, ADR-0001) and Unix domain socket (`$XDG_RUNTIME_DIR/zamind/zamind.sock`). The framing is transport-agnostic; a future remote transport (TLS socket) uses the same framing.
+- Local transports: Windows named pipe (per-user name, ADR-0001) and Unix domain socket (`$XDG_RUNTIME_DIR/zamind/zamind.sock`). The framing is transport-agnostic; the remote transport (ADR-0011) uses the same framing over TLS TCP.
+- **Remote transport** (ADR-0011): ZaminAgent listens on TCP with TLS 1.3 and relays to the local daemon. One remote connection maps to one daemon session. The agent is a frame-level bridge — it validates the handshake's auth and forwards everything else unchanged.
 - One connection multiplexes everything: requests, responses, and notification streams. No message batching at the protocol layer in v0.
 - JSON objects are **tolerantly read**: unknown fields are ignored by both sides. Senders must not rely on field order.
 
@@ -26,7 +27,12 @@
 
 - `protocol` is an integer, starting at 1. Additive evolution does not change it; breaking changes bump it and define a `protocolMin`/`protocolMax` window.
 - On mismatch the daemon replies with error `PROTOCOL_VERSION_UNSUPPORTED` and closes the connection. Clients render this as an upgrade prompt, never as a generic failure.
-- `auth` is opaque in v0; local transports ignore it. A remote transport will define it. This is the authentication hook — nothing more is built now.
+- `auth` is the authentication hook. **Local transports ignore it** — there the OS user + pipe/UDS ACL is the credential (documented, not ignored). **The remote transport requires it** (ADR-0011): the agent checks `auth` against its token before any daemon connection exists.
+  - Missing/empty `auth` over a remote transport → error `AUTH_REQUIRED`, connection closed.
+  - Wrong `auth` → error `AUTH_REJECTED`, connection closed.
+  - A matching hello is forwarded unchanged; the daemon still ignores `auth` on its local leg.
+  - If the agent cannot reach its local daemon → error `DAEMON_UNREACHABLE` (carrying the transport error), connection closed.
+  - Both auth errors answer with the client's own request id; a first frame that is not a readable `daemon.hello` request answers with a Null id and `PROTOCOL_INVALID_REQUEST`, mirroring the daemon's malformed-frame rule (§3).
 
 ## 3. Requests, responses, notifications
 
@@ -48,7 +54,7 @@
 - `message` is a complete, specific, human-readable sentence (see the style guide's message rules).
 - `remediation` lists action IDs clients may map to UI affordances; unknown IDs are ignored.
 - JSON-RPC envelope failures answer `PROTOCOL_INVALID_REQUEST` (unreadable request id → the reply carries a null id, per JSON-RPC 2.0 §4.1) and `PROTOCOL_METHOD_NOT_FOUND` (no such method on this daemon's surface).
-- Initial registry (non-exhaustive): `PROTOCOL_VERSION_UNSUPPORTED`, `PROTOCOL_INVALID_REQUEST`, `PROTOCOL_METHOD_NOT_FOUND`, `DAEMON_BUSY`, `SERVER_NOT_FOUND`, `SERVER_ID_EXISTS`, `SERVER_ID_INVALID`, `SERVER_ALREADY_RUNNING`, `SERVER_NOT_RUNNING`, `SERVER_START_TIMEOUT`, `PREFLIGHT_FAILED`, `NEEDS_EULA`, `JAVA_NOT_FOUND`, `JAVA_INCOMPATIBLE`, `JAVA_EXEC_FAILED`, `PORT_IN_USE`, `FS_OUTSIDE_ROOT`, `FS_NOT_WRITABLE`, `FS_NOT_FOUND`, `FS_PATH_ESCAPES_ROOT`, `ARCHIVE_UNSAFE_ENTRY`, `DISK_FULL`, `JOB_NOT_FOUND`, `JOB_NOT_CANCELLABLE`, `INTERNAL_ERROR`.
+- Initial registry (non-exhaustive): `PROTOCOL_VERSION_UNSUPPORTED`, `PROTOCOL_INVALID_REQUEST`, `PROTOCOL_METHOD_NOT_FOUND`, `DAEMON_BUSY`, `DAEMON_UNREACHABLE`, `AUTH_REQUIRED`, `AUTH_REJECTED`, `SERVER_NOT_FOUND`, `SERVER_ID_EXISTS`, `SERVER_ID_INVALID`, `SERVER_ALREADY_RUNNING`, `SERVER_NOT_RUNNING`, `SERVER_START_TIMEOUT`, `PREFLIGHT_FAILED`, `NEEDS_EULA`, `JAVA_NOT_FOUND`, `JAVA_INCOMPATIBLE`, `JAVA_EXEC_FAILED`, `PORT_IN_USE`, `FS_OUTSIDE_ROOT`, `FS_NOT_WRITABLE`, `FS_NOT_FOUND`, `FS_PATH_ESCAPES_ROOT`, `ARCHIVE_UNSAFE_ENTRY`, `DISK_FULL`, `JOB_NOT_FOUND`, `JOB_NOT_CANCELLABLE`, `INTERNAL_ERROR`. `DAEMON_UNREACHABLE` / `AUTH_REQUIRED` / `AUTH_REJECTED` are raised by the remote transport (ADR-0011).
 
 ## 5. Method catalog (v0)
 
