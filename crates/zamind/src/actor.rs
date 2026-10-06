@@ -1138,6 +1138,35 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
         )
         .with_context("port", *port as u64)
         .with_remediation(&["choose_another_port", "stop_managed_server"]),
+        E::ArchiveUnsafeEntry { entry, reason } => ProtocolError::new(
+            ErrorCode::ArchiveUnsafeEntry,
+            format!("Archive entry {entry:?} is unsafe: {reason}."),
+        ),
+        E::ArchiveTooLarge {
+            found,
+            entries,
+            max_bytes,
+            max_entries,
+        } => ProtocolError::new(
+            ErrorCode::ArchiveUnsafeEntry,
+            format!(
+                "The archive exceeds the safety limits: {found} bytes across {entries} entries; \
+                 the limits are {max_bytes} bytes and {max_entries} entries."
+            ),
+        ),
+        E::DiskFull { path } => ProtocolError::new(
+            ErrorCode::DiskFull,
+            format!("The disk is full at {path:?}. Free space and try again."),
+        )
+        .with_remediation(&["free_space"]),
+        E::Cancelled => ProtocolError::new(
+            ErrorCode::InternalError,
+            "The operation was cancelled before it finished.",
+        ),
+        E::RestoreRolledBack { reason } => ProtocolError::new(
+            ErrorCode::InternalError,
+            format!("Restore failed mid-commit ({reason}); the previous files were rolled back."),
+        ),
         E::Platform(e) => ProtocolError::new(ErrorCode::InternalError, e.to_string()),
     }
 }

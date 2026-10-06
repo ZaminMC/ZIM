@@ -8,6 +8,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod backup;
 pub mod config;
 pub mod error;
 pub mod fsops;

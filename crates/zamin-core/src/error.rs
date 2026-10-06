@@ -76,6 +76,26 @@ pub enum CoreError {
     #[error("port {port} is already in use")]
     PortInUse { port: u16 },
 
+    #[error("archive entry {entry:?} is unsafe: {reason}")]
+    ArchiveUnsafeEntry { entry: String, reason: String },
+
+    #[error("archive exceeds safety limits: {found} bytes across {entries} entries, max {max_bytes} bytes / {max_entries} entries")]
+    ArchiveTooLarge {
+        found: u64,
+        entries: u64,
+        max_bytes: u64,
+        max_entries: u64,
+    },
+
+    #[error("the disk is full at {path:?}")]
+    DiskFull { path: PathBuf },
+
+    #[error("the operation was cancelled")]
+    Cancelled,
+
+    #[error("restore failed mid-commit ({reason}); the previous server files were rolled back — nothing was lost")]
+    RestoreRolledBack { reason: String },
+
     #[error(transparent)]
     Platform(#[from] PlatformError),
 }
