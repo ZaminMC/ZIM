@@ -113,7 +113,18 @@ fn main() -> ExitCode {
     match runtime.block_on(run(cli)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => {
-            if !json_mode {
+            if json_mode {
+                // Machine-readable failure: one error object on stdout —
+                // the verbatim protocol error when the daemon replied,
+                // a synthesized DAEMON_UNREACHABLE object otherwise.
+                match &failure.json_error {
+                    Some(error) => match serde_json::to_string_pretty(error) {
+                        Ok(text) => println!("{text}"),
+                        Err(e) => eprintln!("zamin: cannot serialize error: {e}"),
+                    },
+                    None => eprint!("{}", failure.text),
+                }
+            } else {
                 eprint!("{}", failure.text);
             }
             failure.code
@@ -121,30 +132,67 @@ fn main() -> ExitCode {
     }
 }
 
-/// A command failure: an exit code plus the human-facing text (suppressed
-/// in --json mode, where the error object was already printed).
+/// A command failure: an exit code, the human-facing text, and — when an
+/// error object exists — its machine-readable JSON form.
 struct Failure {
     code: ExitCode,
     text: String,
+    json_error: Option<serde_json::Value>,
 }
 
 impl Failure {
     fn new(code: ExitCode, text: String) -> Failure {
-        Failure { code, text }
+        Failure {
+            code,
+            text,
+            json_error: None,
+        }
     }
 
     fn error(text: String) -> Failure {
         Failure::new(ExitCode::from(1), text)
     }
+
+    fn with_json(mut self, error: serde_json::Value) -> Failure {
+        self.json_error = Some(error);
+        self
+    }
 }
+
+/// Client-synthesized code for transport-level failures; the daemon was
+/// never reached, so no protocol error object exists.
+const DAEMON_UNREACHABLE: &str = "DAEMON_UNREACHABLE";
 
 impl From<ClientError> for Failure {
     fn from(error: ClientError) -> Failure {
-        Failure::error(render::client_error(&error))
+        let text = render::client_error(&error);
+        let json_error = match &error {
+            ClientError::Protocol(protocol) => serde_json::to_value(protocol).ok(),
+            _ => Some(serde_json::json!({
+                "code": DAEMON_UNREACHABLE,
+                "message": error.to_string(),
+            })),
+        };
+        let mut failure = Failure::error(text);
+        failure.json_error = json_error;
+        failure
     }
 }
 
 type CmdResult = Result<(), Failure>;
+
+/// Connect-time failures get the endpoint-aware human message; protocol
+/// errors (a rejected handshake) keep their verbatim error object.
+fn connect_failure(error: ClientError, endpoint_arg: &Option<String>) -> Failure {
+    let text = render::connection_error(&error, endpoint_arg);
+    match &error {
+        ClientError::Protocol(_) => error.into(),
+        _ => Failure::error(text).with_json(serde_json::json!({
+            "code": DAEMON_UNREACHABLE,
+            "message": error.to_string(),
+        })),
+    }
+}
 
 async fn run(cli: Cli) -> Result<(), Failure> {
     // Commands that never need a connection.
@@ -163,7 +211,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
 
     let client = Client::connect(endpoint)
         .await
-        .map_err(|error| Failure::error(render::connection_error(&error, &cli.endpoint)))?;
+        .map_err(|error| connect_failure(error, &cli.endpoint))?;
 
     match &cli.command {
         Commands::List => list(&cli, &client).await,
@@ -478,15 +526,18 @@ fn print_json<T: serde::Serialize>(value: &T) {
     }
 }
 
-/// Wraps protocol errors with the `--endpoint` hint where it helps.
+/// Wraps protocol errors with the `zamin list` hint where it helps.
 fn protocol_with_usage_hint(error: ClientError) -> Failure {
-    if let ClientError::Protocol(protocol) = &error {
-        if protocol.code == zamin_protocol::error::ErrorCode::ServerNotFound {
-            return Failure::error(format!(
-                "{}\n  (list registered servers with `zamin list`)",
-                render::protocol_error(protocol)
-            ));
-        }
+    let is_unknown_server = matches!(
+        &error,
+        ClientError::Protocol(protocol)
+            if protocol.code == zamin_protocol::error::ErrorCode::ServerNotFound
+    );
+    let mut failure: Failure = error.into();
+    if is_unknown_server {
+        failure
+            .text
+            .push_str("\n  (list registered servers with `zamin list`)");
     }
-    error.into()
+    failure
 }

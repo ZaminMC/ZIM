@@ -9,6 +9,7 @@
 | Unit | `#[cfg(test)]` beside the code | state machine transitions (table-driven), config parsing/migration, log parser, port logic, path containment |
 | Integration | `crates/*/tests/` | real filesystem, real processes (fake-mc-server), IPC client ⇄ daemon |
 | Protocol conformance | `crates/zamin-protocol/tests/fixtures/` | recorded exchanges asserted across versions; breaking changes must update fixtures intentionally |
+| CLI end-to-end | `crates/zamin-cli/tests/` | the real `zamin` binary drives the real `zamind` binary over the wire: register/start/stop, `logs -f` streaming, `attach` stdin round trip, `--json` error objects. Workspace binaries are located next to the test binary — run `cargo test --workspace`, not per-package tests |
 | Performance | `#[ignore]`d tests run by the nightly CI job | budgets from [PERFORMANCE-BUDGETS.md](PERFORMANCE-BUDGETS.md) |
 | UI | `apps/panel` — vitest component tests; visual states later | components render states (default/hover/focus/disabled/loading/error/selected); critical flows once a test harness exists |
 
