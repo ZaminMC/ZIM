@@ -52,6 +52,18 @@ The daemon's catalog base URLs are flags: `--catalog-url` (PaperMC Fill API v3) 
 - JDK fetch: Adoptium asset + checksum-link parsing · extraction safety for both archive formats (regular files/directories only, no absolute/`..`/backslash names, one common top-level directory, entry/size caps, tar headers crafted byte-level exactly as a hostile producer would) · the fetched `bin/java` is inspected, never trusted by name; uninspectable runtimes are removed, not left to poison discovery · idempotent reinstall · managed runtimes appear in `java.list` (`managed: true`) and are considered by auto-selection AFTER system candidates · the auto-selection is requirement-aware (`JAVA_INCOMPATIBLE` when all candidates are too old, `JAVA_NOT_FOUND` on a bare machine).
 - Zip fixtures are built with the same crate the extractor reads, so the Windows format is exercised on every platform; the inspect loop is `#[cfg(unix)]` because the fake `java` is a shell script.
 
+## Packaging & integration (required coverage)
+
+Everything here must pass on both CI lanes and, where filesystem state is involved, in a sandbox (never the real user HOME):
+
+- Daemon bring-up: `resolve_daemon_binary` sibling-first-then-PATH, all cases (sibling found, PATH found, nothing found) · `endpoint_ready` probes a live bind as ready and an unbound endpoint as down (see `apps/panel/src-tauri/src/daemon_ensure.rs` tests, run in the bundle workflow's lanes).
+- Autostart: XDG entry content and round-trip (absent → off, set on → on, set off → gone, removing nothing is fine, fresh directories created) against a sandboxed config home; the HKCU Run-key round-trip runs only on the Windows lane (see `apps/panel/src-tauri/src/autostart.rs`).
+- Notifications taxonomy (pure, in `apps/panel/src/integration/notifications.test.ts`): hidden or blurred → notify; focused → silent · crash content names the server, the phase, and the exit code when known · job content distinguishes succeeded/failed/cancelled and resolves unknown kinds honestly.
+- Integration seam (`apps/panel/src/integration/autostart.test.ts`): outside Tauri the toggle reports unavailable and refuses to pretend; inside Tauri it mirrors the host, maps an undeterminable state to unavailable, and stays honest on host refusal.
+- Palette: the autostart command is hidden where the host cannot deliver it and labeled by the current state ("Start with the system" / "Stop starting with the system").
+- Install script (`scripts/packaging/test-install-linux.sh`, runs in the bundle workflow): install → Exec rewritten → icons → idempotent upgrade → autostart on/off → broken-payload rejection → clean uninstall. Plus `shellcheck` on all packaging scripts and `desktop-file-validate` on the entry.
+- The §23 proof of done — clean Win11 + Ubuntu/Arch VM installs — stays a documented manual step; `bundle.yml` exists so those VMs only ever install artifacts that already built, tested, and packaged green.
+
 ## Fixtures
 
 - Golden logs under `crates/zamin-core/testdata/logs/<software>/`: real anonymized Paper, Spigot, Folia, Purpur samples — startup floods, warnings, crash traces. Parser changes must not alter golden output without an explicit diff review.

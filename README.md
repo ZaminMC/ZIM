@@ -59,5 +59,31 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0009
+- [ADRs](docs/adr/) — accepted decisions 0001–0010
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
+
+## Install (Phase 7)
+
+Windows ships as a per-user NSIS installer or a portable zip; Linux as an
+AppImage or a portable tar.gz that doubles as the installer payload. Every
+layout carries all three binaries — `zamin-panel`, `zamind`, `zamin` — and
+the panel brings the daemon up on first contact (ADR-0010).
+
+Linux, no root, XDG everywhere:
+
+```sh
+# AppImage: run directly, or integrate it:
+./ZaminPanel_0.1.0_x86_64.AppImage
+
+# Portable tree: run in place…
+tar xf ZaminPanel-0.1.0-linux-x86_64.tar.gz && ./zaminpanel-0.1.0/bin/zamin-panel
+# …or install it (bins + launcher entry + icons; --uninstall reverses;
+# --autostart on starts the panel at login):
+./zaminpanel-0.1.0/install-linux.sh ./zaminpanel-0.1.0
+```
+
+Notifications follow one rule — crash and job completion, only while the
+window is hidden or blurred — and the Ctrl+K palette offers "Start with the
+system" where the host can deliver it. Bundles are built and tested by
+[.github/workflows/bundle.yml](.github/workflows/bundle.yml) on both OS
+lanes; the remaining §23 proof (clean VM installs) is manual by design.
