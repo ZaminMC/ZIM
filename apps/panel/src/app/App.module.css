@@ -1,0 +1,57 @@
+/* Panel shell: sidebar + top bar + content. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: 48px 1fr;
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar content";
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-m);
+}
+
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.brandSub {
+  color: var(--text-faint);
+  font-weight: 400;
+  font-size: var(--text-s);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.content {
+  grid-area: content;
+  overflow-y: auto;
+  padding: var(--space-5);
+}

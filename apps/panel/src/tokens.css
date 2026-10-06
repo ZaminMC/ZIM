@@ -1,0 +1,74 @@
+/* Design tokens (STYLE-GUIDE: one tokens file, CSS custom properties).
+   Dark-first: this is a long-session operator tool. */
+
+:root {
+  /* surfaces */
+  --bg: #0e1116;
+  --surface: #151a21;
+  --surface-2: #1b222c;
+  --surface-3: #222a36;
+  --border: #2a3340;
+  --border-strong: #3a4553;
+
+  /* text */
+  --text: #e7ecf3;
+  --text-muted: #97a3b4;
+  --text-faint: #67737f;
+
+  /* brand + semantics */
+  --accent: #6ca7f2;
+  --accent-strong: #8ab8f5;
+  --accent-contrast: #0b1524;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --danger-strong: #ef8a8a;
+
+  /* state colors (ADR-0005 lifecycle) */
+  --state-running: #4ade80;
+  --state-starting: #fbbf24;
+  --state-stopping: #fbbf24;
+  --state-stopped: #97a3b4;
+  --state-not-running: #67737f;
+  --state-failed-preflight: #f87171;
+  --state-crashed: #f87171;
+  --state-adopting: #c084fc;
+  --state-unknown: #67737f;
+
+  /* geometry */
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* type */
+  --font-ui:
+    "Inter", "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif;
+  --font-mono:
+    "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Menlo, Consolas,
+    monospace;
+  --text-s: 12px;
+  --text-m: 13px;
+  --text-l: 15px;
+  --text-xl: 18px;
+
+  /* motion */
+  --speed-fast: 120ms;
+  --speed-normal: 200ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+
+  /* terminal (xterm surface) */
+  --term-bg: #10141a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --speed-fast: 0ms;
+    --speed-normal: 0ms;
+  }
+}

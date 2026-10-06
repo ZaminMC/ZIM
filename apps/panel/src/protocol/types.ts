@@ -1,0 +1,217 @@
+// Mirror of the Zamin Protocol v1 wire shapes (zamin-protocol, Rust).
+// Protocol spec §2 (handshake), §5 (servers), §6 (streams), §9 (logs).
+// Field names are exactly what serde emits (camelCase / kebab-case tags);
+// a mismatch here is a wire bug, not a refactor.
+
+export const PROTOCOL_VERSION = 1;
+
+// --- handshake (§2) ---
+
+export interface ClientInfo {
+  name: string;
+  version: string;
+}
+
+export interface HelloParams {
+  protocol: number;
+  client: ClientInfo;
+}
+
+export interface HelloResult {
+  protocol: number;
+  protocolMin: number;
+  protocolMax: number;
+  daemon: { name: string; version: string };
+  capabilities: string[];
+}
+
+// --- servers (§5) ---
+
+export type ServerState =
+  | "not-running"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "failed-preflight"
+  | "crashed"
+  | "adopting"
+  | "unknown";
+
+export type CrashPhase = "startup" | "runtime" | "shutdown";
+
+export interface CrashClassification {
+  phase: CrashPhase;
+  exitCode?: number;
+  evidence?: string;
+}
+
+export interface ServerSummary {
+  serverId: string;
+  displayName: string;
+  state: ServerState;
+}
+
+export interface ServerDetails {
+  serverId: string;
+  displayName: string;
+  state: ServerState;
+  software?: string;
+  version?: string;
+  port?: number;
+}
+
+export interface ServerListResult {
+  servers: ServerSummary[];
+}
+
+export interface RegisterServerParams {
+  requestId: string;
+  serverId: string;
+  displayName: string;
+  rootPath: string;
+}
+
+export interface RegisterServerResult {
+  server: ServerDetails;
+}
+
+export interface RemoveServerParams {
+  requestId: string;
+  serverId: string;
+}
+
+export interface UpdateServerParams {
+  requestId: string;
+  serverId: string;
+  displayName?: string;
+}
+
+export interface LifecycleResult {
+  serverId: string;
+  state: ServerState;
+}
+
+export interface StdinParams {
+  requestId: string;
+  serverId: string;
+  line: string;
+}
+
+// --- streams (§6, ADR-0006) ---
+
+export type StreamKind = "events" | "logs" | "metrics";
+
+export type StreamCursor = { seq: number } | { file: string; offset: number };
+
+export interface EventsSnapshot {
+  servers: ServerSummary[];
+}
+
+export interface SubscribeResult {
+  subscriptionId: string;
+  cursor?: StreamCursor;
+  snapshot?: EventsSnapshot;
+  cursorInvalid?: boolean;
+}
+
+export type LogLevel = "info" | "warn" | "error" | "debug" | "unknown";
+
+export interface LogLine {
+  tsMs: number;
+  level: LogLevel;
+  thread?: string;
+  line: string;
+}
+
+export interface MetricsSample {
+  tsMs: number;
+  cpuPercent?: number;
+  rssBytes?: number;
+  players?: number;
+  tps?: number;
+  uptimeMs?: number;
+}
+
+export type CoreEvent =
+  | {
+      type: "serverStateChanged";
+      serverId: string;
+      from: ServerState;
+      to: ServerState;
+      reason?: string;
+      exitCode?: number;
+      error?: ProtocolErrorObject;
+      crash?: CrashClassification;
+    }
+  | { type: "jobStarted"; job: unknown }
+  | { type: "jobProgress"; jobId: string; progress: unknown }
+  | { type: "jobCompleted"; jobId: string; outcome: unknown; error?: ProtocolErrorObject };
+
+export type StreamPayload =
+  | { kind: "logs"; batch: LogLine[] }
+  | { kind: "event"; event: CoreEvent }
+  | { kind: "metrics"; sample: MetricsSample }
+  | { kind: "missed"; missed: number };
+
+export interface StreamNotification {
+  stream: StreamKind;
+  serverId?: string;
+  seq: number;
+  payload: StreamPayload;
+}
+
+export interface SubscribeParams {
+  stream: StreamKind;
+  serverId?: string;
+  cursor?: StreamCursor;
+}
+
+// --- logs (§9, ADR-0006 file-backed catch-up) ---
+
+export interface LogRangeParams {
+  serverId: string;
+  maxLines?: number;
+}
+
+export interface LogRangeResult {
+  file: string;
+  lines: LogLine[];
+  olderAvailable: boolean;
+}
+
+// --- errors (§3) ---
+
+export interface ProtocolErrorObject {
+  code: string;
+  message: string;
+  context?: Record<string, unknown>;
+  remediation?: string[];
+}
+
+// --- JSON-RPC 2.0 envelopes ---
+//
+// Error responses carry the typed protocol error directly in `error`
+// (protocol spec §3: structured errors over the numeric JSON-RPC codes).
+
+export interface JsonRpcRequest {
+  jsonrpc: "2.0";
+  id: number;
+  method: string;
+  params?: unknown;
+}
+
+export interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: number | string | null;
+  result?: unknown;
+  error?: ProtocolErrorObject;
+}
+
+export interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params?: unknown;
+}
+
+export type JsonRpcIncoming = JsonRpcResponse | JsonRpcNotification;

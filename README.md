@@ -11,6 +11,7 @@ A polished desktop and CLI workspace for running, managing, and developing Minec
 | `crates/zamin-core` | The engine that owns servers: registry, config, filesystem safety, Java discovery, lifecycle, logs. |
 | `crates/zamind` | The resident daemon (ADR-0001): supervision actors, event hub, protocol sessions, adoption. |
 | `crates/zamin-cli` | `zamin` — the command line client (second protocol client, Phase 2). |
+| `apps/panel` | The desktop UI (Phase 3): TypeScript protocol client + design system, Tauri 2 host. Develops in a plain browser against `apps/panel/dev-bridge.mjs`. |
 | `crates/testing/fake-mc-server` | Deterministic Paper mimic used by the whole test matrix — no Java needed. |
 
 ## The zamin CLI
@@ -44,6 +45,10 @@ cargo test --workspace    # unit + conformance + lifecycle + e2e (no Java needed
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
+
+Panel (apps/panel) has its own gates — `npm test`, `npm run typecheck`,
+`npm run lint` — and a browser smoke loop described in
+[apps/panel/README.md](apps/panel/README.md).
 
 `cargo test --workspace` builds every binary the tests spawn (`zamind`,
 `zamin`, `fake-mc-server`); run it rather than per-package tests so the
