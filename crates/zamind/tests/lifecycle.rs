@@ -429,3 +429,72 @@ async fn next_response_frame(client: &mut common::Client) -> bytes::Bytes {
         }
     }
 }
+
+/// `logs.range`: the file-backed historical tail (protocol spec §5).
+/// Streams serve what the daemon has ingested; the log file holds the
+/// history — this is the catch-up path (ADR-0006).
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_range_tails_the_file_backed_history() {
+    let data_dir = scoped_dir("data-log-range");
+    let root = make_server_root("root-log-range");
+    let log_dir = root.join("logs");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let mut contents = String::new();
+    for i in 0..50 {
+        contents.push_str(&format!(
+            "[05:24:{:02}] [Server thread/INFO]: historical line {i}\n",
+            i % 60
+        ));
+    }
+    std::fs::write(log_dir.join("latest.log"), &contents).unwrap();
+
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("log-range");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    register_server(&mut client, "test", &root).await;
+
+    // Tail of 10 out of 50: the LAST ten, with older lines still available.
+    let tail = client
+        .request(
+            methods::LOGS_RANGE,
+            json!({"serverId": "test", "maxLines": 10}),
+        )
+        .await
+        .expect("log range tail");
+    assert_eq!(tail["file"], "logs/latest.log");
+    let lines = tail["lines"].as_array().expect("lines array");
+    assert_eq!(lines.len(), 10);
+    assert_eq!(lines[0]["line"], "historical line 40");
+    assert_eq!(lines[9]["line"], "historical line 49");
+    assert_eq!(tail["olderAvailable"], true);
+
+    // Default (no maxLines) serves everything in the file: no older lines.
+    let all = client
+        .request(methods::LOGS_RANGE, json!({"serverId": "test"}))
+        .await
+        .expect("log range default");
+    assert_eq!(all["lines"].as_array().expect("lines array").len(), 50);
+    assert_eq!(all["olderAvailable"], false);
+
+    // Parsed fields ride along (level/thread), tsMs stays 0 for file-backed
+    // lines — the ingestion time never existed (protocol spec §9).
+    assert_eq!(all["lines"][0]["level"], "info");
+    assert_eq!(all["lines"][0]["thread"], "Server thread");
+    assert_eq!(all["lines"][0]["tsMs"], 0);
+
+    // Missing log file → a typed FS_NOT_FOUND, not a silent empty result.
+    let empty_root = make_server_root("root-log-range-empty");
+    register_server(&mut client, "fresh", &empty_root).await;
+    let error = client
+        .request(methods::LOGS_RANGE, json!({"serverId": "fresh"}))
+        .await
+        .expect_err("no log file yet");
+    assert_eq!(error["code"], "FS_NOT_FOUND");
+
+    // Unregistered server → SERVER_NOT_FOUND.
+    let error = client
+        .request(methods::LOGS_RANGE, json!({"serverId": "ghost"}))
+        .await
+        .expect_err("ghost server");
+    assert_eq!(error["code"], "SERVER_NOT_FOUND");
+}

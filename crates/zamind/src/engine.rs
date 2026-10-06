@@ -2,6 +2,7 @@
 //! layer; sessions are thin over it and the protocol is the only way in.
 
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -356,6 +357,30 @@ impl Engine {
         Ok((result, subscription))
     }
 
+    /// `logs.range`: the tail of the server's own `logs/latest.log`,
+    /// parsed into protocol log lines (protocol spec §5, ADR-0006's
+    /// file-backed catch-up path). The file read is sync and runs in
+    /// `spawn_blocking`, per the rooted-filesystem contract.
+    pub async fn log_range(
+        &self,
+        server_id: &ServerId,
+        max_lines: u32,
+    ) -> Result<zamin_protocol::logs::LogRangeResult, EngineError> {
+        let root = {
+            let registry = self.registry_lock();
+            registry
+                .get(server_id)
+                .map(|e| e.root.clone())
+                .ok_or_else(|| not_found(server_id))?
+        };
+        let server_id = server_id.to_string();
+        let result =
+            tokio::task::spawn_blocking(move || tail_of_latest_log(&root, &server_id, max_lines))
+                .await
+                .map_err(|e| EngineError::Internal(format!("log read task failed: {e}")))?;
+        result.map_err(EngineError::Protocol)
+    }
+
     pub async fn daemon_status(&self) -> serde_json::Value {
         let servers = self.list_servers().await;
         serde_json::json!({
@@ -389,4 +414,97 @@ pub fn to_protocol(error: &zamin_core::error::CoreError) -> ProtocolError {
     // The actor owns the canonical mapping; sessions reuse it so the two
     // never diverge.
     crate::actor::to_protocol_error(error)
+}
+
+/// Sync tail read of `logs/latest.log` under the server root, through the
+/// rooted filesystem's containment checks. Runs inside `spawn_blocking`.
+fn tail_of_latest_log(
+    root: &Path,
+    server_id: &str,
+    max_lines: u32,
+) -> Result<zamin_protocol::logs::LogRangeResult, ProtocolError> {
+    use zamin_protocol::logs::{LogRangeResult, LOG_RANGE_MAX_LINES, LOG_RANGE_WINDOW_BYTES};
+
+    const FILE: &str = "logs/latest.log";
+    let max_lines = max_lines.clamp(1, LOG_RANGE_MAX_LINES) as usize;
+
+    let fs = zamin_core::fsops::RootedFs::open(root).map_err(|e| to_protocol(&e))?;
+    let path = fs.resolve(FILE).map_err(|e| to_protocol(&e))?;
+    if !path.is_file() {
+        return Err(ProtocolError::new(
+            ErrorCode::FsNotFound,
+            format!("Server {server_id} has no log file yet ({FILE} does not exist in its root)."),
+        ));
+    }
+
+    let mut file = std::fs::File::open(&path)
+        .map_err(|source| zamin_core::error::CoreError::Io {
+            path: path.clone(),
+            source,
+        })
+        .map_err(|e| to_protocol(&e))?;
+    let len = file
+        .metadata()
+        .map_err(|source| zamin_core::error::CoreError::Io {
+            path: path.clone(),
+            source,
+        })
+        .map_err(|e| to_protocol(&e))?
+        .len();
+
+    if len == 0 {
+        return Ok(LogRangeResult {
+            file: FILE.to_owned(),
+            lines: Vec::new(),
+            older_available: false,
+        });
+    }
+
+    // Scan at most the trailing window; a partial first line (started
+    // before the window) is dropped and reported via older_available.
+    let window = len.min(LOG_RANGE_WINDOW_BYTES);
+    file.seek(SeekFrom::Start(len - window))
+        .map_err(|source| zamin_core::error::CoreError::Io {
+            path: path.clone(),
+            source,
+        })
+        .map_err(|e| to_protocol(&e))?;
+    let mut buf = Vec::with_capacity(window as usize);
+    file.read_to_end(&mut buf)
+        .map_err(|source| zamin_core::error::CoreError::Io {
+            path: path.clone(),
+            source,
+        })
+        .map_err(|e| to_protocol(&e))?;
+    let text = String::from_utf8_lossy(&buf);
+
+    let mut raw_lines: Vec<&str> = text.split('\n').collect();
+    let mut older_available = window < len;
+    if window < len {
+        // The first element is the cut-off remainder of an older line.
+        if !raw_lines.is_empty() {
+            raw_lines.remove(0);
+        }
+    }
+    // A trailing "" after the final newline is not a line.
+    if raw_lines.last().is_some_and(|l| l.is_empty()) {
+        raw_lines.pop();
+    }
+
+    if raw_lines.len() > max_lines {
+        let drop = raw_lines.len() - max_lines;
+        raw_lines.drain(..drop);
+        older_available = true;
+    }
+
+    let lines = raw_lines
+        .iter()
+        .map(|raw| zamin_core::logparse::parse_line(raw, 0))
+        .collect();
+
+    Ok(LogRangeResult {
+        file: FILE.to_owned(),
+        lines,
+        older_available,
+    })
 }

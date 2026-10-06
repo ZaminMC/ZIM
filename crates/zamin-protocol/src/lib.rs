@@ -16,6 +16,7 @@ pub mod error;
 pub mod framing;
 pub mod handshake;
 pub mod jobs;
+pub mod logs;
 pub mod methods;
 pub mod server;
 pub mod streams;

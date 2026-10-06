@@ -47,7 +47,8 @@
 - `code` is a stable `SCREAMING_SNAKE_CASE` string, registered as an enum in `zamin-protocol`. Prefixes: `DAEMON_`, `PROTOCOL_`, `SERVER_`, `PORT_`, `JAVA_`, `FS_`, `JOB_`, `CONFIG_`.
 - `message` is a complete, specific, human-readable sentence (see the style guide's message rules).
 - `remediation` lists action IDs clients may map to UI affordances; unknown IDs are ignored.
-- Initial registry (non-exhaustive): `PROTOCOL_VERSION_UNSUPPORTED`, `DAEMON_BUSY`, `SERVER_NOT_FOUND`, `SERVER_ID_EXISTS`, `SERVER_ID_INVALID`, `SERVER_ALREADY_RUNNING`, `SERVER_NOT_RUNNING`, `SERVER_START_TIMEOUT`, `PREFLIGHT_FAILED`, `NEEDS_EULA`, `JAVA_NOT_FOUND`, `JAVA_INCOMPATIBLE`, `JAVA_EXEC_FAILED`, `PORT_IN_USE`, `FS_OUTSIDE_ROOT`, `FS_NOT_WRITABLE`, `FS_NOT_FOUND`, `FS_PATH_ESCAPES_ROOT`, `ARCHIVE_UNSAFE_ENTRY`, `DISK_FULL`, `JOB_NOT_FOUND`, `JOB_NOT_CANCELLABLE`, `INTERNAL_ERROR`.
+- JSON-RPC envelope failures answer `PROTOCOL_INVALID_REQUEST` (unreadable request id → the reply carries a null id, per JSON-RPC 2.0 §4.1) and `PROTOCOL_METHOD_NOT_FOUND` (no such method on this daemon's surface).
+- Initial registry (non-exhaustive): `PROTOCOL_VERSION_UNSUPPORTED`, `PROTOCOL_INVALID_REQUEST`, `PROTOCOL_METHOD_NOT_FOUND`, `DAEMON_BUSY`, `SERVER_NOT_FOUND`, `SERVER_ID_EXISTS`, `SERVER_ID_INVALID`, `SERVER_ALREADY_RUNNING`, `SERVER_NOT_RUNNING`, `SERVER_START_TIMEOUT`, `PREFLIGHT_FAILED`, `NEEDS_EULA`, `JAVA_NOT_FOUND`, `JAVA_INCOMPATIBLE`, `JAVA_EXEC_FAILED`, `PORT_IN_USE`, `FS_OUTSIDE_ROOT`, `FS_NOT_WRITABLE`, `FS_NOT_FOUND`, `FS_PATH_ESCAPES_ROOT`, `ARCHIVE_UNSAFE_ENTRY`, `DISK_FULL`, `JOB_NOT_FOUND`, `JOB_NOT_CANCELLABLE`, `INTERNAL_ERROR`.
 
 ## 5. Method catalog (v0)
 
@@ -61,6 +62,23 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
 | `logs` | `logs.range` (file-backed historical read) |
 | `streams` | `streams.subscribe`, `streams.unsubscribe` |
+
+- `logs.range` is the file-backed historical read: the tail of the server's own `logs/latest.log`, through the rooted filesystem (ADR-0006's catch-up path).
+
+```json
+→ {"jsonrpc":"2.0","id":10,"method":"logs.range",
+   "params":{"serverId":"production","maxLines":200}}
+
+← {"jsonrpc":"2.0","id":10,"result":{
+     "file":"logs/latest.log",
+     "lines":[{"tsMs":0,"level":"info","thread":"Server thread",
+               "line":"Done (3.214s)! For help, type \"help\""}],
+     "olderAvailable":true}}
+```
+
+- `maxLines` defaults to 200 and is capped at 5000; the result is chronological and always the LAST `maxLines` lines.
+- `olderAvailable` is true when the file holds older lines than this response returned — a scroll-up affordance, not an error.
+- A missing log file is a typed `FS_NOT_FOUND`, never a silent empty result.
 
 - `server.start/stop/restart/kill` return immediately with the accepted state or a typed error; long outcomes arrive as `server.state_changed` events.
 - `server.kill` is the force path (ADR-0005 ladder, step 4). `stop` is the graceful path. The verbs are fixed: **start, stop, restart, kill**. "Launch" and "terminate" are not protocol words.

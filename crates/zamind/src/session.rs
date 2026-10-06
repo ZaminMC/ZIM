@@ -395,6 +395,22 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
             }
         }
         methods::JOBS_LIST => json_ok(id, ListJobsResult { jobs: Vec::new() }),
+        methods::LOGS_RANGE => {
+            let params: zamin_protocol::logs::LogRangeParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    let max_lines = params.max_lines.unwrap_or(200);
+                    match engine.log_range(&server_id, max_lines).await {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::STREAMS_UNSUBSCRIBE => {
             let params: UnsubscribeParams = match request.parse_params() {
                 Ok(params) => params,
