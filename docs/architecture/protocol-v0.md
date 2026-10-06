@@ -57,7 +57,9 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | Namespace | Methods |
 |---|---|
 | `daemon` | `daemon.hello`, `daemon.status` |
-| `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream) |
+| `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.create` (Phase 6: download, stamp, and register a fresh server — §7b), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream) |
+| `catalog` (Phase 6) | `catalog.list`, `catalog.versions`, `catalog.builds` (§7b) |
+| `java` (Phase 6) | `java.list`, `java.install` (§7c) |
 | `jobs` | `jobs.list`, `jobs.get`, `jobs.cancel` |
 | `backups` (Phase 5) | `backup.create`, `backup.restore`, `backups.list` |
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
@@ -88,7 +90,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 
 - `server.start/stop/restart/kill` return immediately with the accepted state or a typed error; long outcomes arrive as `server.state_changed` events.
 - `server.kill` is the force path (ADR-0005 ladder, step 4). `stop` is the graceful path. The verbs are fixed: **start, stop, restart, kill**. "Launch" and "terminate" are not protocol words.
-- `server.register` exists in v0 because creating servers by download arrives with the software catalog (Phase 6); registration of existing directories is the honest Phase 1–2 path.
+- `server.register` remains the bootstrap for directories that already exist. Creating servers by download is `server.create` (§7b, Phase 6); registration of existing directories is the honest Phase 1–2 path.
 
 ## 6. Streams and cursors
 
@@ -118,7 +120,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 
 - Job states: `queued → running → succeeded | failed | cancelled`.
 - Events: `job.started`, `job.progress`, `job.completed` with `outcome: succeeded | failed | cancelled` and, on failure, a typed error. Three event types, not five — outcome is data, not an event kind.
-- `kind` values in v0: `server.create` (registration scaffolding), `backup.create`, `backup.restore`, `archive.extract`. Download kinds arrive with the software catalog.
+- `kind` values in v0: `server.create` (download-and-register, §7b), `backup.create`, `backup.restore`, `archive.extract`, `java.install` (§7c).
 - `jobs.cancel` is a request: the job observes it at its next cancellation point; the state transition to `cancelled` is authoritative.
 - Finished job history is bounded on the daemon (the oldest finished records drop first); a pruned id answers `JOB_NOT_FOUND`, which is a re-snapshot signal, not a protocol error.
 
@@ -128,6 +130,23 @@ Implemented for the daemon's first release; the file set is specified now, imple
 - `backup.restore {requestId, serverId, backupId}` returns the running `Job`. Refused with `SERVER_ALREADY_RUNNING` unless the server is `not-running` — files a running server holds open cannot be replaced. The extract goes through the full ADR-0009 trap list (zip-slip, Windows-reserved names, case-fold collisions, size/entry limits, link entries); commit failure rolls the previous files back (`RestoreRolledBack` surfaces as a typed error, never a half-restored root).
 - `backups.list {serverId}` reads the per-server manifests, newest first: `{backups: [{backupId, createdAtMs, sizeBytes, totalBytes, fileCount, label?, taken: "live" | "cold"}]}`. An unknown `backupId` is a typed `FS_NOT_FOUND`.
 - Archives live under the daemon's data dir (`backups/<serverId>/<backupId>.tar.gz` + `.json` manifests); clients never see paths — only ids.
+
+### 7b. Software catalog & creation (Phase 6)
+
+The catalog is **data**, not an abstraction (ARCH-REVIEW §17.4): the daemon knows how to create what its catalog table lists, and the table speaks the PaperMC Fill API v3 (`https://fill.papermc.io/v3`; the legacy v2 API is retired upstream). The base URL is a daemon flag (`--catalog-url`) — tests point it at a mock, air-gapped installs at a mirror.
+
+- `catalog.list` → `{entries: [{id, name, description}]}`. V1 rows: `paper`, `purpur`, `folia` (one API family, three rows of data).
+- `catalog.versions {project}` → `{versions: [{id, javaMajor?}]}`, newest first. `javaMajor` is the software's own requirement when the catalog states one.
+- `catalog.builds {project, version}` → `{javaMajor?, builds: [{id, channel, time?, download: {name, sha256, size?, url}}]}`, builds newest first, only builds publishing a `server:default` download. Clients never fetch `download.url` — the daemon downloads it itself.
+- `server.create {requestId, serverId, displayName?, project, version, build?, templateId?, port?, javaPath?}` returns the running `Job` (`kind: "server.create"`). The daemon resolves the build **before** spawning the job, so unknown project/version/build/template are typed synchronous rejections (`CATALOG_NOT_FOUND`, `PROTOCOL_INVALID_REQUEST`), as are an occupied id (`SERVER_ID_EXISTS`) and an unreachable catalog (`CATALOG_UNAVAILABLE`). The job then: stamps the template → downloads and sha256-verifies the jar (byte progress, cancellable) → writes the per-server config (`jar`, `mcVersion`, `javaMajorRequired`, `port`, optional `javaPath`) → registers last, the point of no return. **A failed or cancelled creation leaves nothing behind** — the instance directory is removed; the server appears in `server.list` (and via the `registered` event) only on success.
+- Created servers live under the daemon's data dir (`instances/<serverId>`); `<data>/servers/<serverId>` remains the daemon's private runtime state and is never a server root. Clients reference the server by id only, as everywhere else.
+- Checksums: a mismatch discards the download and fails the job with `CHECKSUM_MISMATCH` (`{expected, actual}` in context). Catalog outages answer `CATALOG_UNAVAILABLE`; a known name with nothing behind it answers `CATALOG_NOT_FOUND`.
+
+### 7c. Java runtimes (Phase 6)
+
+- `java.list` → `{runtimes: [{path, major, versionString, vendor, managed}]}` — every runtime the daemon could start a server with: `PATH`/`JAVA_HOME`/platform install roots plus the daemon's **managed** directory (`<data>/java`, `managed: true`). Every entry is *inspected* by running the JVM (`java -XshowSettings:properties -version`) and parsed — directory names prove nothing (ARCH-REVIEW §7). Inspection is cached per `(path, mtime, size)`: the JVM is asked once per unchanged file, never on UI refresh. A candidate that cannot be inspected is skipped, never listed.
+- `java.install {requestId, majorVersion}` returns the running `Job` (`kind: "java.install"`): the daemon asks the Adoptium API v3 for the newest Temurin GA JDK for this machine's OS/architecture, fetches its published sha256, downloads and verifies the archive (byte progress, cancellable), extracts it into `<data>/java/<release>/`, and inspects the found `java` before reporting success. Extraction enforces the ADR-0009 trap list in miniature (regular files and directories only, no absolute/`..` names, one common top-level directory, entry-count and total-size caps). Installing an already-present release is idempotent (inspect-and-report). The Adoptium base URL is a daemon flag (`--adoptium-url`).
+- Auto-selection (no explicit `javaPath`): the daemon picks the first inspectable candidate **satisfying the server's required Java major** — system candidates first, managed runtimes after. Nobody satisfies a stated requirement → `JAVA_NOT_FOUND` (no candidates) or `JAVA_INCOMPATIBLE` (all too old); both carry `install_java` remediation, which the UI turns into the `java.install` affordance. An explicit `javaPath` is authoritative and may fail the preflight honestly.
 
 ## 8. Files
 
