@@ -1,6 +1,7 @@
 // Crash card: phase, exit code, and the evidence excerpt the daemon
 // classified at crash time (ADR-0005). Stays until the server starts
-// again (resolved by the next transition) or the operator dismisses it.
+// again (resolved by the next transition) or the operator dismisses it —
+// both paths flip `resolved` in the store, which hides the card.
 
 import { useServers } from "../state/servers";
 import { Button } from "../ui/Button";
@@ -9,7 +10,7 @@ import styles from "./CrashCard.module.css";
 export function CrashCard({ serverId }: { serverId: string }) {
   const crash = useServers((s) => s.crashes[serverId]);
   const resolveCrash = useServers((s) => s.resolveCrash);
-  if (!crash) return null;
+  if (!crash || crash.resolved) return null;
 
   return (
     <aside className={styles.card} role="status" aria-label="Crash report">
