@@ -20,6 +20,9 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 tar = "0.4"
 flate2 = "1"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

@@ -93,6 +93,23 @@ pub enum CoreError {
     #[error("the operation was cancelled")]
     Cancelled,
 
+    #[error("the server at {url} answered HTTP {status}: {reason}")]
+    Http {
+        url: String,
+        status: u16,
+        reason: String,
+    },
+
+    #[error("the request to {url} failed: {message}")]
+    HttpTransport { url: String, message: String },
+
+    #[error("downloaded file {path:?} does not match its published checksum (expected sha256 {expected}, computed {actual})")]
+    ChecksumMismatch {
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
+
     #[error("restore failed mid-commit ({reason}); the previous server files were rolled back — nothing was lost")]
     RestoreRolledBack { reason: String },
 
