@@ -6,6 +6,7 @@
 node_modules/
 apps/panel/dist/
 apps/panel/src-tauri/target/
+apps/panel/src-tauri/binaries/
 *.tsbuildinfo
 
 # Test and benchmark output

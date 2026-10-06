@@ -6,6 +6,11 @@
 //! and the ~50 ms coalescing of daemon → webview frames (which lives in
 //! `zamin-bridge`, tested in the workspace). No business logic belongs
 //! here, so none is here.
+//!
+//! The Phase 7 additions stay inside that boundary: `daemon_ensure` makes
+//! "double-clicking ZaminPanel must never show a daemon error"
+//! (ARCH-REVIEW §1.2) a host responsibility, and the autostart commands
+//! are the OS-integration seam the webview cannot reach (§12.1).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -15,6 +20,9 @@ use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::mpsc;
 use zamin_ipc::Endpoint;
+
+mod autostart;
+mod daemon_ensure;
 
 /// One live daemon connection and the tasks moving its frames.
 struct Connected {
@@ -127,13 +135,38 @@ async fn daemon_close(state: State<'_, HostState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Probe the per-user daemon endpoint; spawn the sibling daemon when it is
+/// down; wait for it to bind. The webview calls this when a transport start
+/// fails, and its normal retry loop does the rest. Errors are plain
+/// strings — the webview surfaces them through its own connection state.
+#[tauri::command]
+async fn daemon_ensure() -> Result<String, String> {
+    daemon_ensure::ensure_daemon().await
+}
+
+/// `Some(enabled)` — autostart state; `None` — cannot be determined and
+/// the webview shows "unavailable".
+#[tauri::command]
+async fn autostart_get() -> Result<Option<bool>, String> {
+    Ok(autostart::get())
+}
+
+/// Turn login autostart on or off (XDG autostart entry / HKCU Run key).
+#[tauri::command]
+async fn autostart_set(enabled: bool) -> Result<(), String> {
+    autostart::set(enabled)
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(HostState::default())
         .invoke_handler(tauri::generate_handler![
             daemon_connect,
             daemon_send,
-            daemon_close
+            daemon_close,
+            daemon_ensure,
+            autostart_get,
+            autostart_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ZaminPanel host");

@@ -68,20 +68,37 @@ export class TauriTransport implements Transport {
   async start(sink: (batch: IncomingBatch) => void, onDown: () => void): Promise<void> {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
 
-    const frames = new Channel<string>((message) => {
-      // The host sends each batch as a JSON array of frame strings.
-      try {
-        const parsed: unknown = JSON.parse(message);
-        if (Array.isArray(parsed)) {
-          sink(parsed.filter((frame): frame is string => typeof frame === "string"));
+    const attempt = async (): Promise<void> => {
+      // Fresh channels per attempt: a failed daemon_connect must never leave
+      // half-registered channels behind for the retry to trip over.
+      const frames = new Channel<string>((message) => {
+        // The host sends each batch as a JSON array of frame strings.
+        try {
+          const parsed: unknown = JSON.parse(message);
+          if (Array.isArray(parsed)) {
+            sink(parsed.filter((frame): frame is string => typeof frame === "string"));
+          }
+        } catch {
+          // Unparseable host message: drop it, the reader stays alive.
         }
-      } catch {
-        // Unparseable host message: drop it, the reader stays alive.
-      }
-    });
-    const down = new Channel<null>(() => onDown());
+      });
+      const down = new Channel<null>(() => onDown());
+      await invoke("daemon_connect", { frames, down });
+    };
 
-    await invoke("daemon_connect", { frames, down });
+    try {
+      await attempt();
+    } catch (error) {
+      // Connection refused: first contact or the daemon died mid-session.
+      // §1.2 — double-clicking the panel must never show a daemon error,
+      // so the host brings the daemon back (probe → spawn sibling → wait
+      // for bind) before the client's retry schedule gets its next turn.
+      const outcome = await invoke<string>("daemon_ensure").catch(() => null);
+      if (outcome !== "spawned" && outcome !== "already-running") {
+        throw error; // original failure is the honest one (e.g. no binary)
+      }
+      await attempt();
+    }
   }
 
   send(frame: string): void {
