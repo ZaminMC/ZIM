@@ -702,12 +702,14 @@ impl Actor {
     }
 
     async fn check_startup_validation(&mut self) {
+        // The WHOLE ring, not a tail window: a server that floods stdout
+        // right after its Done line pushes that line past any fixed tail
+        // within milliseconds (30k lines/s evicts 5000 in ~166 ms). The
+        // ring is bounded; scanning it costs nothing next to the tick.
         let validated = self
             .hub
             .log_ring(&self.server_id)
             .iter()
-            .rev()
-            .take(50)
             .any(|l| logparse::is_startup_complete(&l.line))
             || self.port_is_listening().await;
         if validated {

@@ -25,6 +25,7 @@ struct Flags {
     ignore_stop: bool,
     slow_stop_ms: u64,
     flood_stdout: u64,
+    flood_unbounded: bool,
     port: Option<u16>,
 }
 
@@ -38,6 +39,7 @@ fn parse_flags() -> Flags {
         ignore_stop: false,
         slow_stop_ms: 0,
         flood_stdout: 0,
+        flood_unbounded: false,
         port: None,
     };
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -84,6 +86,7 @@ fn parse_flags() -> Flags {
                 "--exit-code" => flags.exit_code = value_for(&mut i, other) as i32,
                 "--slow-stop-ms" => flags.slow_stop_ms = value_for(&mut i, other),
                 "--flood-stdout" => flags.flood_stdout = value_for(&mut i, other),
+                "--flood-unbounded" => flags.flood_unbounded = true,
                 "--port" => flags.port = Some(value_for(&mut i, other) as u16),
                 "--fail-boot" => flags.fail_boot = true,
                 "--exit-after-boot" => flags.exit_after_boot = true,
@@ -271,6 +274,22 @@ fn main() {
             "Encountered an unexpected exception",
         ));
         std::process::exit(flags.exit_code);
+    }
+
+    // Unbounded flood: lines as fast as the process can emit them — the
+    // throughput-budget producer (PERFORMANCE-BUDGETS ingestion rate).
+    if flags.flood_unbounded {
+        let mut i: u64 = 0;
+        loop {
+            if stopping.load(Ordering::SeqCst) {
+                break;
+            }
+            emit(&paper_line(
+                "Server thread/INFO",
+                &format!("flood line {i} with some padding text 0123456789"),
+            ));
+            i += 1;
+        }
     }
 
     // Output flood mode paces itself so tests can measure throughput.
