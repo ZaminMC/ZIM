@@ -31,6 +31,10 @@ pub struct ServerSettingsDefaults {
     /// Direct override of the required Java major version; wins over the
     /// value derived from `mcVersion` (ADR-0005 preflight).
     pub java_major_required: Option<u32>,
+    /// Retention for the server's backups: keep the newest N after every
+    /// successful backup (ARCH-REVIEW §16.5 — retention is required, not
+    /// optional). The built-in default is applied by `layer`.
+    pub backup_keep: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,7 +92,11 @@ pub struct EffectiveSettings {
     pub java_path: Option<PathBuf>,
     pub mc_version: Option<String>,
     pub java_major_required: Option<u32>,
+    pub backup_keep: u32,
 }
+
+/// The built-in default retention when neither config file sets it.
+pub const BACKUP_KEEP_DEFAULT: u32 = 10;
 
 impl EffectiveSettings {
     /// Provenance per field, in field order above — the UI's "Using global
@@ -96,7 +104,7 @@ impl EffectiveSettings {
     pub fn provenance(
         global: &ServerSettingsDefaults,
         per_server: &ServerSettingsDefaults,
-    ) -> [Provenance; 9] {
+    ) -> [Provenance; 10] {
         [
             field_provenance(global.stop_timeout_secs, per_server.stop_timeout_secs),
             field_provenance(global.startup_timeout_secs, per_server.startup_timeout_secs),
@@ -110,6 +118,7 @@ impl EffectiveSettings {
             field_provenance(global.java_path.clone(), per_server.java_path.clone()),
             field_provenance(global.mc_version.clone(), per_server.mc_version.clone()),
             field_provenance(global.java_major_required, per_server.java_major_required),
+            field_provenance(global.backup_keep, per_server.backup_keep),
         ]
     }
 }
@@ -158,6 +167,10 @@ pub fn layer(
         java_major_required: per_server
             .java_major_required
             .or(global.java_major_required),
+        backup_keep: per_server
+            .backup_keep
+            .or(global.backup_keep)
+            .unwrap_or(BACKUP_KEEP_DEFAULT),
     }
 }
 

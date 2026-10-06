@@ -5,39 +5,40 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use super::restore::{commit, CommitError};
 use super::*;
 use crate::server::registry::tempdir;
 
-fn quiet_progress() -> impl Fn(CreateProgress) {
-    |_| {}
+fn quiet_progress() -> Arc<dyn Fn(CreateProgress) + Send + Sync> {
+    Arc::new(|_| {})
 }
 
-fn quiet_restore_progress() -> impl Fn(RestoreProgress) {
-    |_| {}
+fn quiet_restore_progress() -> Arc<dyn Fn(RestoreProgress) + Send + Sync> {
+    Arc::new(|_| {})
 }
 
-fn opts<'a>(
-    server_id: &'a str,
-    cancel: &'a AtomicBool,
-    progress: &'a dyn Fn(CreateProgress),
-) -> BackupCreateOptions<'a> {
+fn opts(
+    server_id: &str,
+    cancel: &Arc<AtomicBool>,
+    progress: Arc<dyn Fn(CreateProgress) + Send + Sync>,
+) -> BackupCreateOptions {
     BackupCreateOptions {
-        server_id,
+        server_id: server_id.to_owned(),
         label: None,
         taken: BackupTaken::Cold,
-        cancel,
+        cancel: Arc::clone(cancel),
         progress,
     }
 }
 
-fn restore_opts<'a>(
-    cancel: &'a AtomicBool,
-    progress: &'a dyn Fn(RestoreProgress),
-) -> RestoreOptions<'a> {
+fn restore_opts(
+    cancel: &Arc<AtomicBool>,
+    progress: Arc<dyn Fn(RestoreProgress) + Send + Sync>,
+) -> RestoreOptions {
     RestoreOptions {
-        cancel,
+        cancel: Arc::clone(cancel),
         progress,
         max_entries: 0,
         max_total_bytes: 0,
@@ -89,11 +90,11 @@ fn create_then_restore_roundtrip_is_lossless() {
     fs::create_dir_all(&root).unwrap();
     seed_server(&root);
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let outcome = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("demo", &cancel, &quiet_progress()),
+        opts("demo", &cancel, quiet_progress()),
     )
     .unwrap();
 
@@ -115,7 +116,7 @@ fn create_then_restore_roundtrip_is_lossless() {
     // Restore into an empty root and compare.
     fs::create_dir_all(&fresh).unwrap();
     let progress = quiet_restore_progress();
-    let ropts = restore_opts(&cancel, &progress);
+    let ropts = restore_opts(&cancel, Arc::clone(&progress));
     let restored = restore_archive(&fresh, &outcome.archive, &ropts).unwrap();
     assert_eq!(restored.restored_files, m.file_count);
     assert_eq!(restored.restored_bytes, m.total_bytes);
@@ -135,11 +136,11 @@ fn create_counts_files_exactly() {
     fs::write(root.join("a.txt"), "hello").unwrap();
     fs::write(root.join("b.txt"), "world!").unwrap();
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let outcome = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("c", &cancel, &quiet_progress()),
+        opts("c", &cancel, quiet_progress()),
     )
     .unwrap();
     assert_eq!(outcome.manifest.file_count, 2);
@@ -153,11 +154,11 @@ fn restore_replaces_a_modified_root() {
     fs::create_dir_all(&root).unwrap();
     seed_server(&root);
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let archive = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("demo", &cancel, &quiet_progress()),
+        opts("demo", &cancel, quiet_progress()),
     )
     .unwrap()
     .archive;
@@ -168,7 +169,7 @@ fn restore_replaces_a_modified_root() {
     fs::remove_file(root.join("plugins/EssentialsX.jar")).unwrap();
 
     let progress = quiet_restore_progress();
-    let ropts = restore_opts(&cancel, &progress);
+    let ropts = restore_opts(&cancel, Arc::clone(&progress));
     restore_archive(&root, &archive, &ropts).unwrap();
     assert_eq!(
         fs::read_to_string(root.join("server.properties")).unwrap(),
@@ -194,11 +195,11 @@ fn staging_dirs_and_marker_rules_hold() {
     fs::create_dir_all(root.join(".zamin")).unwrap();
     fs::write(root.join(".zamin/server.json"), b"{}").unwrap();
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let outcome = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("e", &cancel, &quiet_progress()),
+        opts("e", &cancel, quiet_progress()),
     )
     .unwrap();
     // keep.txt + the marker file; staging excluded, marker INCLUDED.
@@ -215,11 +216,11 @@ fn symlinks_are_never_archived() {
     std::os::unix::fs::symlink("/etc/passwd", root.join("outside-link")).unwrap();
     std::os::unix::fs::symlink("real.txt", root.join("inside-link")).unwrap();
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let outcome = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("s", &cancel, &quiet_progress()),
+        opts("s", &cancel, quiet_progress()),
     )
     .unwrap();
     assert_eq!(
@@ -238,11 +239,11 @@ fn empty_root_backs_up_and_restores_clean() {
     fs::create_dir_all(&target).unwrap();
     fs::write(target.join("doomed.txt"), "gone after restore").unwrap();
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let archive = create_archive(
         &empty,
         &dir.path.join("backups"),
-        opts("n", &cancel, &quiet_progress()),
+        opts("n", &cancel, quiet_progress()),
     )
     .unwrap()
     .archive;
@@ -253,7 +254,12 @@ fn empty_root_backs_up_and_restores_clean() {
     );
 
     let progress = quiet_restore_progress();
-    restore_archive(&target, &archive, &restore_opts(&cancel, &progress)).unwrap();
+    restore_archive(
+        &target,
+        &archive,
+        &restore_opts(&cancel, Arc::clone(&progress)),
+    )
+    .unwrap();
     assert!(
         !target.join("doomed.txt").exists(),
         "restore replaces the whole tree"
@@ -268,11 +274,11 @@ fn deep_paths_roundtrip_through_gnu_longnames() {
     fs::create_dir_all(root.join(deep_rel).parent().unwrap()).unwrap();
     fs::write(root.join(deep_rel), vec![9u8; 512]).unwrap();
 
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let archive = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("d", &cancel, &quiet_progress()),
+        opts("d", &cancel, quiet_progress()),
     )
     .unwrap()
     .archive;
@@ -281,7 +287,7 @@ fn deep_paths_roundtrip_through_gnu_longnames() {
     restore_archive(
         &fresh,
         &archive,
-        &restore_opts(&cancel, &quiet_restore_progress()),
+        &restore_opts(&cancel, quiet_restore_progress()),
     )
     .unwrap();
     assert_same_tree(&root, &fresh);
@@ -295,16 +301,19 @@ fn progress_is_reported_for_files() {
     fs::write(root.join("a"), vec![0; 100]).unwrap();
     fs::write(root.join("b"), vec![0; 200]).unwrap();
 
-    let cancel = AtomicBool::new(false);
-    let seen = std::cell::RefCell::new(Vec::new());
-    let progress = |p: CreateProgress| seen.borrow_mut().push(p);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    let progress: Arc<dyn Fn(CreateProgress) + Send + Sync> = Arc::new(move |p| {
+        sink.lock().unwrap().push(p);
+    });
     let outcome = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("p", &cancel, &progress),
+        opts("p", &cancel, progress),
     )
     .unwrap();
-    let seen = seen.borrow();
+    let seen = seen.lock().unwrap();
     let last = seen.last().unwrap();
     assert_eq!(last.files_done, outcome.manifest.file_count);
     assert_eq!(last.bytes_done, outcome.manifest.total_bytes);
@@ -321,8 +330,8 @@ fn cancel_mid_create_is_typed_and_cleans_up() {
     seed_server(&root);
     let backups = dir.path.join("backups");
 
-    let cancel = AtomicBool::new(true); // cancelled before it starts
-    let err = create_archive(&root, &backups, opts("x", &cancel, &quiet_progress())).unwrap_err();
+    let cancel = Arc::new(AtomicBool::new(true)); // cancelled before it starts
+    let err = create_archive(&root, &backups, opts("x", &cancel, quiet_progress())).unwrap_err();
     assert!(matches!(err, crate::error::CoreError::Cancelled));
     // Nothing leaked into the listing and no staging file survived.
     assert!(list_backups(&backups).is_empty());
@@ -340,20 +349,20 @@ fn cancel_mid_restore_is_typed_and_leaves_root_alone() {
     let root = dir.path.join("server");
     fs::create_dir_all(&root).unwrap();
     seed_server(&root);
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     let archive = create_archive(
         &root,
         &dir.path.join("backups"),
-        opts("x", &cancel, &quiet_progress()),
+        opts("x", &cancel, quiet_progress()),
     )
     .unwrap()
     .archive;
 
-    let stop = AtomicBool::new(true);
+    let stop = Arc::new(AtomicBool::new(true));
     let err = restore_archive(
         &root,
         &archive,
-        &restore_opts(&stop, &quiet_restore_progress()),
+        &restore_opts(&stop, quiet_restore_progress()),
     )
     .unwrap_err();
     assert!(matches!(err, crate::error::CoreError::Cancelled));
@@ -394,11 +403,11 @@ fn craft_archive(path: &Path, entries: &[(&str, &[u8])]) {
 }
 
 fn restore_error(root: &Path, archive: &Path) -> crate::error::CoreError {
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     restore_archive(
         root,
         archive,
-        &restore_opts(&cancel, &quiet_restore_progress()),
+        &restore_opts(&cancel, quiet_restore_progress()),
     )
     .unwrap_err()
 }
@@ -516,11 +525,11 @@ fn reserved_lookalikes_are_allowed() {
             ("world/nullop", b"c"),
         ],
     );
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     restore_archive(
         &root,
         &archive,
-        &restore_opts(&cancel, &quiet_restore_progress()),
+        &restore_opts(&cancel, quiet_restore_progress()),
     )
     .unwrap();
     assert!(root.join("console.log").exists());
@@ -552,13 +561,13 @@ fn entry_and_size_limits_are_enforced() {
         &[("a", b"12345"), ("b", b"67890"), ("c", b"abcde")],
     );
 
-    let stop = AtomicBool::new(false);
+    let stop = Arc::new(AtomicBool::new(false));
     let err = restore_archive(
         &root,
         &archive,
         &RestoreOptions {
-            cancel: &stop,
-            progress: &quiet_restore_progress(),
+            cancel: Arc::clone(&stop),
+            progress: quiet_restore_progress(),
             max_entries: 2,
             max_total_bytes: 0,
         },
@@ -573,8 +582,8 @@ fn entry_and_size_limits_are_enforced() {
         &root,
         &archive,
         &RestoreOptions {
-            cancel: &stop,
-            progress: &quiet_restore_progress(),
+            cancel: Arc::clone(&stop),
+            progress: quiet_restore_progress(),
             max_entries: 0,
             max_total_bytes: 10,
         },

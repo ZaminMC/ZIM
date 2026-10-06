@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub use zamin_protocol::jobs::BackupTaken;
+
 /// Bump when the archive/manifest shape ever changes; restore refuses
 /// (typed error) formats it does not understand rather than guessing.
 pub const ARCHIVE_FORMAT_VERSION: u32 = 1;
@@ -49,13 +51,6 @@ pub struct BackupManifest {
     /// How the backup was taken: "live" (save-off/save-all window around
     /// a running server) or "cold" (server not running).
     pub taken: BackupTaken,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BackupTaken {
-    Live,
-    Cold,
 }
 
 /// Directories that must never enter an archive or a restore: working

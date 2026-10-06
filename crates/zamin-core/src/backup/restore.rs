@@ -22,7 +22,10 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use super::{classify_io, restore_rollback_path, restore_staging_path};
 use crate::error::CoreError;
@@ -39,9 +42,12 @@ pub struct RestoreProgress {
     pub bytes_done: u64,
 }
 
-pub struct RestoreOptions<'a> {
-    pub cancel: &'a AtomicBool,
-    pub progress: &'a dyn Fn(RestoreProgress),
+/// Owned, shareable options: the daemon runs restore work inside
+/// `spawn_blocking`, so the callback and cancel flag must be `'static`.
+/// A limit of 0 means the built-in constant applies.
+pub struct RestoreOptions {
+    pub cancel: Arc<AtomicBool>,
+    pub progress: Arc<dyn Fn(RestoreProgress) + Send + Sync>,
     /// 0 means the built-in [`RESTORE_MAX_ENTRIES`].
     pub max_entries: u64,
     /// 0 means the built-in [`RESTORE_MAX_TOTAL_BYTES`].
@@ -70,7 +76,7 @@ const WINDOWS_RESERVED: [&str; 22] = [
 pub fn restore_archive(
     root: &Path,
     archive: &Path,
-    opts: &RestoreOptions<'_>,
+    opts: &RestoreOptions,
 ) -> Result<RestoreOutcome, CoreError> {
     if !root.is_dir() {
         return Err(CoreError::NotFound {
@@ -119,7 +125,7 @@ struct ExtractStats {
 fn extract_into(
     archive: &Path,
     staging: &Path,
-    opts: &RestoreOptions<'_>,
+    opts: &RestoreOptions,
 ) -> Result<ExtractStats, CoreError> {
     let file =
         fs::File::open(archive).map_err(|source| classify_io(archive.to_path_buf(), source))?;

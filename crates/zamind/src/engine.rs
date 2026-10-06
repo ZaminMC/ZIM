@@ -16,6 +16,7 @@ use zamin_protocol::streams::{EventsSnapshot, StreamCursor, StreamKind, Subscrib
 
 use crate::actor::{Actor, ActorCommand, AdoptRecord};
 use crate::hub::{HubError, HubHandle};
+use crate::jobs::{JobFailure, JobRunner};
 
 #[derive(Clone)]
 pub struct Engine {
@@ -27,7 +28,14 @@ struct Inner {
     registry: Mutex<Registry>,
     hub: HubHandle,
     actors: tokio::sync::Mutex<HashMap<String, mpsc::Sender<ActorCommand>>>,
+    jobs: JobRunner,
 }
+
+/// After `save-all`, a server needs a moment to actually finish writing
+/// region files before the archive walk snapshots them. Fixed and small;
+/// the save commands themselves are awaited through the actor's stdin
+/// ack, this settle covers the server's own flush completion.
+const LIVE_SAVE_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -50,18 +58,27 @@ impl Engine {
             tracing::error!("registry is unreadable: {e}; refusing to start over it");
             std::process::exit(1);
         });
+        let hub = HubHandle::new();
+        let jobs = JobRunner::new(hub.clone());
         Engine {
             inner: Arc::new(Inner {
                 data_dir,
                 registry: Mutex::new(registry),
-                hub: HubHandle::new(),
+                hub,
                 actors: tokio::sync::Mutex::new(HashMap::new()),
+                jobs,
             }),
         }
     }
 
     pub fn hub(&self) -> &HubHandle {
         &self.inner.hub
+    }
+
+    /// The daemon-wide job runner. Events for jobs ride the regular
+    /// events stream; the runner holds the queryable records.
+    pub fn jobs(&self) -> &JobRunner {
+        &self.inner.jobs
     }
 
     fn registry_lock(&self) -> std::sync::MutexGuard<'_, Registry> {
@@ -591,6 +608,254 @@ impl Engine {
         }
     }
 
+    // --- backups (protocol spec §7 jobs; the ADR-0009 safety model) -----
+
+    /// Backups live under the daemon's data dir, one folder per server:
+    /// `<data>/backups/<serverId>/<backupId>.tar.gz` (+ `.json` manifests).
+    fn backups_dir(&self, server_id: &str) -> PathBuf {
+        self.inner.data_dir.join("backups").join(server_id)
+    }
+
+    /// The server's backups, newest first, from the manifests on disk.
+    pub async fn backups_list(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::backups::BackupsListResult, EngineError> {
+        self.file_root(server_id)?;
+        let dir = self.backups_dir(server_id.as_str());
+        let manifests = tokio::task::spawn_blocking(move || zamin_core::backup::list_backups(&dir))
+            .await
+            .map_err(|e| EngineError::Internal(format!("backups list task failed: {e}")))?;
+        Ok(zamin_protocol::backups::BackupsListResult {
+            backups: manifests
+                .into_iter()
+                .rev()
+                .map(|m| zamin_protocol::backups::BackupInfo {
+                    backup_id: m.backup_id,
+                    created_at_ms: m.created_at_ms,
+                    size_bytes: m.size_bytes,
+                    total_bytes: m.total_bytes,
+                    file_count: m.file_count,
+                    label: m.label,
+                    taken: m.taken,
+                })
+                .collect(),
+        })
+    }
+
+    /// `backup.create`: a job. For a running server the archive walk is
+    /// wrapped in a save window (`save-off` → `save-all` → settle → walk
+    /// → `save-on`, ADR-0009); otherwise it is a cold copy. Retention
+    /// prunes older backups after a successful create.
+    pub async fn backup_create(
+        &self,
+        server_id: &ServerId,
+        label: Option<String>,
+    ) -> Result<zamin_protocol::jobs::Job, EngineError> {
+        let root = self.file_root(server_id)?;
+        let live = self.describe_state(server_id).await == ServerState::Running;
+
+        let data_dir = self.inner.data_dir.clone();
+        let sid = server_id.to_string();
+        let keep = tokio::task::spawn_blocking(move || {
+            let global =
+                zamin_core::config::load_global(&data_dir.join("config.toml")).unwrap_or_default();
+            let per = zamin_core::config::load_server(
+                &data_dir.join("servers").join(&sid).join("config.toml"),
+            )
+            .unwrap_or_default();
+            zamin_core::config::layer(&global.defaults, &per.settings).backup_keep
+        })
+        .await
+        .map_err(|e| EngineError::Internal(format!("settings task failed: {e}")))?;
+        let keep = keep.max(1) as usize;
+
+        let engine_for_save = self.clone();
+        let sid_for_save = server_id.clone();
+        let sid_for_archive = server_id.to_string();
+        let backups_dir = self.backups_dir(server_id.as_str());
+        let taken = if live {
+            zamin_protocol::jobs::BackupTaken::Live
+        } else {
+            zamin_protocol::jobs::BackupTaken::Cold
+        };
+
+        Ok(self.inner.jobs.spawn(
+            zamin_protocol::jobs::JobKind::BackupCreate,
+            Some(server_id.to_string()),
+            move |ctl| async move {
+                if live {
+                    ctl.progress(
+                        0,
+                        None,
+                        None,
+                        Some("asking the server to flush (save-off / save-all)"),
+                    );
+                    engine_for_save
+                        .write_stdin(&sid_for_save, "save-off".to_owned())
+                        .await
+                        .map_err(job_failure)?;
+                    engine_for_save
+                        .write_stdin(&sid_for_save, "save-all".to_owned())
+                        .await
+                        .map_err(job_failure)?;
+                    tokio::time::sleep(LIVE_SAVE_SETTLE).await;
+                }
+                if ctl.cancelled() {
+                    if live {
+                        let _ = engine_for_save
+                            .write_stdin(&sid_for_save, "save-on".to_owned())
+                            .await;
+                    }
+                    return Err(JobFailure::Cancelled);
+                }
+
+                let progress_ctl = ctl.clone();
+                let archive_ctl = ctl.clone();
+                let prune_dir = backups_dir.clone();
+                let walk = tokio::task::spawn_blocking(move || {
+                    zamin_core::backup::create_archive(
+                        &root,
+                        &backups_dir,
+                        zamin_core::backup::BackupCreateOptions {
+                            server_id: sid_for_archive,
+                            label,
+                            taken,
+                            cancel: archive_ctl.cancel_flag(),
+                            progress: Arc::new(move |p: zamin_core::backup::CreateProgress| {
+                                progress_ctl.progress(
+                                    p.bytes_done,
+                                    Some(p.bytes_done.max(1)),
+                                    Some("bytes"),
+                                    None,
+                                );
+                            }),
+                        },
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    JobFailure::Error(ProtocolError::new(
+                        ErrorCode::InternalError,
+                        format!("backup task failed: {e}"),
+                    ))
+                })?;
+
+                let result = match walk {
+                    Ok(outcome) => {
+                        ctl.progress(
+                            outcome.manifest.size_bytes,
+                            Some(outcome.manifest.size_bytes.max(1)),
+                            Some("bytes"),
+                            Some(&format!(
+                                "backup {} written ({} files)",
+                                outcome.backup_id, outcome.manifest.file_count
+                            )),
+                        );
+                        // Retention (ARCH-REVIEW §16.5): janitorial, never fatal.
+                        if let Err(e) = zamin_core::backup::prune_backups(&prune_dir, keep) {
+                            tracing::warn!("retention pruning failed: {e}");
+                        }
+                        Ok(())
+                    }
+                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                    Err(e) => Err(JobFailure::Error(crate::engine::to_protocol(&e))),
+                };
+
+                if live {
+                    let _ = engine_for_save
+                        .write_stdin(&sid_for_save, "save-on".to_owned())
+                        .await;
+                }
+                result
+            },
+        ))
+    }
+
+    /// `backup.restore`: a job that replaces the server root with the
+    /// backup's content. Refused while the server is not `not-running` —
+    /// files a running server holds open cannot be replaced (Windows
+    /// locks them; Linux would restore under a live world).
+    pub async fn backup_restore(
+        &self,
+        server_id: &ServerId,
+        backup_id: uuid::Uuid,
+    ) -> Result<zamin_protocol::jobs::Job, EngineError> {
+        let root = self.file_root(server_id)?;
+        let archive =
+            zamin_core::backup::archive_path(&self.backups_dir(server_id.as_str()), backup_id);
+        if !archive.is_file() {
+            return Err(ProtocolError::new(
+                ErrorCode::FsNotFound,
+                format!(
+                    "Backup {backup_id} does not exist for server {server_id}; list the backups first."
+                ),
+            )
+            .into());
+        }
+        let state = self.describe_state(server_id).await;
+        if state != ServerState::NotRunning {
+            return Err(ProtocolError::new(
+                ErrorCode::ServerAlreadyRunning,
+                format!(
+                    "Server {server_id} is {state:?}; stop it before restoring a backup — open files cannot be replaced."
+                ),
+            )
+            .into());
+        }
+
+        Ok(self.inner.jobs.spawn(
+            zamin_protocol::jobs::JobKind::BackupRestore,
+            Some(server_id.to_string()),
+            move |ctl| async move {
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+                let progress_ctl = ctl.clone();
+                let extract_ctl = ctl.clone();
+                let restore = tokio::task::spawn_blocking(move || {
+                    zamin_core::backup::restore_archive(
+                        &root,
+                        &archive,
+                        &zamin_core::backup::RestoreOptions {
+                            cancel: extract_ctl.cancel_flag(),
+                            progress: Arc::new(move |p: zamin_core::backup::RestoreProgress| {
+                                progress_ctl.progress(p.entries_done, None, Some("entries"), None);
+                            }),
+                            max_entries: 0,
+                            max_total_bytes: 0,
+                        },
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    JobFailure::Error(ProtocolError::new(
+                        ErrorCode::InternalError,
+                        format!("restore task failed: {e}"),
+                    ))
+                })?;
+                match restore {
+                    Ok(outcome) => {
+                        ctl.progress(
+                            outcome.restored_files,
+                            Some(outcome.restored_files.max(1)),
+                            Some("entries"),
+                            Some(&format!(
+                                "restored {} files ({} bytes)",
+                                outcome.restored_files, outcome.restored_bytes
+                            )),
+                        );
+                        Ok(())
+                    }
+                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                    Err(e) => Err(JobFailure::Error(crate::engine::to_protocol(&e))),
+                }
+            },
+        ))
+    }
+
+    // --- registry events ---------------------------------------------
+
     /// Broadcast a registry-driven transition (registration, removal).
     /// These are state changes from the registry's point of view, not the
     /// actor's, so they are published here rather than in an actor.
@@ -621,6 +886,17 @@ pub enum LifecycleKind {
     Stop,
     Restart,
     Kill,
+}
+
+/// Map an engine error into a job failure (typed errors pass through).
+fn job_failure(error: EngineError) -> JobFailure {
+    match error {
+        EngineError::Protocol(pe) => JobFailure::Error(pe),
+        other => JobFailure::Error(ProtocolError::new(
+            ErrorCode::InternalError,
+            other.to_string(),
+        )),
+    }
 }
 
 fn not_found(server_id: &ServerId) -> ProtocolError {

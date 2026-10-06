@@ -260,6 +260,14 @@ fn main() {
                         std::process::exit(0);
                     }
                     "list" => info("There are 0 of a max of 20 players online"),
+                    "save-off" => info("Turned off world auto-saving"),
+                    "save-on" => info("Turned on world auto-saving"),
+                    "save-all" => {
+                        // Mimic the flush: the reply lands after a short
+                        // delay so the backup window's settle is visible.
+                        thread::sleep(Duration::from_millis(100));
+                        info("Saved the game");
+                    }
                     "" => {}
                     other => info(&format!("Unknown command: {other}")),
                 }

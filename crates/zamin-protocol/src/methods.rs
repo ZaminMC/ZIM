@@ -18,6 +18,10 @@ pub const JOBS_LIST: &str = "jobs.list";
 pub const JOBS_GET: &str = "jobs.get";
 pub const JOBS_CANCEL: &str = "jobs.cancel";
 
+pub const BACKUP_CREATE: &str = "backup.create";
+pub const BACKUP_RESTORE: &str = "backup.restore";
+pub const BACKUPS_LIST: &str = "backups.list";
+
 pub const STREAMS_SUBSCRIBE: &str = "streams.subscribe";
 pub const STREAMS_UNSUBSCRIBE: &str = "streams.unsubscribe";
 pub const STREAMS_NOTIFICATION: &str = "streams.notification";

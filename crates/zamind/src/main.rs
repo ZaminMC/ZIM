@@ -7,6 +7,7 @@ mod actor;
 mod engine;
 mod files;
 mod hub;
+mod jobs;
 mod session;
 
 use std::path::PathBuf;

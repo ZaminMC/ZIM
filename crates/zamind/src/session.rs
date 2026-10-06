@@ -14,10 +14,14 @@ use bytes::Bytes;
 use tokio::sync::mpsc;
 use zamin_core::server::ServerId;
 use zamin_ipc::Connection;
+use zamin_protocol::backups::{
+    BackupCreateParams, BackupCreateResult, BackupRestoreParams, BackupRestoreResult,
+    BackupsListParams, BackupsListResult,
+};
 use zamin_protocol::envelope::{IncomingMessage, Request, RequestId, Response};
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::handshake::{capabilities, HelloParams, HelloResult};
-use zamin_protocol::jobs::ListJobsResult;
+use zamin_protocol::jobs::{CancelJobParams, GetJobParams, JobKind, ListJobsResult};
 use zamin_protocol::methods;
 use zamin_protocol::server::{
     EmptyResult, GetServerParams, ListServersResult, RegisterServerParams, RegisterServerResult,
@@ -394,7 +398,88 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
-        methods::JOBS_LIST => json_ok(id, ListJobsResult { jobs: Vec::new() }),
+        methods::JOBS_LIST => json_ok(
+            id,
+            ListJobsResult {
+                jobs: engine.jobs().list(),
+            },
+        ),
+        methods::JOBS_GET => {
+            let params: GetJobParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.jobs().get(params.job_id) {
+                Ok(job) => json_ok(id, job),
+                Err(e) => Response::err(id, e),
+            }
+        }
+        methods::JOBS_CANCEL => {
+            let params: CancelJobParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.jobs().cancel(params.job_id) {
+                Ok(job) => json_ok(id, job),
+                Err(e) => Response::err(id, e),
+            }
+        }
+        methods::BACKUP_CREATE => {
+            let params: BackupCreateParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.backup_create(&server_id, params.label).await {
+                    Ok(job) => json_ok(
+                        id,
+                        BackupCreateResult {
+                            kind: JobKind::BackupCreate,
+                            job,
+                        },
+                    ),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::BACKUP_RESTORE => {
+            let params: BackupRestoreParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.backup_restore(&server_id, params.backup_id).await {
+                    Ok(job) => json_ok(
+                        id,
+                        BackupRestoreResult {
+                            kind: JobKind::BackupRestore,
+                            job,
+                        },
+                    ),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::BACKUPS_LIST => {
+            let params: BackupsListParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.backups_list(&server_id).await {
+                    Ok(result) => json_ok(
+                        id,
+                        BackupsListResult {
+                            backups: result.backups,
+                        },
+                    ),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::LOGS_RANGE => {
             let params: zamin_protocol::logs::LogRangeParams = match request.parse_params() {
                 Ok(params) => params,

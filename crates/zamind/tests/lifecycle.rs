@@ -392,13 +392,21 @@ async fn wire_robustness_null_ids_invalid_requests_and_unknown_methods() {
     assert_eq!(value["error"]["code"], "PROTOCOL_INVALID_REQUEST");
 
     // 3. Unknown method → PROTOCOL_METHOD_NOT_FOUND (not INTERNAL_ERROR).
+    //    jobs.get is a real method now: it answers JOB_NOT_FOUND for a
+    //    nonexistent job instead of the unimplemented rejection.
     let error = client
         .request(
             methods::JOBS_GET,
             json!({"jobId": "00000000-0000-0000-0000-000000000000"}),
         )
         .await
-        .expect_err("jobs.get is not implemented yet");
+        .expect_err("no such job exists");
+    assert_eq!(error["code"], "JOB_NOT_FOUND");
+
+    let error = client
+        .request("definitely.not.a.method", json!({}))
+        .await
+        .expect_err("unknown method");
     assert_eq!(error["code"], "PROTOCOL_METHOD_NOT_FOUND");
 
     // 4. A notification (method, no id) gets NO reply: the next response on

@@ -38,6 +38,15 @@ pub enum JobOutcome {
     Cancelled,
 }
 
+/// How a backup was taken: "live" (a save-off / save-all window around a
+/// running server) or "cold" (the server was not running).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackupTaken {
+    Live,
+    Cold,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobProgress {

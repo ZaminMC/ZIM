@@ -13,7 +13,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
@@ -29,12 +32,14 @@ pub struct CreateProgress {
     pub bytes_done: u64,
 }
 
-pub struct BackupCreateOptions<'a> {
-    pub server_id: &'a str,
-    pub label: Option<&'a str>,
+/// Owned, shareable options: the daemon runs archive work inside
+/// `spawn_blocking`, so callbacks and the cancel flag must be `'static`.
+pub struct BackupCreateOptions {
+    pub server_id: String,
+    pub label: Option<String>,
     pub taken: BackupTaken,
-    pub cancel: &'a AtomicBool,
-    pub progress: &'a dyn Fn(CreateProgress),
+    pub cancel: Arc<AtomicBool>,
+    pub progress: Arc<dyn Fn(CreateProgress) + Send + Sync>,
 }
 
 pub struct BackupCreateOutcome {
@@ -59,7 +64,7 @@ impl std::fmt::Debug for BackupCreateOutcome {
 pub fn create_archive(
     root: &Path,
     backups_dir: &Path,
-    opts: BackupCreateOptions<'_>,
+    opts: BackupCreateOptions,
 ) -> Result<BackupCreateOutcome, CoreError> {
     if !root.is_dir() {
         return Err(CoreError::NotFound {
@@ -92,7 +97,7 @@ fn cancelled(cancel: &AtomicBool) -> bool {
 fn write_archive(
     root: &Path,
     staging: &Path,
-    opts: &BackupCreateOptions<'_>,
+    opts: &BackupCreateOptions,
 ) -> Result<ArchiveStats, CoreError> {
     let file =
         fs::File::create(staging).map_err(|source| classify_io(staging.to_path_buf(), source))?;
@@ -105,7 +110,7 @@ fn write_archive(
     };
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        if cancelled(opts.cancel) {
+        if cancelled(&opts.cancel) {
             return Err(CoreError::Cancelled);
         }
         let mut entries: Vec<fs::DirEntry> = fs::read_dir(&dir)
@@ -117,7 +122,7 @@ fn write_archive(
         entries.sort_by_key(|e| e.file_name());
 
         for entry in entries {
-            if cancelled(opts.cancel) {
+            if cancelled(&opts.cancel) {
                 return Err(CoreError::Cancelled);
             }
             let path = entry.path();
@@ -189,7 +194,7 @@ fn commit(
     backups_dir: &Path,
     staging: &Path,
     backup_id: uuid::Uuid,
-    opts: BackupCreateOptions<'_>,
+    opts: BackupCreateOptions,
     stats: ArchiveStats,
 ) -> Result<BackupCreateOutcome, CoreError> {
     // The archive is complete: flush it to disk before it becomes visible.
@@ -205,12 +210,12 @@ fn commit(
     let manifest = BackupManifest {
         format_version: ARCHIVE_FORMAT_VERSION,
         backup_id,
-        server_id: opts.server_id.to_owned(),
+        server_id: opts.server_id.clone(),
         created_at_ms: now_ms(),
         size_bytes: fs::metadata(&archive).map(|m| m.len()).unwrap_or_default(),
         total_bytes: stats.total_bytes,
         file_count: stats.file_count,
-        label: opts.label.map(str::to_owned),
+        label: opts.label,
         taken: opts.taken,
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|e| {
