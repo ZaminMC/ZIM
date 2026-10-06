@@ -131,6 +131,9 @@ pub fn connection_error(error: &ClientError, endpoint_arg: &Option<String>) -> S
         ClientError::Ipc(IpcError::NoDaemon) => format!(
             "zamin: zamind is not running — nothing is listening at {at}.\n  Start the daemon first (the Panel launches it too), or pass --endpoint."
         ),
+        ClientError::Ipc(IpcError::DaemonBusy) => format!(
+            "zamin: the daemon at {at} is out of connection slots (it is alive but saturated).\n  Retry in a moment; if this persists, restart the daemon."
+        ),
         ClientError::Timeout(_) => format!(
             "zamin: the daemon at {at} did not answer in time.\n  It may be wedged; retry, then restart it if this persists."
         ),

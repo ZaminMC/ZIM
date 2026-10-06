@@ -7,6 +7,8 @@ pub enum IpcError {
     AlreadyRunning,
     #[error("daemon is not running")]
     NoDaemon,
+    #[error("daemon is alive but out of connection slots")]
+    DaemonBusy,
     #[error("ipc endpoint is not usable here: {0}")]
     EndpointInvalid(String),
     #[error("frame exceeds the protocol limit")]

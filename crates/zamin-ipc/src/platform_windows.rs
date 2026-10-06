@@ -81,7 +81,10 @@ pub async fn connect(endpoint: Endpoint) -> Result<Connection, IpcError> {
             }
             Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
                 if Instant::now() >= deadline {
-                    return Err(IpcError::NoDaemon);
+                    // The daemon is alive (busy ≠ absent): report the
+                    // saturation honestly so clients retry with context
+                    // instead of concluding it is gone.
+                    return Err(IpcError::DaemonBusy);
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
