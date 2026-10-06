@@ -11,6 +11,7 @@ A polished desktop and CLI workspace for running, managing, and developing Minec
 | `crates/zamin-core` | The engine that owns servers: registry, config, filesystem safety, Java discovery, lifecycle, logs. |
 | `crates/zamind` | The resident daemon (ADR-0001): supervision actors, event hub, protocol sessions, adoption. |
 | `crates/zamin-cli` | `zamin` — the command line client (second protocol client, Phase 2). |
+| `crates/zamin-bridge` | The panel host's forwarder: frame coalescing (~50 ms batches), down signals. Testable without a webview. |
 | `apps/panel` | The desktop UI (Phase 3): TypeScript protocol client + design system, Tauri 2 host. Develops in a plain browser against `apps/panel/dev-bridge.mjs`. |
 | `crates/testing/fake-mc-server` | Deterministic Paper mimic used by the whole test matrix — no Java needed. |
 

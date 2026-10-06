@@ -1,0 +1,29 @@
+[package]
+name = "zamin-panel-host"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ZaminMC/ZaminPanel"
+description = "ZaminPanel desktop shell: a thin Tauri 2 host bridging the webview to the daemon's local transport (ADR-0003)."
+
+[[bin]]
+name = "zamin-panel"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# The bridge logic (framing, coalescing, down signals) is tested in the
+# workspace crate; this host only wires it to the webview channels.
+zamin-bridge = { path = "../../../crates/zamin-bridge" }
+zamin-ipc = { path = "../../../crates/zamin-ipc" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

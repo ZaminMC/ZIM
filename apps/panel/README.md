@@ -9,14 +9,16 @@ UI develops and tests standalone in a plain browser.
 ## Layout
 
 ```
-src/
-  protocol/    # wire layer: types mirror of zamin-protocol, transport seam,
-               # the client (handshake, correlation, subscriptions, reconnect)
-  bridge/      # the only module that may import @tauri-apps
-  state/       # zustand stores (connection, servers) + typed daemon actions
-  ui/          # design-system primitives (tokens.css + CSS Modules)
-  app/         # shell: sidebar, tabs, palette, views
-dev-bridge.mjs # DEV ONLY: browser WebSocket ⇄ daemon's framed local transport
+src/            # webview: protocol client, stores, design system, views
+  protocol/     # wire layer: types mirror of zamin-protocol, transport seam,
+                # the client (handshake, correlation, subscriptions, reconnect)
+  bridge/       # the only module that may import @tauri-apps
+  state/        # zustand stores (connection, servers, ui) + daemon actions
+  ui/           # design-system primitives (tokens.css + CSS Modules)
+  app/          # shell: sidebar, tabs, palette, server views, console
+src-tauri/      # the Tauri 2 host: three commands, two channels, zero logic
+                # (bridge logic lives in crates/zamin-bridge, tested there)
+dev-bridge.mjs  # DEV ONLY: browser WebSocket ⇄ daemon's framed local transport
 ```
 
 Import boundaries are enforced by ESLint (`no-restricted-imports`): the
