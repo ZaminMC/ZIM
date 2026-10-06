@@ -1,0 +1,137 @@
+/* Backups: list + job progress, same visual language as the other
+   workspace surfaces. */
+
+.backups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.count {
+  font-size: var(--text-m);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-s);
+}
+
+.jobKind {
+  font-weight: 600;
+}
+
+.bar {
+  width: 220px;
+  height: 8px;
+}
+
+.jobMeta {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.jobMessage {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert {
+  background: var(--surface-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--text-s);
+}
+
+.notice {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+}
+
+.itemMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.when {
+  font-size: var(--text-s);
+}
+
+.meta {
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.label {
+  align-self: flex-start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: var(--text-xs, var(--text-s));
+  color: var(--text-muted);
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-s);
+}

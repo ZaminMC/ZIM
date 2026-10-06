@@ -3,7 +3,12 @@
 // failures; UI layers translate, never re-parse.
 
 import type {
+  BackupJobResult,
+  BackupsListResult,
+  CancelJobParams,
   FilesCommitResult,
+  Job,
+  JobsListResult,
   PlayersListResult,
   FilesListResult,
   FilesReadResult,
@@ -83,6 +88,39 @@ export async function killServer(serverId: string): Promise<LifecycleResult> {
 export async function sendStdin(serverId: string, line: string): Promise<void> {
   const params: StdinParams = { requestId: newRequestId(), serverId, line };
   await client.request("server.stdin", params);
+}
+
+// --- backups & jobs (§7) ---
+
+export async function listBackups(serverId: string): Promise<BackupsListResult> {
+  return client.request<BackupsListResult>("backups.list", { serverId });
+}
+
+export async function createBackup(serverId: string, label?: string): Promise<BackupJobResult> {
+  const params = {
+    requestId: newRequestId(),
+    serverId,
+    ...(label === undefined || label === "" ? {} : { label }),
+  };
+  return client.request<BackupJobResult>("backup.create", params);
+}
+
+export async function restoreBackup(serverId: string, backupId: string): Promise<BackupJobResult> {
+  const params: { requestId: string; serverId: string; backupId: string } = {
+    requestId: newRequestId(),
+    serverId,
+    backupId,
+  };
+  return client.request<BackupJobResult>("backup.restore", params);
+}
+
+export async function listJobs(): Promise<JobsListResult> {
+  return client.request<JobsListResult>("jobs.list");
+}
+
+export async function cancelJob(jobId: string): Promise<Job> {
+  const params: CancelJobParams = { requestId: newRequestId(), jobId };
+  return client.request<Job>("jobs.cancel", params);
 }
 
 // --- players (§5) ---

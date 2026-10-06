@@ -133,6 +133,60 @@ export interface MetricsSample {
   uptimeMs?: number;
 }
 
+// --- jobs & backups (§7) ---
+
+export type JobKind = "server.create" | "backup.create" | "backup.restore" | "archive.extract";
+export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type JobOutcome = "succeeded" | "failed" | "cancelled";
+export type BackupTaken = "live" | "cold";
+
+export interface JobProgress {
+  current: number;
+  total?: number;
+  unit?: string;
+  message?: string;
+}
+
+export interface Job {
+  jobId: string;
+  kind: JobKind;
+  serverId?: string;
+  state: JobState;
+  progress?: JobProgress;
+  error?: ProtocolErrorObject;
+  createdAtMs: number;
+  startedAtMs?: number;
+  endedAtMs?: number;
+}
+
+export interface BackupInfo {
+  backupId: string;
+  createdAtMs: number;
+  sizeBytes: number;
+  totalBytes: number;
+  fileCount: number;
+  label?: string;
+  taken: BackupTaken;
+}
+
+export interface BackupsListResult {
+  backups: BackupInfo[];
+}
+
+export interface BackupJobResult {
+  kind: JobKind;
+  job: Job;
+}
+
+export interface JobsListResult {
+  jobs: Job[];
+}
+
+export interface CancelJobParams {
+  requestId: string;
+  jobId: string;
+}
+
 export type CoreEvent =
   | {
       type: "serverStateChanged";
@@ -144,9 +198,14 @@ export type CoreEvent =
       error?: ProtocolErrorObject;
       crash?: CrashClassification;
     }
-  | { type: "jobStarted"; job: unknown }
-  | { type: "jobProgress"; jobId: string; progress: unknown }
-  | { type: "jobCompleted"; jobId: string; outcome: unknown; error?: ProtocolErrorObject };
+  | { type: "jobStarted"; job: Job }
+  | { type: "jobProgress"; jobId: string; progress: JobProgress }
+  | {
+      type: "jobCompleted";
+      jobId: string;
+      outcome: JobOutcome;
+      error?: ProtocolErrorObject;
+    };
 
 export type StreamPayload =
   | { kind: "logs"; batch: LogLine[] }

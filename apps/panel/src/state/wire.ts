@@ -9,6 +9,7 @@ import type { Transport } from "../protocol/transport";
 import { logWarn } from "../logger";
 import { useConnection } from "./connection";
 import { useServers } from "./servers";
+import { useJobs } from "./jobs";
 import { getServer } from "./actions";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -40,7 +41,20 @@ async function wireEvents(): Promise<void> {
     onPayload: (notification) => {
       if (notification.payload.kind !== "event") return;
       const event = notification.payload.event;
-      if (event.type !== "serverStateChanged") return;
+      if (event.type !== "serverStateChanged" && !event.type.startsWith("job")) return;
+
+      if (event.type === "jobStarted") {
+        useJobs.getState().started(event.job);
+        return;
+      }
+      if (event.type === "jobProgress") {
+        useJobs.getState().progress(event.jobId, event.progress);
+        return;
+      }
+      if (event.type === "jobCompleted") {
+        useJobs.getState().completed(event.jobId, event.outcome, event.error);
+        return;
+      }
 
       const state = useServers.getState();
       if (event.reason === "removed") {
