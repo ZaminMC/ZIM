@@ -108,6 +108,10 @@ impl StateMachine {
                 }))
             }
             (S::Starting, Cmd::PreflightFailed { .. }) => Some(Transition::To(S::FailedPreflight)),
+            // A deliberate user stop during startup is a stop, not a crash:
+            // unexpected exits before validation classify as startup
+            // crashes, requested ones go through the normal shutdown path.
+            (S::Starting, Cmd::Stop) => Some(Transition::To(S::Stopping)),
 
             // Running: stop or crash.
             (S::Running, Cmd::Stop) => Some(Transition::To(S::Stopping)),

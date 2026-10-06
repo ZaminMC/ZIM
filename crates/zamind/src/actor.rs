@@ -74,6 +74,11 @@ pub struct Actor {
 
     pending_restart: bool,
     adopted_identity: Option<ProcessIdentity>,
+
+    /// Set once per startup attempt when the configured startup timeout is
+    /// exceeded, so the "still starting" progress notice fires exactly
+    /// once (ADR-0005: remain STARTING, surface progress, never guess).
+    startup_timeout_surfaced: bool,
 }
 
 impl Actor {
@@ -100,6 +105,7 @@ impl Actor {
             graceful_signaled: false,
             pending_restart: false,
             adopted_identity: None,
+            startup_timeout_surfaced: false,
         }
     }
 
@@ -171,11 +177,12 @@ impl Actor {
                 });
             }
             ActorCommand::Retire { reply } => {
-                if self.spawned.is_some() {
+                // Adopted servers are supervised too: removing one must
+                // terminate its process, never orphan a live JVM (M1).
+                if self.spawned.is_some() || self.adopted_identity.is_some() {
                     let _ = self.stop(true).await;
-                    // The child takes up to the ladder to die; the actor
-                    // exits after the stop flow reports — the retire reply
-                    // acknowledges the request, not the exit.
+                    // The kill is synchronous; the actor exits after the
+                    // retire reply acknowledges the request.
                 }
                 self.clear_runtime_record();
                 let _ = reply.send(Ok(()));
@@ -315,6 +322,7 @@ impl Actor {
         self.stdin = spawned.handle().child().stdin.take();
         self.spawned = Some(spawned);
         self.started_at_ms = Some(now_ms());
+        self.startup_timeout_surfaced = false;
         self.machine
             .apply(LifecycleCommand::Spawned)
             .map_err(typed_rejection)?;
@@ -398,9 +406,12 @@ impl Actor {
     }
 
     async fn stop(&mut self, force: bool) -> Result<ServerState, ProtocolError> {
-        let has_child = self.spawned.is_some();
         let state = self.machine.state();
-        if !has_child {
+        let adopted = self.spawned.is_none() && self.adopted_identity.is_some();
+
+        // Neither spawned nor adopted: nothing to stop (Stopping stays
+        // idempotent-ok while the shutdown ladder runs).
+        if self.spawned.is_none() && !adopted {
             return match state {
                 zamin_core::supervisor::state::ServerState::Stopping => Ok(self.wire_state()),
                 _ => Err(ProtocolError::new(
@@ -409,15 +420,33 @@ impl Actor {
                 )),
             };
         }
+
         if force {
-            // Kill = stop without grace: same machine path, no waiting.
+            // Kill = stop without grace. Move to stopping FIRST so the
+            // exit is classified as a deliberate stop, never a crash; then
+            // terminate immediately.
+            if matches!(
+                state,
+                zamin_core::supervisor::state::ServerState::Running
+                    | zamin_core::supervisor::state::ServerState::Starting
+            ) {
+                let from = self.wire_state();
+                self.machine
+                    .apply(LifecycleCommand::Stop)
+                    .map_err(typed_rejection)?;
+                self.publish_transition(from, Some("kill-requested".to_owned()));
+            }
             if let Some(spawned) = self.spawned.as_mut() {
                 let _ = spawned.handle().force_kill_tree();
+            } else {
+                self.kill_verified_adopted();
             }
             return Ok(self.wire_state());
         }
+
         match state {
-            zamin_core::supervisor::state::ServerState::Running => {
+            zamin_core::supervisor::state::ServerState::Running
+            | zamin_core::supervisor::state::ServerState::Starting => {
                 let from = self.wire_state();
                 self.machine
                     .apply(LifecycleCommand::Stop)
@@ -425,7 +454,13 @@ impl Actor {
                 self.publish_transition(from, Some("stop-requested".to_owned()));
                 self.stop_requested_at = Some(Instant::now());
                 self.graceful_signaled = false;
-                if let Some(stdin) = self.stdin.as_mut() {
+                if adopted {
+                    // An adopted server has no stdin and no console: the
+                    // graceful mechanism is the OS signal (ladder step 3),
+                    // issued now. The ladder then waits one grace window
+                    // before step 4, matching the spawned ladder's tail.
+                    self.signal_adopted_graceful().await;
+                } else if let Some(stdin) = self.stdin.as_mut() {
                     let _ = stdin.write_all(b"stop\n").await;
                     let _ = stdin.flush().await;
                 }
@@ -439,6 +474,46 @@ impl Actor {
                     self.server_id, state
                 ),
             )),
+        }
+    }
+
+    /// Graceful signal for an adopted process (no stdin). The ladder's
+    /// stdin step is marked as consumed so force lands one grace window
+    /// after the signal. Failures are logged, never hidden; the ladder
+    /// proceeds to force regardless (ADR-0005).
+    async fn signal_adopted_graceful(&mut self) {
+        self.graceful_signaled = true;
+        let stop_timeout = Duration::from_secs(
+            self.load_effective_settings()
+                .await
+                .ok()
+                .map(|s| s.stop_timeout_secs.max(1) as u64)
+                .unwrap_or(60),
+        );
+        self.stop_requested_at = Some(Instant::now() - stop_timeout);
+        if let Some(identity) = &self.adopted_identity {
+            match platform::process().signal_graceful(identity.pid) {
+                Ok(()) => {
+                    tracing::info!(server = %self.server_id, "sent os-level graceful signal to adopted server")
+                }
+                Err(e) => tracing::warn!(
+                    server = %self.server_id,
+                    "os-level graceful signal unavailable ({e}); ladder falls through to force"
+                ),
+            }
+        }
+    }
+
+    /// Kill an adopted process whose identity was verified at adoption and
+    /// is re-verified immediately before the kill — no code path may kill
+    /// a process whose identity was not verified (ADR-0005).
+    fn kill_verified_adopted(&mut self) {
+        if let Some(identity) = &self.adopted_identity {
+            if platform::process().is_alive(identity) {
+                if let Err(e) = platform::process().force_kill(identity.pid) {
+                    tracing::warn!(server = %self.server_id, "force kill failed: {e}");
+                }
+            }
         }
     }
 
@@ -524,14 +599,26 @@ impl Actor {
                 .is_some_and(|identity| !platform::process().is_alive(identity));
             if adopted_gone {
                 self.adopted_identity = None;
+                self.stop_requested_at = None;
+                self.graceful_signaled = false;
                 tracing::info!(server = %self.server_id, "adopted server exited");
                 let from = self.wire_state();
-                if self
-                    .machine
-                    .apply(LifecycleCommand::Crashed { exit_code: 0 })
-                    .is_ok()
-                {
+                // A stop we requested completes gracefully; anything else
+                // is an unexpected exit of a supervised process.
+                let command = match self.machine.state() {
+                    zamin_core::supervisor::state::ServerState::Stopping => {
+                        LifecycleCommand::StoppedGracefully
+                    }
+                    _ => LifecycleCommand::Crashed { exit_code: 0 },
+                };
+                if self.machine.apply(command).is_ok() {
                     self.publish_transition(from, Some("adopted-process-exited".to_owned()));
+                }
+                if self.pending_restart
+                    && self.machine.state() == zamin_core::supervisor::state::ServerState::Stopped
+                {
+                    self.pending_restart = false;
+                    let _ = self.start().await;
                 }
             }
         }
@@ -555,6 +642,29 @@ impl Actor {
             {
                 self.publish_transition(from, Some("startup-validated".to_owned()));
                 tracing::info!(server = %self.server_id, "server is running");
+            }
+            return;
+        }
+
+        // ADR-0005: a startup that exceeds the configured timeout remains
+        // STARTING — never guess — but the wait is surfaced exactly once
+        // so clients can show progress instead of silence.
+        if !self.startup_timeout_surfaced {
+            let started_at = self.started_at_ms.unwrap_or(now_ms());
+            let elapsed_ms = (now_ms().saturating_sub(started_at)).max(0) as u64;
+            let timeout_secs = self
+                .load_effective_settings()
+                .await
+                .ok()
+                .map(|s| s.startup_timeout_secs.max(1) as u64)
+                .unwrap_or(120);
+            if elapsed_ms >= timeout_secs * 1000 {
+                self.startup_timeout_surfaced = true;
+                tracing::warn!(
+                    server = %self.server_id,
+                    "startup exceeds configured timeout; still starting (state unchanged per ADR-0005)"
+                );
+                self.publish_state(Some("startup-timeout-exceeded"), None);
             }
         }
     }
@@ -602,6 +712,9 @@ impl Actor {
             tracing::warn!(server = %self.server_id, "stop timeout exceeded; forcing tree termination");
             if let Some(spawned) = self.spawned.as_mut() {
                 let _ = spawned.handle().force_kill_tree();
+            } else {
+                // Adopted server: kill by re-verified identity.
+                self.kill_verified_adopted();
             }
         }
     }

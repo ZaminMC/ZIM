@@ -12,7 +12,8 @@ use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetProcessTimes, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_TERMINATE,
 };
 
 use crate::error::PlatformError;
@@ -187,6 +188,25 @@ impl ProcessOps for WindowsProcessOps {
         let ok = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) };
         if ok == 0 {
             return Err(PlatformError::GracefulSignalUnsupported);
+        }
+        Ok(())
+    }
+
+    fn force_kill(&self, pid: u32) -> Result<(), PlatformError> {
+        // Adopted servers were spawned by a previous daemon, so the Job
+        // Object that provides tree-kill is unreachable here; the kill
+        // degrades to the single verified process. Identity must be
+        // verified by the caller (ADR-0005).
+        unsafe {
+            let process = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if process.is_null() {
+                return Err(PlatformError::ProcessGone { pid });
+            }
+            let ok = TerminateProcess(process, 1);
+            CloseHandle(process);
+            if ok == 0 {
+                return Err(PlatformError::ProcessGone { pid });
+            }
         }
         Ok(())
     }

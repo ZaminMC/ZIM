@@ -19,6 +19,15 @@ pub struct PlatformServer {
     listener: UnixListener,
 }
 
+impl Drop for PlatformServer {
+    fn drop(&mut self) {
+        // Best-effort cleanup of our own socket file on a controlled exit.
+        // A SIGKILLed daemon leaves it behind; the stale-reclaim path in
+        // bind() handles that case.
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 impl PlatformServer {
     pub async fn bind(endpoint: Endpoint) -> Result<PlatformServer, IpcError> {
         let path = match endpoint {
@@ -31,8 +40,16 @@ impl PlatformServer {
         };
 
         if let Some(parent) = path.parent() {
+            // Restrict permissions only when the daemon creates the
+            // directory itself (the default endpoint's per-user runtime
+            // dir). An operator-supplied --endpoint may live in a shared
+            // parent such as /tmp; chmodding that to 0700 would break
+            // everything else in it.
+            let created = std::fs::metadata(parent).is_err();
             std::fs::create_dir_all(parent)?;
-            std::fs::set_permissions(parent, Permissions::from_mode(0o700))?;
+            if created {
+                std::fs::set_permissions(parent, Permissions::from_mode(0o700))?;
+            }
         }
 
         if path.exists() {

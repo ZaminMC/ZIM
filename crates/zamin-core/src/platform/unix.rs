@@ -111,6 +111,26 @@ impl ProcessOps for UnixProcessOps {
         }
         Ok(())
     }
+
+    fn force_kill(&self, pid: u32) -> Result<(), PlatformError> {
+        // Processes we spawn lead their own group (pgid == pid), so the
+        // group kill also covers adopted children that inherited that
+        // shape. Identity must be verified by the caller (ADR-0005).
+        let group = -(pid as i32);
+        if unsafe { libc::kill(group, libc::SIGKILL) } == 0 {
+            return Ok(());
+        }
+        // Group gone or unreachable: target the single process.
+        let ok = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        if ok == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::ESRCH) => Err(PlatformError::ProcessGone { pid }),
+            _ => Err(err.into()),
+        }
+    }
 }
 
 /// `/proc/<pid>/stat` starttime (field 22) plus the boot id: stable across

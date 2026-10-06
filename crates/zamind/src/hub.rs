@@ -38,6 +38,10 @@ struct SubscriberState {
     sender: mpsc::Sender<StreamNotification>,
     /// Highest sequence delivered to this subscriber.
     cursor: u64,
+    /// Notifications that could not be enqueued while the subscriber was
+    /// slow. Reported through a single `Missed` marker when delivery
+    /// resumes; the cursor never advances for undelivered sequences.
+    pending_missed: u64,
 }
 
 #[derive(Default)]
@@ -153,6 +157,10 @@ impl HubHandle {
     /// answers `CursorInvalid` and the client re-snapshots (ADR-0006).
     /// Fresh logs subscriptions receive the current ring as their first
     /// batch and resume from the ingest cursor.
+    ///
+    /// Replay and registration happen under one lock hold: a publisher
+    /// cannot ingest between them, so there is no gap in which events are
+    /// silently lost.
     pub fn subscribe(
         &self,
         stream: StreamKind,
@@ -170,14 +178,16 @@ impl HubHandle {
             (Some(_), _) => return Err(HubError::CursorUnknown),
         };
 
+        let mut inner = self
+            .hub
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         // Replay for events streams.
+        let mut last_replayed = seq_cursor;
         if stream == StreamKind::Events {
             if let Some(from) = seq_cursor {
-                let inner = self
-                    .hub
-                    .inner
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let rings = inner
                     .rings
                     .get(server_id.as_deref().unwrap_or_default())
@@ -195,17 +205,13 @@ impl HubHandle {
                             event: event.clone(),
                         },
                     });
+                    last_replayed = Some(*seq);
                 }
             }
         }
 
         // Fresh logs subscriptions: deliver the ring as the opening batch.
         if stream == StreamKind::Logs && cursor.is_none() {
-            let inner = self
-                .hub
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(rings) = inner.rings.get(server_id.as_deref().unwrap_or_default()) {
                 if !rings.logs.is_empty() {
                     let batch: Vec<LogLine> =
@@ -220,18 +226,14 @@ impl HubHandle {
             }
         }
 
-        let mut inner = self
-            .hub
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.subscribers.insert(
             id.clone(),
             SubscriberState {
                 stream,
                 server_id,
                 sender,
-                cursor: seq_cursor.unwrap_or(0),
+                cursor: last_replayed.unwrap_or(0),
+                pending_missed: 0,
             },
         );
 
@@ -273,17 +275,36 @@ fn fan_out(inner: &mut Inner, notification: &StreamNotification) {
         let Some(state) = inner.subscribers.get_mut(&id) else {
             continue;
         };
-        state.cursor = notification.seq;
-        if state.sender.try_send(notification.clone()).is_err() {
-            // Queue full: this subscriber fell behind. One marker tells it
-            // what happened; if even that cannot fit, drop silently — the
-            // client resyncs from files on reconnect (ADR-0006).
-            let _ = state.sender.try_send(StreamNotification {
+        // The cursor only advances for sequences that actually entered the
+        // queue; a reconnect resuming from the cursor must never skip past
+        // events that were dropped (ADR-0006: no silent loss).
+        if state.pending_missed > 0 {
+            // The subscriber was slow earlier: lead with the accumulated
+            // marker once a slot is free. If even the marker cannot fit,
+            // keep accumulating and do not advance.
+            let missed = StreamNotification {
                 stream: notification.stream,
                 server_id: notification.server_id.clone(),
                 seq: notification.seq,
-                payload: StreamPayload::Missed { missed: 1 },
-            });
+                payload: StreamPayload::Missed {
+                    missed: state.pending_missed,
+                },
+            };
+            match state.sender.try_send(missed) {
+                Ok(()) => {
+                    state.pending_missed = 0;
+                    if state.sender.try_send(notification.clone()).is_ok() {
+                        state.cursor = notification.seq;
+                    } else {
+                        state.pending_missed += 1;
+                    }
+                }
+                Err(_) => state.pending_missed += 1,
+            }
+        } else if state.sender.try_send(notification.clone()).is_ok() {
+            state.cursor = notification.seq;
+        } else {
+            state.pending_missed += 1;
         }
     }
 }

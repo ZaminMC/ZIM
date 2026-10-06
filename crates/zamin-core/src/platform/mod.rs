@@ -96,6 +96,14 @@ pub trait ProcessOps: Send + Sync {
     /// never hidden.
     fn signal_graceful(&self, pid: u32) -> Result<(), PlatformError>;
 
+    /// Ladder step 4 for adopted servers: force-terminate by PID, covering
+    /// the process group where the platform allows it. The caller MUST have
+    /// verified the identity (PID + start marker) beforehand — no code path
+    /// may kill a process whose identity was not verified (ADR-0005). For
+    /// adopted Windows servers the original Job Object is unreachable, so
+    /// the kill degrades to the single verified process.
+    fn force_kill(&self, pid: u32) -> Result<(), PlatformError>;
+
     /// Run a short-lived process to completion and capture its output.
     /// Blocking by design; async callers go through `spawn_blocking`.
     /// Used by, e.g., Java runtime inspection.

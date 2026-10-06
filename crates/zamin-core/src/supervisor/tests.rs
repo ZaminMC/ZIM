@@ -94,6 +94,15 @@ fn adoption_verifies_before_running() {
 }
 
 #[test]
+fn deliberate_stop_during_startup_is_not_a_crash() {
+    // A user-requested stop while STARTING moves through the normal
+    // shutdown path; only *unexpected* exits before validation classify
+    // as startup crashes.
+    assert_eq!(apply_ok(S::Starting, Cmd::Stop), S::Stopping);
+    assert_eq!(apply_ok(S::Stopping, Cmd::StoppedGracefully), S::Stopped);
+}
+
+#[test]
 fn reset_returns_terminal_states_to_not_running() {
     for state in [S::Stopped, S::Crashed, S::FailedPreflight, S::Unknown] {
         assert_eq!(apply_ok(state, Cmd::Reset), S::NotRunning, "from {state:?}");
@@ -106,7 +115,6 @@ fn dangerous_transitions_are_rejected() {
         // No double start.
         (S::Starting, Cmd::Start),
         (S::Running, Cmd::Start),
-        (S::Starting, Cmd::Stop),
         (S::NotRunning, Cmd::Stop),
         // Nothing while stopping except completion.
         (S::Stopping, Cmd::Start),
