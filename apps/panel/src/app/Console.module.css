@@ -1,21 +1,32 @@
 .console {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   background: var(--term-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
-  padding: var(--space-2);
-  min-height: 320px;
+  box-shadow: var(--shadow-s);
+  min-height: 440px;
   overflow: hidden;
 }
 
 .console :global(.xterm) {
-  padding: var(--space-1);
+  padding: var(--space-2);
 }
 
 .consoleBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--space-1) var(--space-2);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
   color: var(--text-faint);
   font-size: var(--text-s);
+}
+
+.host {
+  flex: 1;
+  min-height: 0;
 }

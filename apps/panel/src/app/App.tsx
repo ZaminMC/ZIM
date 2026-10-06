@@ -1,6 +1,8 @@
-// Panel shell: sidebar (server list + New server), tab strip, content area,
-// command palette, and modals. Ctrl/Cmd+K is the keyboard surface for the
-// §53 journey.
+// Panel shell: a proper control-center frame. The left rail carries the
+// brand, primary navigation (Overview, the server fleet, and the reserved
+// "Model" slot for a future capability), and the daemon footer; the main
+// area is either the Overview dashboard or one server's workspace.
+// Ctrl/Cmd+K remains the keyboard surface for the §53 journey.
 
 import { useEffect, useMemo } from "react";
 import { useConnection } from "../state/connection";
@@ -9,10 +11,11 @@ import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
 import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
+import { IconDashboard, IconPlus, IconServer, IconSparkles } from "../ui/icons";
+import { Dashboard } from "./Dashboard";
 import { NewServerModal } from "./NewServerModal";
 import { Palette } from "./Palette";
 import { ServerView } from "./ServerView";
-import { TabStrip } from "./TabStrip";
 import styles from "./App.module.css";
 import listStyles from "./ServerList.module.css";
 
@@ -28,6 +31,7 @@ export function App() {
   const servers = useMemo(() => Object.values(serverMap), [serverMap]);
   const activeTab = useUi((s) => s.activeTab);
   const openServer = useUi((s) => s.openServer);
+  const setActive = useUi((s) => s.setActive);
   const newServerOpen = useUi((s) => s.newServerOpen);
   const setNewServerOpen = useUi((s) => s.setNewServerOpen);
   const paletteOpen = useUi((s) => s.paletteOpen);
@@ -46,75 +50,123 @@ export function App() {
 
   const sorted = [...servers].sort((a, b) => a.displayName.localeCompare(b.displayName));
   const activeServer = activeTab ? serverMap[activeTab] : undefined;
+  const statusLabel =
+    status === "ready" ? "daemon online" : status === "connecting" ? "connecting…" : "daemon offline";
+  const statusColor =
+    status === "ready" ? "var(--success)" : status === "connecting" ? "var(--warning)" : "var(--danger)";
 
   return (
     <div className={styles.shell}>
-      <header className={styles.topbar}>
+      <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          ZaminPanel
-          <span className={styles.brandSub}>
-            {daemon ? `${daemon.name} v${daemon.version}` : "\u00a0"}
+          <span className={styles.logoMark} aria-hidden>
+            <svg viewBox="0 0 32 32" width="26" height="26">
+              <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="var(--accent-soft)" stroke="var(--accent-border)" />
+              <path d="M9 9h14v4.4h-9.2v2.4H21v4.4h-7.2v2.4H23V27H9V9z" fill="var(--accent)" opacity="0" />
+              <path d="M10 10h12v3.6h-8.4v2.2H20v3.6h-6.4v2.2H22V25H10V10z" fill="var(--accent)" />
+              <circle cx="21.5" cy="11.8" r="1.7" fill="var(--success)" />
+            </svg>
           </span>
+          <span className={styles.brandName}>ZaminPanel</span>
         </div>
-        <span className={styles.badge} title={lastError ?? undefined}>
-          <span
-            className={styles.badgeDot}
-            style={{
-              background:
-                status === "ready"
-                  ? "var(--success)"
-                  : status === "connecting"
-                    ? "var(--warning)"
-                    : "var(--danger)",
-            }}
-          />
-          {status === "ready" ? "daemon online" : status === "connecting" ? "connecting…" : "daemon offline"}
-        </span>
-      </header>
 
-      <nav className={styles.sidebar} aria-label="Servers">
-        <div className={styles.sidebarHead}>
-          <span>Servers</span>
-        </div>
-        <Button variant="primary" onClick={() => setNewServerOpen(true)}>
-          + New server
-        </Button>
-        {sorted.length > 0 ? (
-          <ul className={listStyles.list}>
-            {sorted.map((server) => (
-              <li
-                key={server.serverId}
-                className={listStyles.item}
-                onClick={() => openServer(server.serverId)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") openServer(server.serverId);
-                }}
-                tabIndex={0}
-                role="button"
-                aria-label={`Open ${server.displayName}`}
-              >
-                <StatusDot state={server.state} />
-                <span className={listStyles.name}>{server.displayName}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </nav>
+        <nav className={styles.nav} aria-label="Primary">
+          <button
+            className={`${styles.navItem} ${activeTab === null ? styles.navItemActive : ""}`}
+            onClick={() => setActive(null)}
+            aria-label="Overview"
+          >
+            <IconDashboard />
+            <span>Overview</span>
+          </button>
 
-      <div className={styles.main}>
-        <TabStrip />
-        <main className={styles.content}>
-          {activeServer ? (
-            <ServerView serverId={activeServer.serverId} />
-          ) : (
-            <p className={listStyles.empty}>
-              {servers.length === 0
-                ? "No servers yet. Use “+ New server” (or the Ctrl+K palette) to register an existing server directory."
-                : "Pick a server from the sidebar, or press Ctrl+K for commands."}
-            </p>
-          )}
-        </main>
-      </div>
+          <div className={styles.section}>
+            <span className={styles.sectionLabel}>Servers</span>
+            <Button variant="primary" onClick={() => setNewServerOpen(true)}>
+              <IconPlus size={14} />
+              New server
+            </Button>
+            {sorted.length > 0 ? (
+              <ul className={listStyles.list}>
+                {sorted.map((server) => (
+                  <li
+                    key={server.serverId}
+                    className={[
+                      listStyles.item,
+                      server.serverId === activeTab ? listStyles.itemActive : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onClick={() => openServer(server.serverId)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") openServer(server.serverId);
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Open ${server.displayName}`}
+                  >
+                    <StatusDot state={server.state} />
+                    <span className={listStyles.name}>{server.displayName}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={styles.sideHint}>
+                <IconServer size={14} />
+                Nothing registered yet
+              </p>
+            )}
+          </div>
+
+          <div className={styles.section}>
+            <span className={styles.sectionLabel}>System</span>
+            <div
+              className={`${styles.navItem} ${styles.navItemReserved}`}
+              aria-disabled="true"
+              title="Planned — the Model workspace lands here"
+            >
+              <IconSparkles />
+              <span>Model</span>
+              <span className={styles.soonChip}>soon</span>
+            </div>
+          </div>
+        </nav>
+
+        <footer className={styles.sideFoot}>
+          <div
+            className={styles.daemonRow}
+            title={lastError ?? undefined}
+          >
+            <span
+              className={styles.daemonDot}
+              style={{ background: statusColor }}
+              aria-hidden
+            />
+            <span className={styles.daemonLabel}>{statusLabel}</span>
+          </div>
+          <div className={styles.daemonMeta}>
+            <span className={styles.daemonVersion}>
+              {daemon ? `${daemon.name} v${daemon.version}` : "zamind"}
+            </span>
+            <button
+              className={styles.kbdHint}
+              onClick={() => setPaletteOpen(true)}
+              aria-label="Open command palette"
+              title="Command palette"
+            >
+              Ctrl K
+            </button>
+          </div>
+        </footer>
+      </aside>
+
+      <main className={styles.main}>
+        {activeServer ? (
+          <ServerView serverId={activeServer.serverId} />
+        ) : (
+          <Dashboard servers={sorted} onOpen={openServer} onNewServer={() => setNewServerOpen(true)} />
+        )}
+      </main>
 
       {newServerOpen ? <NewServerModal /> : null}
       {paletteOpen ? <Palette /> : null}

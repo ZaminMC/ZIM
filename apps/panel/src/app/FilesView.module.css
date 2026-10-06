@@ -20,7 +20,7 @@
 .crumb {
   border: none;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-strong);
   cursor: pointer;
   padding: 2px 4px;
   font-size: var(--text-s);
@@ -45,6 +45,14 @@
   gap: var(--space-2);
 }
 
+.tableCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+  overflow: hidden;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -55,13 +63,18 @@
   text-align: left;
   color: var(--text-faint);
   font-weight: 500;
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 
 .table td {
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .table tbody tr:hover {

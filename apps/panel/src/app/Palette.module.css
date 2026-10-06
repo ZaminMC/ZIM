@@ -1,13 +1,13 @@
 .palette {
   position: fixed;
-  top: 72px;
-  left: 50%;
+  top: 96px;
+  left: calc(50% + 124px);
   transform: translateX(-50%);
   width: min(520px, calc(100vw - 48px));
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-m);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-l);
   z-index: 50;
   overflow: hidden;
   animation: drop var(--speed-fast) var(--ease);

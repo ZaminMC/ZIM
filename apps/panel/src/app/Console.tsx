@@ -166,7 +166,7 @@ export function Console({ serverId, running }: { serverId: string; running: bool
         <span>console</span>
         <span>{running ? "stdin connected" : "server is not running — stdin is rejected"}</span>
       </div>
-      <div ref={hostRef} style={{ height: "340px" }} />
+      <div ref={hostRef} className={styles.host} />
     </section>
   );
 }

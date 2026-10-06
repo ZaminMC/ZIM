@@ -1,5 +1,6 @@
-// Shell rendering: sidebar reflects the servers store, badge reflects the
-// connection store. The wire module is mocked out — no sockets in tests.
+// Shell rendering: sidebar reflects the servers store, the footer reflects
+// the connection store, the Overview dashboard renders the fleet. The wire
+// module is mocked out — no sockets in tests.
 
 import { render, screen, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +21,7 @@ describe("App shell", () => {
 
   afterEach(cleanup);
 
-  it("shows the daemon version and servers when online", () => {
+  it("shows the daemon version, the fleet, and the reserved Model slot", () => {
     useConnection.setState({
       status: "ready",
       daemon: { name: "zamind", version: "9.9.9" },
@@ -37,10 +38,14 @@ describe("App shell", () => {
 
     expect(screen.getByText("zamind v9.9.9")).toBeTruthy();
     expect(screen.getByText("daemon online")).toBeTruthy();
-    expect(screen.getByText("Alpha")).toBeTruthy();
-    expect(screen.getByText("Beta")).toBeTruthy();
-    expect(screen.getByLabelText("state: running")).toBeTruthy();
-    expect(screen.getByLabelText("state: crashed")).toBeTruthy();
+    // Servers appear twice by design: sidebar rows + dashboard cards.
+    expect(screen.getAllByText("Alpha").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Beta").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByLabelText("state: running").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByLabelText("state: crashed").length).toBeGreaterThanOrEqual(1);
+    // The reserved nav slot (room for a future capability), visibly not live.
+    expect(screen.getByText("Model")).toBeTruthy();
+    expect(screen.getByText(/soon/i)).toBeTruthy();
   });
 
   it("shows the offline badge when the daemon is unreachable", () => {

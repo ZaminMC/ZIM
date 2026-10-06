@@ -10,11 +10,11 @@
 }
 
 .dialog {
-  width: min(460px, calc(100vw - 48px));
-  background: var(--surface);
+  width: min(480px, calc(100vw - 48px));
+  background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-l);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-l);
   padding: var(--space-5);
   animation: rise var(--speed-normal) var(--ease);
 }
@@ -22,7 +22,8 @@
 .title {
   margin: 0 0 var(--space-4);
   font-size: var(--text-xl);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 @keyframes fade {

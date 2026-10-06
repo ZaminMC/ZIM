@@ -16,7 +16,7 @@
 }
 
 .input {
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-s);
   color: var(--text);
@@ -27,6 +27,7 @@
 .input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+  border-color: transparent;
 }
 
 .hint {
@@ -60,23 +61,37 @@
 .modeSwitch {
   display: flex;
   gap: var(--space-1);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: 3px;
 }
 
 .modeTab {
   background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
+  border: none;
+  border-radius: 6px;
   color: var(--text-muted);
   cursor: pointer;
   flex: 1;
   font: inherit;
+  font-weight: 500;
   padding: 6px 10px;
+  transition:
+    background var(--speed-fast) var(--ease),
+    color var(--speed-fast) var(--ease);
 }
 
-.modeTabActive {
-  border-color: var(--accent);
+.modeTab:hover {
   color: var(--text);
+}
+
+.modeTabActive,
+.modeTabActive:hover {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-s);
 }
 
 .fieldRow {

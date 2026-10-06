@@ -1,7 +1,7 @@
-// One open server: header + lifecycle actions + error surface + crash card
-// + a view switch between the console (interactive terminal) and the log
-// viewer (paged, filterable history + live tail). All outcomes arrive as
-// events (ADR-0005); buttons only dispatch and wait, they never guess the
+// One open server: header (identity + lifecycle actions) + error surface
+// + crash card + an icon tab row over the workspace surfaces (console,
+// logs, files, players, backups). All outcomes arrive as events
+// (ADR-0005); buttons only dispatch and wait, they never guess the
 // resulting state.
 
 import { useEffect, useState } from "react";
@@ -12,7 +12,14 @@ import type { ServerState } from "../protocol/types";
 import { useServers } from "../state/servers";
 import { useUi } from "../state/ui";
 import { Button } from "../ui/Button";
-import { StatusDot } from "../ui/StatusDot";
+import { StatusChip } from "../ui/StatusChip";
+import {
+  IconBackups,
+  IconFolder,
+  IconLogs,
+  IconPlayers,
+  IconTerminal,
+} from "../ui/icons";
 import { Console } from "./Console";
 import { CrashCard } from "./CrashCard";
 import { FilesView } from "./FilesView";
@@ -39,6 +46,16 @@ export function availableVerbs(state: ServerState): LifecycleVerb[] {
   }
 }
 
+const LOWER_VIEWS = [
+  { id: "console", label: "Console", icon: IconTerminal },
+  { id: "logs", label: "Logs", icon: IconLogs },
+  { id: "files", label: "Files", icon: IconFolder },
+  { id: "players", label: "Players", icon: IconPlayers },
+  { id: "backups", label: "Backups", icon: IconBackups },
+] as const;
+
+type LowerView = (typeof LOWER_VIEWS)[number]["id"];
+
 export function ServerView({ serverId }: { serverId: string }) {
   const server = useServers((s) => s.servers[serverId]);
   const upsert = useServers((s) => s.upsert);
@@ -48,9 +65,7 @@ export function ServerView({ serverId }: { serverId: string }) {
   const setActionError = useUi((s) => s.setActionError);
   // Which lower surface the tab shows: the interactive console, the paged
   // log viewer, or the file browser. Panel-local, not persisted.
-  const [lowerView, setLowerView] = useState<
-    "console" | "logs" | "files" | "players" | "backups"
-  >("console");
+  const [lowerView, setLowerView] = useState<LowerView>("console");
 
   // Details (software/version/port) arrive via server.get; refresh when the
   // server boots, since software identity is only knowable then.
@@ -97,33 +112,37 @@ export function ServerView({ serverId }: { serverId: string }) {
   return (
     <div className={styles.view}>
       <header className={styles.header}>
-        <StatusDot state={server.state} />
-        <h1 className={styles.name}>{server.displayName}</h1>
-        <div className={styles.meta}>
-          <span className={styles.codeChip}>{serverId}</span>
-          {server.software ? <span className={styles.metaChip}>{server.software}</span> : null}
-          {server.version ? <span className={styles.metaChip}>v{server.version}</span> : null}
-          {server.port ? <span className={styles.metaChip}>:{server.port}</span> : null}
+        <div className={styles.headInfo}>
+          <div className={styles.titleRow}>
+            <h1 className={styles.name}>{server.displayName}</h1>
+            <StatusChip state={server.state} />
+          </div>
+          <div className={styles.meta}>
+            <span className={styles.codeChip}>{serverId}</span>
+            {server.software ? <span className={styles.metaChip}>{server.software}</span> : null}
+            {server.version ? <span className={styles.metaChip}>v{server.version}</span> : null}
+            {server.port ? <span className={styles.metaChip}>:{server.port}</span> : null}
+          </div>
+        </div>
+
+        <div className={styles.actions} role="toolbar" aria-label="Server actions">
+          {LIFECYCLE_VERBS.map((verb) => {
+            const allowed = verbs.includes(verb);
+            return (
+              <Button
+                key={verb}
+                variant={verb === "start" ? "primary" : verb === "kill" ? "danger" : "default"}
+                disabled={!allowed}
+                busy={pendingVerb === verb}
+                onClick={() => dispatch(verb)}
+                title={allowed ? undefined : `${verb} is not available while ${server.state}`}
+              >
+                {verb.charAt(0).toUpperCase() + verb.slice(1)}
+              </Button>
+            );
+          })}
         </div>
       </header>
-
-      <div className={styles.actions} role="toolbar" aria-label="Server actions">
-        {LIFECYCLE_VERBS.map((verb) => {
-          const allowed = verbs.includes(verb);
-          return (
-            <Button
-              key={verb}
-              variant={verb === "start" ? "primary" : verb === "kill" ? "danger" : "default"}
-              disabled={!allowed}
-              busy={pendingVerb === verb}
-              onClick={() => dispatch(verb)}
-              title={allowed ? undefined : `${verb} is not available while ${server.state}`}
-            >
-              {verb.charAt(0).toUpperCase() + verb.slice(1)}
-            </Button>
-          );
-        })}
-      </div>
 
       {actionError ? (
         <div className={styles.alert} role="alert">
@@ -180,59 +199,35 @@ export function ServerView({ serverId }: { serverId: string }) {
         serverId={serverId}
         onRecover={() => setLowerView("backups")}
       />
+
       <div className={styles.viewSwitch} role="tablist" aria-label="Output view">
-        <button
-          role="tab"
-          aria-selected={lowerView === "console"}
-          className={`${styles.viewTab} ${lowerView === "console" ? styles.viewTabActive : ""}`}
-          onClick={() => setLowerView("console")}
-        >
-          Console
-        </button>
-        <button
-          role="tab"
-          aria-selected={lowerView === "logs"}
-          className={`${styles.viewTab} ${lowerView === "logs" ? styles.viewTabActive : ""}`}
-          onClick={() => setLowerView("logs")}
-        >
-          Logs
-        </button>
-        <button
-          role="tab"
-          aria-selected={lowerView === "files"}
-          className={`${styles.viewTab} ${lowerView === "files" ? styles.viewTabActive : ""}`}
-          onClick={() => setLowerView("files")}
-        >
-          Files
-        </button>
-        <button
-          role="tab"
-          aria-selected={lowerView === "players"}
-          className={`${styles.viewTab} ${lowerView === "players" ? styles.viewTabActive : ""}`}
-          onClick={() => setLowerView("players")}
-        >
-          Players
-        </button>
-        <button
-          role="tab"
-          aria-selected={lowerView === "backups"}
-          className={`${styles.viewTab} ${lowerView === "backups" ? styles.viewTabActive : ""}`}
-          onClick={() => setLowerView("backups")}
-        >
-          Backups
-        </button>
+        {LOWER_VIEWS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={lowerView === id}
+            className={`${styles.viewTab} ${lowerView === id ? styles.viewTabActive : ""}`}
+            onClick={() => setLowerView(id)}
+          >
+            <Icon size={15} />
+            {label}
+          </button>
+        ))}
       </div>
-      {lowerView === "console" ? (
-        <Console serverId={serverId} running={server.state === "running"} />
-      ) : lowerView === "logs" ? (
-        <LogViewer serverId={serverId} />
-      ) : lowerView === "files" ? (
-        <FilesView serverId={serverId} />
-      ) : lowerView === "players" ? (
-        <PlayersView serverId={serverId} />
-      ) : (
-        <BackupsView serverId={serverId} running={server.state === "running"} />
-      )}
+
+      <div className={styles.panel}>
+        {lowerView === "console" ? (
+          <Console serverId={serverId} running={server.state === "running"} />
+        ) : lowerView === "logs" ? (
+          <LogViewer serverId={serverId} />
+        ) : lowerView === "files" ? (
+          <FilesView serverId={serverId} />
+        ) : lowerView === "players" ? (
+          <PlayersView serverId={serverId} />
+        ) : (
+          <BackupsView serverId={serverId} running={server.state === "running"} />
+        )}
+      </div>
     </div>
   );
 }

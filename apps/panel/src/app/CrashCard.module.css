@@ -2,12 +2,15 @@
 
 .card {
   border: 1px solid color-mix(in srgb, var(--danger) 50%, var(--border));
-  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--danger) 12%, transparent), transparent 90px),
+    var(--surface-2);
   border-radius: var(--radius-m);
-  padding: var(--space-4);
+  box-shadow: var(--shadow-s);
+  padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .head {
@@ -31,10 +34,12 @@
   cursor: pointer;
   font-size: var(--text-l);
   padding: 0 var(--space-1);
+  border-radius: var(--radius-s);
 }
 
 .dismiss:hover {
   color: var(--text);
+  background: var(--surface-3);
 }
 
 .facts {
@@ -46,10 +51,10 @@
 .chip {
   font-family: var(--font-mono);
   font-size: var(--text-s);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-s);
-  padding: 1px 8px;
+  padding: 2px 9px;
   color: var(--text-muted);
 }
 

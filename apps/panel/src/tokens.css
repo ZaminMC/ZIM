@@ -1,50 +1,64 @@
 /* Design tokens (STYLE-GUIDE: one tokens file, CSS custom properties).
-   Dark-first: this is a long-session operator tool. */
+   Dark-first: this is a long-session operator tool. The 2026-10 refresh
+   moves the panel from "flat dev tool" to "control center": deeper layered
+   surfaces, tinted washes, real elevation, and a calmer accent. */
 
 :root {
-  /* surfaces */
-  --bg: #0e1116;
-  --surface: #151a21;
-  --surface-2: #1b222c;
-  --surface-3: #222a36;
-  --border: #2a3340;
-  --border-strong: #3a4553;
+  /* surfaces — layered, each step clearly above the last */
+  --bg: #090c11;
+  --surface: #0f141b;
+  --surface-2: #151c25;
+  --surface-3: #1c2430;
+  --surface-4: #232d3b;
+  --border: #212a36;
+  --border-strong: #334052;
 
   /* text */
-  --text: #e7ecf3;
-  --text-muted: #97a3b4;
-  --text-faint: #67737f;
+  --text: #e9eef6;
+  --text-muted: #9aa7b9;
+  --text-faint: #667384;
 
   /* brand + semantics */
-  --accent: #6ca7f2;
-  --accent-strong: #8ab8f5;
-  --accent-contrast: #0b1524;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --danger-strong: #ef8a8a;
+  --accent: #5c9df4;
+  --accent-strong: #85b7f8;
+  --accent-soft: rgba(92, 157, 244, 0.13);
+  --accent-border: rgba(92, 157, 244, 0.35);
+  --accent-contrast: #071120;
+  --success: #46d483;
+  --success-soft: rgba(70, 212, 131, 0.12);
+  --warning: #f5b93d;
+  --warning-soft: rgba(245, 185, 61, 0.12);
+  --danger: #f47174;
+  --danger-strong: #f79194;
+  --danger-soft: rgba(244, 113, 116, 0.1);
 
   /* state colors (ADR-0005 lifecycle) */
-  --state-running: #4ade80;
-  --state-starting: #fbbf24;
-  --state-stopping: #fbbf24;
-  --state-stopped: #97a3b4;
-  --state-not-running: #67737f;
-  --state-failed-preflight: #f87171;
-  --state-crashed: #f87171;
+  --state-running: #46d483;
+  --state-starting: #f5b93d;
+  --state-stopping: #f5b93d;
+  --state-stopped: #9aa7b9;
+  --state-not-running: #667384;
+  --state-failed-preflight: #f47174;
+  --state-crashed: #f47174;
   --state-adopting: #c084fc;
-  --state-unknown: #67737f;
+  --state-unknown: #667384;
 
   /* geometry */
-  --radius-s: 6px;
-  --radius-m: 10px;
-  --radius-l: 14px;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;
+
+  /* elevation */
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-m: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.5);
 
   /* type */
   --font-ui:
@@ -52,10 +66,12 @@
   --font-mono:
     "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Menlo, Consolas,
     monospace;
+  --text-xs: 11px;
   --text-s: 12px;
   --text-m: 13px;
   --text-l: 15px;
-  --text-xl: 18px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
 
   /* motion */
   --speed-fast: 120ms;
@@ -63,7 +79,7 @@
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
 
   /* terminal (xterm surface) */
-  --term-bg: #10141a;
+  --term-bg: #0b0f15;
 }
 
 @media (prefers-reduced-motion: reduce) {

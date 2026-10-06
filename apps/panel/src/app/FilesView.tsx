@@ -254,7 +254,8 @@ export function FilesView({ serverId }: { serverId: string }) {
             </Button>
           </div>
 
-          <table className={styles.table}>
+          <div className={styles.tableCard}>
+            <table className={styles.table}>
             <thead>
               <tr>
                 <th scope="col">Name</th>
@@ -332,7 +333,8 @@ export function FilesView({ serverId }: { serverId: string }) {
                 </tr>
               ) : null}
             </tbody>
-          </table>
+            </table>
+          </div>
           {listing && listing.total > listing.entries.length ? (
             <p className={styles.moreNote}>
               {listing.total - listing.entries.length} more entries — open subdirectories to
