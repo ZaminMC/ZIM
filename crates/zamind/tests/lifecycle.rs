@@ -44,6 +44,15 @@ async fn startup_crash_is_reported_with_classification() {
         .expect("server reaches crashed");
     assert_eq!(crashed["crash"]["phase"], "startup");
     assert_eq!(crashed["crash"]["exitCode"], 3);
+    // The crash card's evidence excerpt: the last ingested log lines before
+    // the process died (the fake server's FATAL line).
+    let evidence = crashed["crash"]["evidence"]
+        .as_str()
+        .expect("crash carries an evidence excerpt");
+    assert!(
+        evidence.contains("Failed to start the minecraft server"),
+        "evidence should contain the FATAL line, got: {evidence}"
+    );
 
     let entry = wait_list_state(&mut client, "test", "crashed", Duration::from_secs(5)).await;
     assert_eq!(entry["state"], "crashed");

@@ -23,6 +23,9 @@ use crate::hub::HubHandle;
 const TICK: Duration = Duration::from_millis(250);
 const GRACEFUL_GRACE: Duration = Duration::from_secs(10);
 
+/// Log lines attached to a crash classification as evidence (§53 crash card).
+const CRASH_EVIDENCE_LINES: usize = 3;
+
 /// Disk-headroom sanity floor for a start attempt: 1 GiB. A "sanity"
 /// check, not a sizing tool — a fresh server needs this much for the jar,
 /// libraries, and first world files; more is always better.
@@ -814,8 +817,26 @@ impl Actor {
         };
 
         match self.machine.apply(command.clone()) {
-            Ok(zamin_core::supervisor::Transition::CrashReported(report)) => {
+            Ok(zamin_core::supervisor::Transition::CrashReported(mut report)) => {
                 tracing::warn!(server = %self.server_id, exit_code, "server crashed");
+                // The crash card is the operator's first screen (§53): attach
+                // the last ingested log lines as evidence. The reader task
+                // usually has the dying process's final lines by the time
+                // waitpid returns; if the race bites, the excerpt shows the
+                // preceding activity, which is still context worth showing.
+                if report.evidence.is_none() {
+                    let tail = self.hub.log_ring(&self.server_id);
+                    let excerpt: Vec<String> = tail
+                        .iter()
+                        .rev()
+                        .take(CRASH_EVIDENCE_LINES)
+                        .rev()
+                        .map(|line| line.line.clone())
+                        .collect();
+                    if !excerpt.is_empty() {
+                        report.evidence = Some(excerpt.join("\n"));
+                    }
+                }
                 self.publish_crash(report);
             }
             Ok(_) => {
