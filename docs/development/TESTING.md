@@ -29,6 +29,8 @@
 
 Lifecycle tests spawn it through the real supervisor and real IPC. No test may sleep-and-hope: state changes are awaited via events.
 
+Like the real thing, the mimic owns `logs/latest.log` in its working directory (the server root): the file is created fresh at boot — Paper rotates the previous session away — and every emitted line lands in stdout and the file, flushed per line. "The log files hold the full history" (ADR-0006) therefore holds for mimicked servers exactly as it does for real ones; tests that need a crafted history write the file before starting anything.
+
 ## Lifecycle matrix (required coverage)
 
 start · stop · restart · crash during startup · crash while running · stop timeout → ladder escalation · hang on stop · duplicate start · start during stopping · adoption after daemon restart · foreign PID in registry (never adopt, never kill) · kill tree (child of child) · each preflight failure · port conflict · daemon restart while running · client disconnect/reconnect with cursor replay.

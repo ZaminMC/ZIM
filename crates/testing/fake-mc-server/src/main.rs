@@ -2,11 +2,17 @@
 //! supervisor and daemon tests so the lifecycle matrix runs without Java
 //! (TESTING.md). Modes are composable flags; the process prints
 //! Paper-shaped stdout, consumes stdin commands, and exits on cue.
+//!
+//! Like the real thing, it owns `logs/latest.log` in its working directory
+//! (the server root): the file is created fresh at boot — Paper rotates the
+//! previous session away — and every emitted line lands in both stdout and
+//! the file, so "the log files hold the full history" (ADR-0006) holds for
+//! mimicked servers exactly as it does for real ones.
 
 use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -96,6 +102,27 @@ fn emit(line: &str) {
     let mut stdout = std::io::stdout().lock();
     let _ = writeln!(stdout, "{line}");
     let _ = stdout.flush();
+    if let Some(file) = session_log() {
+        if let Ok(mut handle) = file.lock() {
+            let _ = writeln!(handle, "{line}");
+            // Paper's appender flushes per line; the mimic does too, so
+            // file-backed reads see a live session's lines immediately.
+            let _ = handle.flush();
+        }
+    }
+}
+
+/// The session's `logs/latest.log`, created fresh on first emit (boot).
+/// Unwritable roots (no directory, read-only) degrade to stdout-only.
+fn session_log() -> Option<&'static Mutex<std::fs::File>> {
+    static LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+    LOG.get_or_init(|| {
+        std::fs::create_dir_all("logs").ok()?;
+        std::fs::File::create("logs/latest.log")
+            .ok()
+            .map(Mutex::new)
+    })
+    .as_ref()
 }
 
 /// Paper-family stdout carries a local-time prefix:

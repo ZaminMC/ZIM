@@ -1,8 +1,10 @@
 // One open server: header + lifecycle actions + error surface + crash card
-// + console. All outcomes arrive as events (ADR-0005); buttons only
-// dispatch and wait, they never guess the resulting state.
+// + a view switch between the console (interactive terminal) and the log
+// viewer (paged, filterable history + live tail). All outcomes arrive as
+// events (ADR-0005); buttons only dispatch and wait, they never guess the
+// resulting state.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getServer, killServer, restartServer, startServer, stopServer } from "../state/actions";
 import { describeError, LIFECYCLE_VERBS } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
@@ -13,6 +15,7 @@ import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
 import { Console } from "./Console";
 import { CrashCard } from "./CrashCard";
+import { LogViewer } from "./LogViewer";
 import styles from "./ServerView.module.css";
 
 /** Which verbs make sense from a given state (ADR-0005 ladder). */
@@ -40,6 +43,9 @@ export function ServerView({ serverId }: { serverId: string }) {
   const setPending = useUi((s) => s.setPending);
   const actionError = useUi((s) => s.actionErrors[serverId]);
   const setActionError = useUi((s) => s.setActionError);
+  // Which lower surface the tab shows: the interactive console or the
+  // paged log viewer. Panel-local, deliberately not persisted.
+  const [lowerView, setLowerView] = useState<"console" | "logs">("console");
 
   // Details (software/version/port) arrive via server.get; refresh when the
   // server boots, since software identity is only knowable then.
@@ -138,7 +144,29 @@ export function ServerView({ serverId }: { serverId: string }) {
       ) : null}
 
       <CrashCard serverId={serverId} />
-      <Console serverId={serverId} running={server.state === "running"} />
+      <div className={styles.viewSwitch} role="tablist" aria-label="Output view">
+        <button
+          role="tab"
+          aria-selected={lowerView === "console"}
+          className={`${styles.viewTab} ${lowerView === "console" ? styles.viewTabActive : ""}`}
+          onClick={() => setLowerView("console")}
+        >
+          Console
+        </button>
+        <button
+          role="tab"
+          aria-selected={lowerView === "logs"}
+          className={`${styles.viewTab} ${lowerView === "logs" ? styles.viewTabActive : ""}`}
+          onClick={() => setLowerView("logs")}
+        >
+          Logs
+        </button>
+      </div>
+      {lowerView === "console" ? (
+        <Console serverId={serverId} running={server.state === "running"} />
+      ) : (
+        <LogViewer serverId={serverId} />
+      )}
     </div>
   );
 }

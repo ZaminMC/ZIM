@@ -74,6 +74,11 @@ interface ActiveSubscription {
   lastSeq: number | null;
   /** Set when dispose() ran before the subscribe reply arrived. */
   disposeAfterReply: boolean;
+  /** Explicit first-subscribe cursor (e.g. a logs subscription that must
+   *  start live-only instead of replaying the ring). Also rides every
+   *  resubscribe: `resumeCursorFor` has nothing for logs streams, so the
+   *  initial choice (replay or not) is sticky across reconnects. */
+  initialCursor?: StreamCursor;
 }
 
 interface PendingRequest {
@@ -284,11 +289,16 @@ export class ProtocolClient {
   // --- streams ---
 
   /** Subscribe to a stream. The handler is registered *before* the request
-   *  goes out, so the opening replay batch can never race the reply. */
+   *  goes out, so the opening replay batch can never race the reply.
+   *  `initialCursor` pins the first subscribe's cursor (and every later
+   *  resubscribe's, for streams without a resume cursor): a logs
+   *  subscription that must start live-only passes a logs cursor and the
+   *  daemon skips its ring replay. */
   async subscribe(
     stream: StreamKind,
     serverId: string | undefined,
     handler: StreamHandler,
+    initialCursor?: StreamCursor,
   ): Promise<SubscriptionHandle> {
     const key = Symbol("subscription");
     const sub: ActiveSubscription = {
@@ -298,6 +308,7 @@ export class ProtocolClient {
       subscriptionId: null,
       lastSeq: null,
       disposeAfterReply: false,
+      ...(initialCursor === undefined ? {} : { initialCursor }),
     };
     this.subs.set(key, sub);
 
@@ -320,7 +331,7 @@ export class ProtocolClient {
   }
 
   private async sendSubscribe(sub: ActiveSubscription, allowFallback = true): Promise<void> {
-    const cursor = this.resumeCursorFor(sub);
+    const cursor = this.resumeCursorFor(sub) ?? sub.initialCursor;
     const params: SubscribeParams = {
       stream: sub.stream,
       ...(sub.serverId === undefined ? {} : { serverId: sub.serverId }),

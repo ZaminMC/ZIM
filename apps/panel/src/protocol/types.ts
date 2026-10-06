@@ -172,12 +172,18 @@ export interface SubscribeParams {
 export interface LogRangeParams {
   serverId: string;
   maxLines?: number;
+  /** Byte-offset cursor: return lines ending at or before this offset
+   *  (the previous page's startOffset). Absent — read from the tail. */
+  beforeOffset?: number;
 }
 
 export interface LogRangeResult {
   file: string;
   lines: LogLine[];
   olderAvailable: boolean;
+  /** Byte offset where the first returned line starts — a line boundary.
+   *  Pass it as beforeOffset to page further back; 0 = nothing older. */
+  startOffset: number;
 }
 
 // --- errors (§3) ---

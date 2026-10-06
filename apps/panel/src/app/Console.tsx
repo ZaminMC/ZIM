@@ -8,7 +8,7 @@ import { Terminal } from "@xterm/xterm";
 import type { ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import styles from "./Console.module.css";
-import { sendStdin, subscribeLogs, tailLogs } from "../state/actions";
+import { sendStdin, subscribeLogs, rangeLogs } from "../state/actions";
 import { formatLogLine, formatMarker, LineBuffer } from "./consoleText";
 import type { LogLine } from "../protocol/types";
 import { logWarn } from "../logger";
@@ -138,7 +138,7 @@ export function Console({ serverId, running }: { serverId: string; running: bool
 
       // Empty ring: fall back to the file-backed tail (ADR-0006).
       try {
-        const tail = await tailLogs({ serverId, maxLines: HISTORY_LINES });
+        const tail = await rangeLogs({ serverId, maxLines: HISTORY_LINES });
         if (isDisposed()) return;
         if (tail.olderAvailable) {
           term.writeln(formatMarker("older lines live in the log file"));

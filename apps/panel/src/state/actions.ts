@@ -12,6 +12,7 @@ import type {
   ServerDetails,
   ServerListResult,
   StdinParams,
+  StreamCursor,
   SubscribeResult,
   UpdateServerParams,
 } from "../protocol/types";
@@ -79,21 +80,31 @@ export async function sendStdin(serverId: string, line: string): Promise<void> {
   await client.request("server.stdin", params);
 }
 
-export async function tailLogs(params: LogRangeParams): Promise<LogRangeResult> {
+export async function rangeLogs(params: LogRangeParams): Promise<LogRangeResult> {
   return client.request<LogRangeResult>("logs.range", params);
 }
 
 export async function subscribeLogs(
   serverId: string,
   handler: Parameters<typeof client.subscribe>[2],
+  /** Explicit first-subscribe cursor. A logs cursor starts the
+   *  subscription live-only (no ring replay) — the log viewer pairs it
+   *  with a file-backed range read; the console leaves it absent and
+   *  takes the ring replay as its opening batch. */
+  initialCursor?: StreamCursor,
 ): Promise<{ dispose(): void; result: SubscribeResult | null }> {
   let result: SubscribeResult | null = null;
-  const handle = await client.subscribe("logs", serverId, {
-    onPayload: (notification) => handler.onPayload(notification),
-    onRegistered: (resubscribed) => {
-      result = resubscribed;
-      handler.onRegistered?.(resubscribed);
+  const handle = await client.subscribe(
+    "logs",
+    serverId,
+    {
+      onPayload: (notification) => handler.onPayload(notification),
+      onRegistered: (resubscribed) => {
+        result = resubscribed;
+        handler.onRegistered?.(resubscribed);
+      },
     },
-  });
+    initialCursor,
+  );
   return { dispose: () => handle.dispose(), result };
 }
