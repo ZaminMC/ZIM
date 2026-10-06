@@ -98,8 +98,20 @@ fn emit(line: &str) {
     let _ = stdout.flush();
 }
 
+/// Paper-family stdout carries a local-time prefix:
+/// `[HH:MM:SS] [Thread/LEVEL]: message`. Tests downstream (log parsing,
+/// the log viewer) depend on the shape being faithful.
+fn paper_line(thread_level: &str, message: &str) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() % 86_400;
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    format!("[{h:02}:{m:02}:{s:02}] [{thread_level}]: {message}")
+}
+
 fn info(msg: &str) {
-    emit(&format!("[Server thread/INFO]: {msg}"));
+    emit(&paper_line("Server thread/INFO", msg));
 }
 
 fn main() {
@@ -115,7 +127,10 @@ fn main() {
     info("Starting minecraft server version 1.21.1");
     info("Loading properties");
     if flags.fail_boot {
-        emit("[main/FATAL]: Failed to start the minecraft server");
+        emit(&paper_line(
+            "main/FATAL",
+            "Failed to start the minecraft server",
+        ));
         std::process::exit(flags.exit_code);
     }
     thread::sleep(Duration::from_millis(flags.boot_ms));
@@ -158,7 +173,10 @@ fn main() {
 
     if flags.crash_mid_run {
         thread::sleep(Duration::from_millis(300));
-        emit("[Server thread/ERROR]: Encountered an unexpected exception");
+        emit(&paper_line(
+            "Server thread/ERROR",
+            "Encountered an unexpected exception",
+        ));
         std::process::exit(flags.exit_code);
     }
 
@@ -170,8 +188,9 @@ fn main() {
             if stopping.load(Ordering::SeqCst) {
                 break;
             }
-            emit(&format!(
-                "[Server thread/INFO]: flood line {i} with some padding text 0123456789"
+            emit(&paper_line(
+                "Server thread/INFO",
+                &format!("flood line {i} with some padding text 0123456789"),
             ));
             i += 1;
             thread::sleep(per_line);

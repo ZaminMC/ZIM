@@ -5,6 +5,7 @@ members = [
     "crates/zamin-ipc",
     "crates/zamin-core",
     "crates/zamind",
+    "crates/zamin-cli",
     "crates/testing/fake-mc-server",
 ]
 

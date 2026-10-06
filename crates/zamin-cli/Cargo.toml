@@ -1,0 +1,43 @@
+[package]
+name = "zamin-cli"
+description = "The zamin command line: manage ZaminPanel servers over the Zamin Protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "zamin"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+zamin-protocol = { path = "../zamin-protocol" }
+zamin-ipc = { path = "../zamin-ipc" }
+tokio = { workspace = true, features = ["io-std"] }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+# The CLI is the one place hand-rolled argv parsing would be a bug farm:
+# ~11 subcommands with per-command flags, global flags, and generated
+# help. clap is compile-time (derive) and trimmed to used features.
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "derive",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions",
+] }
+
+[dev-dependencies]
+bytes = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true
