@@ -15,7 +15,7 @@ mod templates;
 
 pub use download::{download_to_dir, DownloadOptions, DownloadOutcome, DownloadProgress};
 pub use fill::FillClient;
-pub use templates::{stamp_template, template, templates, Template};
+pub use templates::{stamp_template, template, templates, Template, DEFAULT_TEMPLATE_ID};
 
 /// Honest request identification: the Fill API asks clients to say who
 /// they are, and it is the right thing to do anyway.

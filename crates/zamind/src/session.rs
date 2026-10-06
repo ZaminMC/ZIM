@@ -480,6 +480,49 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
+        methods::CATALOG_LIST => json_ok(id, engine.catalog_list().await),
+        methods::CATALOG_VERSIONS => {
+            let params: zamin_protocol::software::CatalogVersionsParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match engine.catalog_versions(&params.project).await {
+                Ok(result) => json_ok(id, result),
+                Err(e) => dispatch_error(id, e),
+            }
+        }
+        methods::CATALOG_BUILDS => {
+            let params: zamin_protocol::software::CatalogBuildsParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine
+                .catalog_builds(&params.project, &params.version)
+                .await
+            {
+                Ok(result) => json_ok(id, result),
+                Err(e) => dispatch_error(id, e),
+            }
+        }
+        methods::SERVER_CREATE => {
+            let params: zamin_protocol::software::ServerCreateParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.create_server(params).await {
+                Ok(job) => json_ok(
+                    id,
+                    zamin_protocol::software::ServerCreateResult {
+                        kind: JobKind::ServerCreate,
+                        job,
+                    },
+                ),
+                Err(e) => dispatch_error(id, e),
+            }
+        }
         methods::LOGS_RANGE => {
             let params: zamin_protocol::logs::LogRangeParams = match request.parse_params() {
                 Ok(params) => params,

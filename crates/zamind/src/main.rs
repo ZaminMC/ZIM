@@ -21,12 +21,20 @@ const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 struct DaemonConfig {
     endpoint: zamin_ipc::Endpoint,
     data_dir: PathBuf,
+    /// Software catalog base URL (PaperMC Fill API v3). Overridable for
+    /// mirrors and tests; the New Server flow is the consumer.
+    catalog_url: String,
 }
+
+/// The live PaperMC Fill API. (The legacy api.papermc.io/v2 is retired
+/// upstream; v3 is the supported shape.)
+const DEFAULT_CATALOG_URL: &str = "https://fill.papermc.io/v3";
 
 fn parse_args() -> DaemonConfig {
     let mut config = DaemonConfig {
         endpoint: zamin_ipc::Endpoint::default_endpoint(),
         data_dir: zamin_core::platform::paths::data_dir(),
+        catalog_url: DEFAULT_CATALOG_URL.to_owned(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -42,6 +50,12 @@ fn parse_args() -> DaemonConfig {
                     .next()
                     .unwrap_or_else(|| panic!("--data-dir needs a value"));
                 config.data_dir = PathBuf::from(value);
+            }
+            "--catalog-url" => {
+                let value = args
+                    .next()
+                    .unwrap_or_else(|| panic!("--catalog-url needs a value"));
+                config.catalog_url = value.trim_end_matches('/').to_owned();
             }
             "--version" => {
                 println!("{DAEMON_NAME} {DAEMON_VERSION}");
@@ -81,7 +95,8 @@ fn main() {
 }
 
 async fn run(config: DaemonConfig) {
-    let engine = engine::Engine::new(config.data_dir.clone()).await;
+    let engine =
+        crate::engine::Engine::with_catalog_url(config.data_dir.clone(), config.catalog_url).await;
 
     let mut server = match IpcServer::bind(config.endpoint.clone()).await {
         Ok(server) => server,

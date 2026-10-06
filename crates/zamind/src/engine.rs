@@ -29,6 +29,9 @@ struct Inner {
     hub: HubHandle,
     actors: tokio::sync::Mutex<HashMap<String, mpsc::Sender<ActorCommand>>>,
     jobs: JobRunner,
+    /// The software catalog's base URL (Fill API v3); overridable so
+    /// tests and air-gapped installs can point at a mirror.
+    catalog_url: String,
 }
 
 /// After `save-all`, a server needs a moment to actually finish writing
@@ -52,7 +55,7 @@ fn server_dir(data_dir: &Path, id: &str) -> PathBuf {
 }
 
 impl Engine {
-    pub async fn new(data_dir: PathBuf) -> Engine {
+    pub async fn with_catalog_url(data_dir: PathBuf, catalog_url: String) -> Engine {
         let _ = std::fs::create_dir_all(data_dir.join("servers"));
         let registry = Registry::load(data_dir.join("registry.json")).unwrap_or_else(|e| {
             tracing::error!("registry is unreadable: {e}; refusing to start over it");
@@ -67,6 +70,7 @@ impl Engine {
                 hub,
                 actors: tokio::sync::Mutex::new(HashMap::new()),
                 jobs,
+                catalog_url,
             }),
         }
     }
@@ -866,7 +870,345 @@ impl Engine {
         ))
     }
 
-    // --- registry events ---------------------------------------------
+    // --- software catalog & creation (protocol spec §7b) ---------------
+
+    /// Created servers' files live under `<data>/instances/<id>` — never
+    /// under `<data>/servers/<id>`, which is the daemon's runtime state
+    /// (runtime records, per-server config) and must not be visible as a
+    /// server root.
+    fn instances_dir(&self) -> PathBuf {
+        self.inner.data_dir.join("instances")
+    }
+
+    fn fill_client(&self) -> zamin_core::software::FillClient {
+        zamin_core::software::FillClient::new(&self.inner.catalog_url)
+    }
+
+    pub async fn catalog_list(&self) -> zamin_protocol::software::CatalogListResult {
+        use zamin_protocol::software::{CatalogEntry, CatalogListResult};
+        CatalogListResult {
+            entries: zamin_core::software::CATALOG
+                .iter()
+                .map(|e| CatalogEntry {
+                    id: e.id.to_owned(),
+                    name: e.name.to_owned(),
+                    description: e.description.to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    pub async fn catalog_versions(
+        &self,
+        project: &str,
+    ) -> Result<zamin_protocol::software::CatalogVersionsResult, EngineError> {
+        use zamin_protocol::software::{CatalogVersion, CatalogVersionsResult};
+        let entry = zamin_core::software::entry(project).ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::CatalogNotFound,
+                format!("The software catalog has no entry {project:?}."),
+            )
+        })?;
+        let client = self.fill_client();
+        let versions = tokio::task::spawn_blocking(move || client.versions(entry.project))
+            .await
+            .map_err(|e| internal(&format!("catalog task failed: {e}")))?
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        Ok(CatalogVersionsResult {
+            project: project.to_owned(),
+            versions: versions
+                .into_iter()
+                .map(|v| CatalogVersion {
+                    id: v.id,
+                    java_major: v.java_major,
+                })
+                .collect(),
+        })
+    }
+
+    pub async fn catalog_builds(
+        &self,
+        project: &str,
+        version: &str,
+    ) -> Result<zamin_protocol::software::CatalogBuildsResult, EngineError> {
+        use zamin_protocol::software::{CatalogBuild, CatalogBuildsResult};
+        let entry = zamin_core::software::entry(project).ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::CatalogNotFound,
+                format!("The software catalog has no entry {project:?}."),
+            )
+        })?;
+        let client = self.fill_client();
+        let project_static = entry.project;
+        let version_owned = version.to_owned();
+        let (builds, java_major) = tokio::task::spawn_blocking(move || {
+            let builds = client.builds(project_static, &version_owned)?;
+            // The version's Java requirement rides along (one extra
+            // metadata call); if it cannot be fetched, the local table
+            // decides and the daemon still derives it at creation.
+            let java_major = client
+                .version_java_major(project_static, &version_owned)
+                .ok()
+                .flatten()
+                .or_else(|| zamin_core::java::required_major(&version_owned));
+            Ok::<_, zamin_core::error::CoreError>((builds, java_major))
+        })
+        .await
+        .map_err(|e| internal(&format!("catalog task failed: {e}")))?
+        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        Ok(CatalogBuildsResult {
+            project: project.to_owned(),
+            version: version.to_owned(),
+            java_major,
+            builds: builds
+                .into_iter()
+                .map(|b| CatalogBuild {
+                    id: b.id,
+                    channel: b.channel,
+                    time: b.time,
+                    download: zamin_protocol::software::CatalogDownload {
+                        name: b.download.name,
+                        sha256: b.download.sha256,
+                        size: b.download.size,
+                        url: b.download.url,
+                    },
+                })
+                .collect(),
+        })
+    }
+
+    /// `server.create`: resolve the requested build, then run the creation
+    /// as a job — stamp the template, download and verify the jar, write
+    /// the per-server configuration, register. Every failure before
+    /// registration cleans the instance directory away: a failed creation
+    /// leaves nothing behind.
+    pub async fn create_server(
+        &self,
+        params: zamin_protocol::software::ServerCreateParams,
+    ) -> Result<zamin_protocol::jobs::Job, EngineError> {
+        use zamin_core::software::{template, DEFAULT_TEMPLATE_ID};
+
+        let server_id = ServerId::parse(&params.server_id)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let display_name = params
+            .display_name
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| server_id.to_string());
+        let template_id = params
+            .template_id
+            .clone()
+            .unwrap_or_else(|| DEFAULT_TEMPLATE_ID.to_owned());
+
+        // Fast, synchronous rejections before any job exists: an unknown
+        // project or template is a bad request; an occupied id is an id
+        // conflict — the caller learns in the same request, not from a
+        // job event later.
+        let entry = zamin_core::software::entry(&params.project).ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::CatalogNotFound,
+                format!(
+                    "The software catalog has no entry {:?}; ask for catalog.list.",
+                    params.project
+                ),
+            )
+        })?;
+        if template(&template_id).is_none() {
+            return Err(ProtocolError::new(
+                ErrorCode::ProtocolInvalidRequest,
+                format!("Unknown creation template {template_id:?}."),
+            )
+            .into());
+        }
+        if self.registry_lock().get(&server_id).is_some() {
+            return Err(ProtocolError::new(
+                ErrorCode::ServerIdExists,
+                format!("Server id {server_id} is already registered."),
+            )
+            .into());
+        }
+        let instance_root = self.instances_dir().join(server_id.as_str());
+        if instance_root.exists() {
+            return Err(ProtocolError::new(
+                ErrorCode::ServerIdExists,
+                format!(
+                    "A directory for server {server_id} already exists at {instance_root:?} but it is not registered; remove it or register it instead."
+                ),
+            )
+            .into());
+        }
+
+        // Resolve the build (and the version's Java requirement) up
+        // front: an unknown version/build or an unreachable catalog is a
+        // typed rejection now, not a job that fails 200 ms in.
+        let client = self.fill_client();
+        let project = entry.project;
+        let version = params.version.clone();
+        let wanted_build = params.build;
+        let (build, java_major) = tokio::task::spawn_blocking(move || {
+            let builds = client.builds(project, &version)?;
+            let build =
+                match wanted_build {
+                    Some(id) => builds.into_iter().find(|b| b.id == id).ok_or_else(|| {
+                        zamin_core::error::CoreError::Http {
+                            url: format!("catalog: {project} {version} build {id}"),
+                            status: 404,
+                            reason: "build not found".to_owned(),
+                        }
+                    })?,
+                    None => builds.into_iter().next().ok_or_else(|| {
+                        zamin_core::error::CoreError::Http {
+                            url: format!("catalog: {project} {version}"),
+                            status: 404,
+                            reason: "no builds published".to_owned(),
+                        }
+                    })?,
+                };
+            let java_major = client
+                .version_java_major(project, &version)
+                .ok()
+                .flatten()
+                .or_else(|| zamin_core::java::required_major(&version));
+            Ok::<_, zamin_core::error::CoreError>((build, java_major))
+        })
+        .await
+        .map_err(|e| internal(&format!("build resolution task failed: {e}")))?
+        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+
+        let engine = self.clone();
+        let sid = server_id.clone();
+        let root = instance_root.clone();
+        let data_dir = self.inner.data_dir.clone();
+        Ok(self.inner.jobs.spawn(
+            zamin_protocol::jobs::JobKind::ServerCreate,
+            Some(server_id.to_string()),
+            move |ctl| async move {
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+                ctl.progress(0, None, None, Some("preparing the server directory"));
+                std::fs::create_dir_all(&root).map_err(|source| {
+                    JobFailure::Error(to_protocol(&zamin_core::error::CoreError::Io {
+                        path: root.clone(),
+                        source,
+                    }))
+                })?;
+
+                // Stamp the template (never overwrites; the directory is
+                // fresh by the pre-checks above).
+                if ctl.cancelled() {
+                    let _ = std::fs::remove_dir_all(&root);
+                    return Err(JobFailure::Cancelled);
+                }
+                ctl.progress(0, None, None, Some("writing server files"));
+                if let Err(e) = zamin_core::software::stamp_template(&root, &template_id) {
+                    let _ = std::fs::remove_dir_all(&root);
+                    return Err(JobFailure::Error(to_protocol(&e)));
+                }
+                if let Some(port) = params.port {
+                    patch_stamped_port(&root, port);
+                }
+
+                // Download + verify. Cancelled downloads and checksum
+                // mismatches leave nothing behind (the downloader owns
+                // that guarantee); the instance dir goes too — creation
+                // is all-or-nothing.
+                let progress_ctl = ctl.clone();
+                let cancel_flag = ctl.cancel_flag();
+                let name = build.download.name.clone();
+                let sha = build.download.sha256.clone();
+                let url = build.download.url.clone();
+                let size = build.download.size;
+                let download_root = root.clone();
+                ctl.progress(0, size, Some("bytes"), Some(&format!("downloading {name}")));
+                let options = zamin_core::software::DownloadOptions {
+                    cancel: cancel_flag,
+                    progress: Some(Arc::new(
+                        move |p: zamin_core::software::DownloadProgress| {
+                            progress_ctl.progress(p.bytes_done, p.total, Some("bytes"), None);
+                        },
+                    )),
+                };
+                let outcome = tokio::task::spawn_blocking(move || {
+                    zamin_core::software::download_to_dir(
+                        &url,
+                        &download_root,
+                        "server.jar",
+                        Some(&sha),
+                        &options,
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    let _ = std::fs::remove_dir_all(&root);
+                    JobFailure::Error(ProtocolError::new(
+                        ErrorCode::InternalError,
+                        format!("download task failed: {e}"),
+                    ))
+                })?;
+                match outcome {
+                    Ok(outcome) => ctl.progress(
+                        outcome.size,
+                        Some(outcome.size.max(1)),
+                        Some("bytes"),
+                        Some(&format!(
+                            "verified {name} (sha256 {}…)",
+                            &outcome.sha256[..8]
+                        )),
+                    ),
+                    Err(zamin_core::error::CoreError::Cancelled) => {
+                        let _ = std::fs::remove_dir_all(&root);
+                        return Err(JobFailure::Cancelled);
+                    }
+                    Err(e) => {
+                        let _ = std::fs::remove_dir_all(&root);
+                        return Err(JobFailure::Error(to_protocol(&e)));
+                    }
+                }
+
+                // Per-server configuration: jar path, the version this
+                // server runs, the Java requirement derived from the
+                // catalog, and the desired port.
+                if ctl.cancelled() {
+                    let _ = std::fs::remove_dir_all(&root);
+                    return Err(JobFailure::Cancelled);
+                }
+                ctl.progress(0, None, None, Some("writing the server configuration"));
+                let config_path = data_dir
+                    .join("servers")
+                    .join(sid.as_str())
+                    .join("config.toml");
+                let config = zamin_core::config::ServerConfigFile {
+                    schema_version: zamin_core::config::CONFIG_SCHEMA_VERSION,
+                    display_name: Some(display_name.clone()),
+                    jar: Some("server.jar".to_owned()),
+                    settings: zamin_core::config::ServerSettingsDefaults {
+                        mc_version: Some(params.version.clone()),
+                        java_major_required: java_major,
+                        port: params.port,
+                        ..Default::default()
+                    },
+                };
+                if let Err(e) = zamin_core::config::save_server(&config_path, &config) {
+                    let _ = std::fs::remove_dir_all(&root);
+                    return Err(JobFailure::Error(to_protocol(&e)));
+                }
+
+                // Registration is the last step and the point of no
+                // return: from here the server exists (marker, registry,
+                // `registered` event), so failures no longer clean up.
+                if ctl.cancelled() {
+                    let _ = std::fs::remove_dir_all(&root);
+                    return Err(JobFailure::Cancelled);
+                }
+                ctl.progress(0, None, None, Some("registering the server"));
+                engine
+                    .register_server(sid, display_name, root)
+                    .await
+                    .map_err(job_failure)?;
+                Ok(())
+            },
+        ))
+    }
 
     /// Broadcast a registry-driven transition (registration, removal).
     /// These are state changes from the registry's point of view, not the
@@ -926,6 +1268,34 @@ pub fn to_protocol(error: &zamin_core::error::CoreError) -> ProtocolError {
     // The actor owns the canonical mapping; sessions reuse it so the two
     // never diverge.
     crate::actor::to_protocol_error(error)
+}
+
+/// Point the stamped `server.properties` at the requested port. The file
+/// was written seconds ago by the template stamp; a missing line means a
+/// template drift and is left alone (the layered setting stays the
+/// authoritative desired value).
+fn patch_stamped_port(root: &Path, port: u16) {
+    let path = root.join("server.properties");
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        let patched = {
+            let mut found = false;
+            let mut out = String::new();
+            for line in content.lines() {
+                if line.trim_start().starts_with("server-port=") {
+                    out.push_str(&format!("server-port={port}\n"));
+                    found = true;
+                } else {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            if !found {
+                out.push_str(&format!("server-port={port}\n"));
+            }
+            out
+        };
+        let _ = zamin_core::fsops::atomic_write(&path, patched.as_bytes());
+    }
 }
 
 /// Sync ranged read of `logs/latest.log` under the server root, through

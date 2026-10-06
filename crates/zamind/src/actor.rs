@@ -1163,6 +1163,42 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             ErrorCode::InternalError,
             "The operation was cancelled before it finished.",
         ),
+        E::Http { url, status, reason } => {
+            // 404 from a catalog endpoint means "that thing does not
+            // exist"; every other HTTP failure (and transport failure
+            // below) means the catalog itself is unreachable.
+            if *status == 404 {
+                ProtocolError::new(
+                    ErrorCode::CatalogNotFound,
+                    format!("The catalog has nothing at {url} (HTTP 404: {reason})."),
+                )
+            } else {
+                ProtocolError::new(
+                    ErrorCode::CatalogUnavailable,
+                    format!("The software catalog answered HTTP {status} for {url}: {reason}."),
+                )
+                .with_remediation(&["retry_later"])
+            }
+        }
+        E::HttpTransport { url, message } => ProtocolError::new(
+            ErrorCode::CatalogUnavailable,
+            format!("The software catalog is unreachable ({url}): {message}."),
+        )
+        .with_remediation(&["check_connection", "retry_later"]),
+        E::ChecksumMismatch {
+            path,
+            expected,
+            actual,
+        } => ProtocolError::new(
+            ErrorCode::ChecksumMismatch,
+            format!(
+                "The downloaded file at {path:?} does not match its published checksum \
+                 (expected sha256 {expected}, computed {actual}); the download was discarded."
+            ),
+        )
+        .with_context("expected", expected.clone())
+        .with_context("actual", actual.clone())
+        .with_remediation(&["retry_download"]),
         E::RestoreRolledBack { reason } => ProtocolError::new(
             ErrorCode::InternalError,
             format!("Restore failed mid-commit ({reason}); the previous files were rolled back."),

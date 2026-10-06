@@ -6,6 +6,7 @@ pub const DAEMON_STATUS: &str = "daemon.status";
 pub const SERVER_LIST: &str = "server.list";
 pub const SERVER_GET: &str = "server.get";
 pub const SERVER_REGISTER: &str = "server.register";
+pub const SERVER_CREATE: &str = "server.create";
 pub const SERVER_UPDATE: &str = "server.update";
 pub const SERVER_REMOVE: &str = "server.remove";
 pub const SERVER_START: &str = "server.start";
@@ -21,6 +22,12 @@ pub const JOBS_CANCEL: &str = "jobs.cancel";
 pub const BACKUP_CREATE: &str = "backup.create";
 pub const BACKUP_RESTORE: &str = "backup.restore";
 pub const BACKUPS_LIST: &str = "backups.list";
+
+// Specified in v0 as catalog.*; implemented with the software catalog
+// (protocol spec §7b).
+pub const CATALOG_LIST: &str = "catalog.list";
+pub const CATALOG_VERSIONS: &str = "catalog.versions";
+pub const CATALOG_BUILDS: &str = "catalog.builds";
 
 pub const STREAMS_SUBSCRIBE: &str = "streams.subscribe";
 pub const STREAMS_UNSUBSCRIBE: &str = "streams.unsubscribe";

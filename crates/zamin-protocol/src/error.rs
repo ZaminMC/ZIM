@@ -36,6 +36,9 @@ pub enum ErrorCode {
     DiskFull,
     JobNotFound,
     JobNotCancellable,
+    CatalogUnavailable,
+    CatalogNotFound,
+    ChecksumMismatch,
     InternalError,
 }
 
@@ -67,6 +70,9 @@ impl ErrorCode {
             ErrorCode::DiskFull => "DISK_FULL",
             ErrorCode::JobNotFound => "JOB_NOT_FOUND",
             ErrorCode::JobNotCancellable => "JOB_NOT_CANCELLABLE",
+            ErrorCode::CatalogUnavailable => "CATALOG_UNAVAILABLE",
+            ErrorCode::CatalogNotFound => "CATALOG_NOT_FOUND",
+            ErrorCode::ChecksumMismatch => "CHECKSUM_MISMATCH",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
     }

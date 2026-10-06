@@ -6,7 +6,9 @@
 #![allow(dead_code)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -135,6 +137,15 @@ impl Client {
 /// daemon — servers it spawned have their own groups and survive, which is
 /// exactly what adoption tests rely on.
 pub fn spawn_daemon(data_dir: &Path, endpoint: &zamin_ipc::Endpoint) -> TestServer {
+    spawn_daemon_with(data_dir, endpoint, &[])
+}
+
+/// `spawn_daemon` with extra CLI arguments (e.g. `--catalog-url`).
+pub fn spawn_daemon_with(
+    data_dir: &Path,
+    endpoint: &zamin_ipc::Endpoint,
+    extra_args: &[&str],
+) -> TestServer {
     let endpoint_arg = match endpoint {
         zamin_ipc::Endpoint::WindowsPipe(name) => name.clone(),
         zamin_ipc::Endpoint::UnixSocket(path) => path.to_string_lossy().into_owned(),
@@ -151,6 +162,7 @@ pub fn spawn_daemon(data_dir: &Path, endpoint: &zamin_ipc::Endpoint) -> TestServ
                     "--endpoint",
                     &endpoint_arg,
                 ])
+                .args(extra_args)
                 .process_group(0);
             command.spawn().expect("zamind spawns")
         }
@@ -163,6 +175,7 @@ pub fn spawn_daemon(data_dir: &Path, endpoint: &zamin_ipc::Endpoint) -> TestServ
                     "--endpoint",
                     &endpoint_arg,
                 ])
+                .args(extra_args)
                 .spawn()
                 .expect("zamind spawns")
         }
@@ -333,4 +346,187 @@ pub async fn wait_list_state(
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+// --- a tiny mock HTTP server (software catalog / JDK downloads) -----------
+
+pub struct MockHttpResponse {
+    pub status: u16,
+    pub reason: &'static str,
+    pub content_type: &'static str,
+    pub body: Vec<u8>,
+    /// When set, the body is written in 64 KiB chunks with this delay
+    /// between them — deterministic mid-stream cancellation.
+    pub drip_ms: u64,
+}
+
+impl MockHttpResponse {
+    pub fn json(body: impl Into<Vec<u8>>) -> MockHttpResponse {
+        MockHttpResponse {
+            status: 200,
+            reason: "OK",
+            content_type: "application/json",
+            body: body.into(),
+            drip_ms: 0,
+        }
+    }
+    pub fn bytes(body: Vec<u8>) -> MockHttpResponse {
+        MockHttpResponse {
+            status: 200,
+            reason: "OK",
+            content_type: "application/octet-stream",
+            body,
+            drip_ms: 0,
+        }
+    }
+    pub fn not_found() -> MockHttpResponse {
+        MockHttpResponse {
+            status: 404,
+            reason: "Not Found",
+            content_type: "application/json",
+            body: br#"{"error":"not found","detail":"unknown route"}"#.to_vec(),
+            drip_ms: 0,
+        }
+    }
+    pub fn dripping(mut self, drip_ms: u64) -> MockHttpResponse {
+        self.drip_ms = drip_ms;
+        self
+    }
+}
+
+/// An in-process HTTP server speaking canned responses. Dropping it stops
+/// the accept loop; tests never touch the real network.
+pub struct MockHttp {
+    pub url: String,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl MockHttp {
+    pub fn spawn(handler: impl Fn(&str) -> MockHttpResponse + Send + Sync + 'static) -> MockHttp {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("mock binds");
+        let url = format!("http://{}", listener.local_addr().expect("addr"));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_for_thread = Arc::clone(&stop);
+        listener.set_nonblocking(true).expect("nonblocking mock");
+        let handler = Arc::new(handler);
+        let handle = std::thread::spawn(move || loop {
+            if stop_for_thread.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                    let mut request = Vec::new();
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                request.extend_from_slice(&buf[..n]);
+                                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&request);
+                    let path = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                    let response = handler(&path);
+                    let head = format!(
+                        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        response.status,
+                        response.reason,
+                        response.content_type,
+                        response.body.len()
+                    );
+                    if stream.write_all(head.as_bytes()).is_err() {
+                        continue;
+                    }
+                    if response.drip_ms == 0 {
+                        let _ = stream.write_all(&response.body);
+                    } else {
+                        for chunk in response.body.chunks(64 * 1024) {
+                            if stream.write_all(chunk).is_err() {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(response.drip_ms));
+                        }
+                    }
+                    let _ = stream.flush();
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => return,
+            }
+        });
+        MockHttp {
+            url,
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    /// Poll `jobs.get` until the job leaves the running/queued states.
+    pub async fn wait_job(
+        client: &mut Client,
+        job_id: &str,
+        timeout: Duration,
+    ) -> (String, Option<Value>) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let job = client
+                .request(methods::JOBS_GET, json!({ "jobId": job_id }))
+                .await
+                .expect("jobs.get");
+            let state = job["state"].as_str().unwrap_or_default().to_owned();
+            if state != "running" && state != "queued" {
+                return (
+                    state,
+                    job["error"].as_object().map(|_| job["error"].clone()),
+                );
+            }
+            assert!(Instant::now() < deadline, "job never finished: {job:?}");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+}
+
+impl Drop for MockHttp {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Accept the EULA of a freshly created server through the file surface
+/// (the same move the panel makes from its typed NEEDS_EULA affordance).
+pub async fn accept_eula(client: &mut Client, server_id: &str) {
+    let written = client
+        .request(
+            methods::FILES_WRITE,
+            json!({ "serverId": server_id, "content": base64("eula=true\n") }),
+        )
+        .await
+        .expect("files.write");
+    client
+        .request(
+            methods::FILES_COMMIT,
+            json!({
+                "serverId": server_id,
+                "stagingId": written["stagingId"],
+                "target": "eula.txt",
+            }),
+        )
+        .await
+        .expect("files.commit");
+}
+
+fn base64(text: &str) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(text)
 }
