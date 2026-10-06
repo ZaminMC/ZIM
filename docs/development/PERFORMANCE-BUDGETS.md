@@ -32,7 +32,35 @@
 | Terminal input echo (round trip via daemon) | p99 < 50 ms |
 | UI under load | no dropped frames with a background server streaming 1k lines/s |
 | xterm.js scrollback | capped at 5k lines in view; full history belongs to the log viewer, not terminal memory |
-| Stream delivery to webview | batched ~50 ms via the bridge channel; never one message per line |
+| Stream delivery to webview | batched by the daemon's log pump — 10 ms flush tick with a 256-line cap (see Verifications); never one message per line under load |
+
+## Verifications
+
+Every budget above is a test in `crates/zamind/tests/perf.rs`, run by the
+nightly `perf` workflow (`.github/workflows/perf.yml`); the normal
+`cargo test --workspace` stays fast and hermetic. Measured on this repo's
+development sandbox (2 cores, shared): IPC p50 ≈ 0.1 ms, cold start ≈ 100 ms,
+sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
+≈ 64k), echo p50 ≈ 10 ms, idle RSS 9 MiB, stalled-subscriber RSS 61 MiB.
+
+Negotiations and hardware notes, in writing per the rules:
+
+- **Terminal echo ↔ flush tick.** Echo latency is quantized by the pump's
+  flush tick, so the original 50 ms tick made the p99 < 50 ms budget
+  unsatisfiable by design. The tick is 10 ms, which keeps echo p99 ≈ 10–30 ms
+  on the sandbox while flood batches stay at the 256-line cap (avg ≈ 239
+  lines — the "never one message per line" invariant holds).
+- **Slow-subscriber memory ↔ batch cap.** The subscriber queue bounds
+  notification COUNT (1024); without a per-notification size bound, backlog
+  memory scaled with ingestion rate (measured 182 MiB under an unbounded
+  flood before the cap). The pump's 256-line cap makes each frame's size
+  rate-independent; measured stalled-subscriber RSS dropped to ~61 MiB.
+- **Burst rate in CI.** The nightly gates on the sustained 20k lines/s plus
+  the invariants (no stall, missed marker, bounded memory, batch shape);
+  the 50,000 lines/s burst figure is a reference-hardware number, recorded
+  from every nightly run's uploaded log rather than gated on shared runners.
+- **Memory assertions are Linux-only** (`/proc`); the timing and invariant
+  assertions run everywhere the suite runs.
 
 ## Rules
 

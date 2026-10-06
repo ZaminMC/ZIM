@@ -16,6 +16,7 @@
 
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use serde_json::json;
 
 mod common;
@@ -292,6 +293,431 @@ async fn directory_listing_of_20k_entries_under_250ms() {
         p95_us < 250_000,
         "listing p95 {p95_us} µs exceeds the 250 ms budget"
     );
+}
+
+/// The burst budget (PERFORMANCE-BUDGETS.md): 50,000 lines/s with zero
+/// unbounded memory growth; a slow subscriber sees `missed: N` and the
+/// daemon does not stall. One connection stops reading while the flood
+/// keeps publishing — the bounded subscriber queue fills, the hub
+/// accumulates the drop count (ADR-0006: no silent loss, a marker leads
+/// the catch-up) — while a second connection keeps probing
+/// `daemon.status` to prove the pipeline never blocks on delivery.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "performance budget: run with --ignored (nightly CI)"]
+async fn log_burst_slow_subscriber_gets_missed_marker_and_daemon_does_not_stall() {
+    let data_dir = scoped_dir("perf-burst");
+    let root = make_server_root("root-perf-burst");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("perf-burst");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    std::fs::write(
+        root.join("server.properties"),
+        format!("server-port={port}\n"),
+    )
+    .unwrap();
+    common::write_server_config(
+        &data_dir,
+        "burst",
+        &format!("port = {port}\nextraJvmArgs = [\"--flood-unbounded\"]\n"),
+    );
+    register_server(&mut client, "burst", &root).await;
+    common::subscribe_events(&mut client, None).await;
+    start_server(&mut client, "burst")
+        .await
+        .expect("start accepted");
+    wait_for_state(&mut client, ServerState::Running, Duration::from_secs(30))
+        .await
+        .expect("burst server reaches running");
+
+    client
+        .request(
+            methods::STREAMS_SUBSCRIBE,
+            json!({"stream": "logs", "serverId": "burst"}),
+        )
+        .await
+        .expect("subscribe logs");
+
+    // The stall: stop reading this connection entirely. The daemon keeps
+    // ingesting; the bounded subscriber queue (1024 notifications) fills
+    // and the hub starts counting drops. The pump publishes at 256-line
+    // batches (~220 notifications/s at flood rates), so the queue
+    // overflows well inside 14 s.
+    let mut probe = connect_daemon(&endpoint).await;
+    let stall = Duration::from_secs(14);
+    let stalled_at = Instant::now();
+    let mut probes = 0;
+    let mut worst_probe_us = 0u128;
+    while stalled_at.elapsed() < stall {
+        let start = Instant::now();
+        probe
+            .request(methods::DAEMON_STATUS, json!({}))
+            .await
+            .expect("status during stall");
+        worst_probe_us = worst_probe_us.max(start.elapsed().as_micros());
+        probes += 1;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    println!("During {stall:?} stall: {probes} probes, worst round trip {worst_probe_us} µs");
+    assert!(
+        worst_probe_us < 1_000_000,
+        "daemon stalled under a slow subscriber: worst probe {worst_probe_us} µs"
+    );
+
+    // Zero unbounded memory growth: the queue is bounded, so the peak is
+    // bounded — sample it at the end of the stall.
+    #[cfg(target_os = "linux")]
+    {
+        let daemon_pid = daemon_pid_of(&endpoint);
+        if let Some(rss) = daemon_pid.and_then(rss_bytes) {
+            println!(
+                "Daemon RSS with stalled subscriber: {} MiB",
+                rss / 1024 / 1024
+            );
+            assert!(
+                rss < 150 * 1024 * 1024,
+                "RSS {rss} under a stalled subscriber exceeds the 150 MiB budget"
+            );
+        }
+    }
+
+    // Resume: drain the backlog. The catch-up marker leads the first
+    // publication that finds a free slot — it carries the accumulated
+    // drop count. Backlog frames are Logs payloads; the marker is the
+    // only frame shape containing "missed", so the scan pre-filters on
+    // the raw bytes and parses only candidates.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut scanned = 0u64;
+    let mut missed_total = 0u64;
+    let mut found = false;
+    while Instant::now() < deadline {
+        let remaining = deadline - Instant::now();
+        let frame = tokio::time::timeout(
+            remaining.min(Duration::from_millis(500)),
+            client.connection.recv(),
+        )
+        .await
+        .expect("recv within deadline")
+        .expect("open")
+        .expect("frame");
+        scanned += 1;
+        if !frame.windows(6).any(|w| w == b"missed") {
+            continue;
+        }
+        let value: serde_json::Value = serde_json::from_slice(&frame).expect("json");
+        let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
+            continue;
+        };
+        let Ok(note) = serde_json::from_value::<StreamNotification>(note.params.expect("params"))
+        else {
+            continue;
+        };
+        if let StreamPayload::Missed { missed } = note.payload {
+            missed_total += missed;
+            found = true;
+            println!("Missed marker after the stall: {missed} dropped notifications");
+            break;
+        }
+    }
+    assert!(
+        found,
+        "no Missed marker after draining {scanned} frames — the queue never \
+         overflowed (publication rate too low on this runner?)"
+    );
+    assert!(missed_total >= 1, "marker must carry a positive drop count");
+
+    // Fresh measurement window over the still-running flood: the burst
+    // rate and the batch shape (delivery is batched, never one message
+    // per line — the point of the flush tick in the log pump).
+    let window = Duration::from_secs(5);
+    let started = Instant::now();
+    let mut lines: u64 = 0;
+    let mut notifications: u64 = 0;
+    while started.elapsed() < window {
+        let remaining = window - started.elapsed();
+        let Ok(frame) = tokio::time::timeout(
+            remaining.min(Duration::from_millis(250)),
+            client.connection.recv(),
+        )
+        .await
+        else {
+            continue;
+        };
+        let frame = frame.expect("open").expect("frame");
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame) else {
+            continue;
+        };
+        let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
+            continue;
+        };
+        let Ok(note) = serde_json::from_value::<StreamNotification>(note.params.expect("params"))
+        else {
+            continue;
+        };
+        if let StreamPayload::Logs { batch } = note.payload {
+            lines += batch.len() as u64;
+            notifications += 1;
+        }
+    }
+    let seconds = started.elapsed().as_secs_f64();
+    let rate = lines as f64 / seconds;
+    let avg_batch = lines as f64 / notifications.max(1) as f64;
+    println!(
+        "Burst after catch-up: {rate:.0} lines/s, avg batch {avg_batch:.0} lines \
+         over {notifications} notifications"
+    );
+    // The hard line everywhere is the sustained budget — burst conditions
+    // must not degrade the pipeline below it. The 50k burst figure in
+    // PERFORMANCE-BUDGETS.md is a reference-hardware number (mid-range
+    // 2023 laptop); CI runners are slower and shared, so the nightly
+    // records the measured rate and gates on the sustained line plus the
+    // invariants (no stall, missed marker, bounded memory, batch shape).
+    assert!(
+        rate >= 20_000.0,
+        "burst rate {rate:.0} lines/s is under the sustained 20,000 lines/s budget"
+    );
+    assert!(
+        avg_batch >= 50.0,
+        "avg batch {avg_batch:.0} lines — delivery is not batched (never one \
+         message per line under load)"
+    );
+
+    stop_server_gracefully(&mut client, "burst").await;
+}
+
+/// Daemon RSS, idle: < 50 MB (reference platform only — /proc).
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "performance budget: run with --ignored (nightly CI)"]
+async fn daemon_rss_idle_under_50mb() {
+    let data_dir = scoped_dir("perf-rss-idle");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("perf-rss-idle");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    client
+        .request(methods::DAEMON_STATUS, json!({}))
+        .await
+        .expect("hello");
+
+    // Let one metrics-less idle tick pass and the allocator settle.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let pid = daemon_pid_of(&endpoint).expect("daemon pid found");
+    let rss = rss_bytes(pid).expect("VmRSS present");
+    println!("Idle daemon RSS: {} MiB", rss / 1024 / 1024);
+    assert!(
+        rss < 50 * 1024 * 1024,
+        "idle RSS {rss} exceeds the 50 MiB budget"
+    );
+}
+
+/// The five-server shape: 5 fake servers each streaming 1k lines/s with
+/// an active subscriber draining — total daemon RSS stays under 150 MB.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "performance budget: run with --ignored (nightly CI)"]
+async fn five_servers_streaming_1k_lines_each_stay_under_150mb() {
+    let data_dir = scoped_dir("perf-fleet");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("perf-fleet");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    common::subscribe_events(&mut client, None).await;
+
+    const FLEET: usize = 5;
+    let mut ports = Vec::with_capacity(FLEET);
+    for _ in 0..FLEET {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        ports.push(listener.local_addr().unwrap().port());
+        drop(listener);
+    }
+    for (i, port) in ports.iter().enumerate() {
+        let id = format!("fleet{i}");
+        let root = make_server_root(&format!("root-perf-fleet-{i}"));
+        std::fs::write(
+            root.join("server.properties"),
+            format!("server-port={port}\n"),
+        )
+        .unwrap();
+        common::write_server_config(
+            &data_dir,
+            &id,
+            &format!("port = {port}\nextraJvmArgs = [\"--flood-stdout\", \"1000\"]\n"),
+        );
+        register_server(&mut client, &id, &root).await;
+    }
+    for i in 0..FLEET {
+        let id = format!("fleet{i}");
+        start_server(&mut client, &id)
+            .await
+            .expect("start accepted");
+        wait_for_state(&mut client, ServerState::Running, Duration::from_secs(30))
+            .await
+            .unwrap_or_else(|| panic!("{id} reaches running"));
+    }
+
+    client
+        .request(methods::STREAMS_SUBSCRIBE, json!({"stream": "logs"}))
+        .await
+        .expect("subscribe fleet logs");
+
+    // Soak: drain like an active subscriber, then sample the peak.
+    let soak = Duration::from_secs(6);
+    let started = Instant::now();
+    let mut lines: u64 = 0;
+    while started.elapsed() < soak {
+        let remaining = soak - started.elapsed();
+        let Ok(frame) = tokio::time::timeout(
+            remaining.min(Duration::from_millis(250)),
+            client.connection.recv(),
+        )
+        .await
+        else {
+            continue;
+        };
+        let frame = frame.expect("open").expect("frame");
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame) else {
+            continue;
+        };
+        let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
+            continue;
+        };
+        let Ok(note) = serde_json::from_value::<StreamNotification>(note.params.expect("params"))
+        else {
+            continue;
+        };
+        if let StreamPayload::Logs { batch } = note.payload {
+            lines += batch.len() as u64;
+        }
+    }
+    println!("Fleet soak: {lines} lines over {:.1} s", soak.as_secs_f64());
+    // Sanity only: the producer paces itself with thread sleeps, so the
+    // achievable aggregate varies with scheduler noise (measured ~4k/s on
+    // a loaded 2-core box). The budget under test is RSS, not throughput
+    // here — this line proves all five servers stream.
+    assert!(
+        lines >= 2_000 * soak.as_secs(),
+        "fleet throughput {lines} lines in {:?} — servers are not streaming",
+        soak
+    );
+
+    #[cfg(target_os = "linux")]
+    {
+        let daemon_pid = daemon_pid_of(&endpoint);
+        if let Some(rss) = daemon_pid.and_then(rss_bytes) {
+            println!(
+                "Daemon RSS, 5 servers @ 1k lines/s: {} MiB",
+                rss / 1024 / 1024
+            );
+            assert!(
+                rss < 150 * 1024 * 1024,
+                "RSS {rss} exceeds the 150 MiB five-server budget"
+            );
+        }
+    }
+
+    for i in 0..FLEET {
+        stop_server_gracefully(&mut client, &format!("fleet{i}")).await;
+    }
+}
+
+/// Terminal input echo, round trip via the daemon: send `server.stdin`,
+/// wait for the server's reply line on the logs stream. p99 < 50 ms.
+/// The reply's latency is quantized by the pump's flush tick — the tick
+/// (10 ms) exists so this budget is satisfiable at all; see the comment
+/// in `log pump` (actor.rs) and the negotiated wording in
+/// PERFORMANCE-BUDGETS.md.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "performance budget: run with --ignored (nightly CI)"]
+async fn terminal_echo_round_trip_p99_under_50ms() {
+    let data_dir = scoped_dir("perf-echo");
+    let root = make_server_root("root-perf-echo");
+    // Point "java" at the fake server binary (no flood flags — the echo
+    // path needs a quiet server). Without this the daemon falls back to
+    // the system java, which cannot run the fake jar.
+    common::write_server_config(&data_dir, "echo", "");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("perf-echo");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    register_server(&mut client, "echo", &root).await;
+    common::subscribe_events(&mut client, None).await;
+    start_server(&mut client, "echo")
+        .await
+        .expect("start accepted");
+    wait_for_state(&mut client, ServerState::Running, Duration::from_secs(30))
+        .await
+        .expect("echo server reaches running");
+
+    client
+        .request(
+            methods::STREAMS_SUBSCRIBE,
+            json!({"stream": "logs", "serverId": "echo"}),
+        )
+        .await
+        .expect("subscribe logs");
+
+    const SAMPLES: usize = 100;
+    let mut latencies = Vec::with_capacity(SAMPLES);
+    for i in 0..SAMPLES {
+        let marker = format!("echo-perf-{i}");
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 10_000 + i as u64,
+            "method": methods::SERVER_STDIN,
+            "params": {
+                "requestId": uuid::Uuid::now_v7().to_string(),
+                "serverId": "echo",
+                "line": marker,
+            },
+        });
+        let start = Instant::now();
+        client
+            .connection
+            .send(Bytes::from(serde_json::to_vec(&request).unwrap()))
+            .await
+            .expect("send stdin");
+        // The fake server answers unknown commands with
+        // "Unknown command: <line>" — that reply line is the echo.
+        let needle = format!("Unknown command: {marker}");
+        let deadline = start + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline, "echo for {marker} never arrived");
+            let frame = tokio::time::timeout(Duration::from_secs(5), client.connection.recv())
+                .await
+                .expect("recv")
+                .expect("open")
+                .expect("frame");
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame) else {
+                continue;
+            };
+            let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
+                continue; // the stdin request's own response, earlier replies
+            };
+            let Ok(note) =
+                serde_json::from_value::<StreamNotification>(note.params.expect("params"))
+            else {
+                continue;
+            };
+            let StreamPayload::Logs { batch } = note.payload else {
+                continue;
+            };
+            if batch.iter().any(|line| line.line.contains(&needle)) {
+                latencies.push(start.elapsed().as_micros());
+                break;
+            }
+        }
+    }
+
+    let p50_us = percentile(&mut latencies, 0.50);
+    let p99_us = percentile(&mut latencies, 0.99);
+    println!("Terminal echo round trip: p50 = {p50_us} µs, p99 = {p99_us} µs (n = {SAMPLES})");
+    assert!(
+        p99_us < 50_000,
+        "echo p99 {p99_us} µs exceeds the 50 ms budget"
+    );
+
+    stop_server_gracefully(&mut client, "echo").await;
 }
 
 // --- local helpers over the common harness ---

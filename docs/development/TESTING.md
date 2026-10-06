@@ -76,6 +76,22 @@ The remote path is the security boundary of the product (ADR-0011); every rule b
 - The panel side: connection profiles persist to localStorage (local default, add/remove/activate remotes, active-id fallback on remove) · `transportSpec` derives the bridge relay URL + hello credential per profile · the client sends `hello.auth` only when a credential is set, and `reconnect()` swaps the live transport and re-handshakes with the new credential without waiting for the retry schedule.
 - Player roster (log-roster refinement): join/leave lines parse only with a legal username charset (a chat line saying the phrase never joins the roster) · joins/leaves over the real daemon end-to-end (fake-mc-server `join`/`leave` over stdin → pumps → hub → `players.list`) · the roster dies with the server process · the ping side stays its own honest shape.
 
+## Performance budgets (required coverage)
+
+The budgets in [PERFORMANCE-BUDGETS.md](PERFORMANCE-BUDGETS.md) are tests in
+`crates/zamind/tests/perf.rs` (`#[ignore]`d; the nightly `perf` workflow runs
+them with `--ignored`). Each assertion gates a published number:
+
+- IPC round trip over the real daemon: p50 < 1 ms, p99 < 5 ms (2,000 warm samples).
+- Cold start → accepting + speaking the protocol: p50 < 500 ms across 5 runs, max < 1 s.
+- Sustained ingestion ≥ 20,000 lines/s over a 10 s window through the real pipeline (spawn → parse → ring → stream), daemon RSS under the flood < 150 MiB.
+- Burst with a stalled subscriber: 14 s without reading under an unbounded flood → the daemon's `daemon.status` round trips stay sub-second throughout (the stdout reader never blocks on delivery), the resuming subscriber receives a `Missed { missed: N > 0 }` marker (no silent loss, ADR-0006), RSS stays under 150 MiB, and post-catch-up throughput stays above the sustained budget with batched delivery (avg ≥ 50 lines/notification).
+- State change → events notification delivery: p99 < 20 ms.
+- 20k-entry directory listing: p95 < 250 ms.
+- Idle daemon RSS < 50 MiB (reference platform; Linux-only via /proc).
+- Five servers streaming 1k lines/s each with an active subscriber: daemon RSS < 150 MiB.
+- Terminal input echo, round trip via the daemon (stdin request → the server's reply line on the logs stream): p99 < 50 ms over 100 samples — the test that forced the pump's flush tick from 50 ms to 10 ms.
+
 ## Fixtures
 
 - Golden logs under `crates/zamin-core/testdata/logs/<software>/`: real anonymized Paper, Spigot, Folia, Purpur samples — startup floods, warnings, crash traces. Parser changes must not alter golden output without an explicit diff review.

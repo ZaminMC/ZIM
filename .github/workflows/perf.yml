@@ -1,0 +1,49 @@
+name: perf
+
+# The performance-budget nightly (PERFORMANCE-BUDGETS.md): the published
+# budgets are tests, run here on a schedule so a regression on a hot path
+# shows up as a red nightly, not as a user complaint. The main CI stays
+# fast and hermetic (`cargo test --workspace` skips the #[ignore]d perf
+# suite); this job is where the real pipeline gets measured.
+#
+# Linux-only lane: the memory budgets read /proc (the reference platform
+# is a Linux laptop) and Windows runners add AV/scheduling noise that
+# would turn tight assertions into flakes. Windows perf numbers come from
+# manual runs on real hardware, as the budget doc's reference-hardware
+# note intends.
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # daily, off the top of the hour like the docs say nobody does
+  workflow_dispatch: {}
+
+concurrency:
+  group: perf-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  daemon-budgets:
+    name: Daemon budgets (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the test binaries
+        run: cargo test -p zamind --test perf --no-run
+      - name: Run the performance-budget suite
+        run: |
+          cargo test -p zamind --test perf -- --ignored --nocapture 2>&1 | tee perf.log
+          # The suite's own assertions are the gate; tee is for the record.
+          test ${PIPESTATUS[0]} -eq 0
+      - name: Upload the measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-measurements
+          path: perf.log
+          retention-days: 90

@@ -1010,13 +1010,36 @@ async fn pump_logs(
     });
 
     let mut pending: Vec<LogLine> = Vec::new();
-    let mut flush = tokio::time::interval(Duration::from_millis(50));
+    // The flush tick is the stream batcher: under load each window carries
+    // hundreds of lines, so the webview channel never sees one message per
+    // line. The window size is bounded below by the terminal-echo budget
+    // (PERFORMANCE-BUDGETS.md): echo latency is quantized by this tick, so
+    // at 50 ms the p99 would be ~50 ms + ε — the budget broken by design.
+    // 10 ms keeps echo p99 ≈ 10 ms on reference hardware while the flood
+    // batches stay huge (asserted by the perf suite's batch-shape check).
+    //
+    // The line cap is the memory half of the same bargain: a slow
+    // subscriber's backlog is bounded per NOTIFICATION, so if a
+    // notification could grow with ingestion rate (a whole tick's worth
+    // of lines), the backlog would grow with the flood too — measured at
+    // 182 MiB under an unbounded flood before the cap existed. 256 lines
+    // ≈ 18 KB makes each frame's size rate-independent, so the bounded
+    // subscriber queue (1024 frames) is bounded in bytes no matter how
+    // fast the server screams. Quiet servers never hit the cap; the tick
+    // flushes them.
+    const LOG_FLUSH_MAX_LINES: usize = 256;
+    let mut flush = tokio::time::interval(Duration::from_millis(10));
     flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             line = rx.recv() => {
                 match line {
-                    Some(line) => pending.push(line),
+                    Some(line) => {
+                        pending.push(line);
+                        if pending.len() >= LOG_FLUSH_MAX_LINES {
+                            hub.publish_logs(&server_id, std::mem::take(&mut pending));
+                        }
+                    }
                     None => {
                         if !pending.is_empty() {
                             hub.publish_logs(&server_id, std::mem::take(&mut pending));
