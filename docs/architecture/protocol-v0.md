@@ -76,9 +76,11 @@ Implemented for the daemon's first release; the file set is specified now, imple
      "olderAvailable":true}}
 ```
 
-- `maxLines` defaults to 200 and is capped at 5000; the result is chronological and always the LAST `maxLines` lines.
-- `olderAvailable` is true when the file holds older lines than this response returned — a scroll-up affordance, not an error.
-- A missing log file is a typed `FS_NOT_FOUND`, never a silent empty result.
+- `maxLines` defaults to 200 and is capped at 5000; the result is chronological and always the LAST `maxLines` lines ending at or before the requested offset.
+- `startOffset` is the byte offset where the first returned line starts — a line boundary. Paging backward passes it as `beforeOffset`; a `startOffset` of 0 means the file holds nothing older.
+- `olderAvailable` is exactly `startOffset > 0` — a scroll-up affordance, not an error.
+- Reads walk the file backward in bounded windows (8 MiB), so a page costs roughly the page plus one window regardless of file size; a tail never re-reads from offset 0.
+- A `beforeOffset` beyond the file's current length means rotation or truncation happened; the daemon answers a typed `LOG_CURSOR_INVALID` and the client restarts from the tail. A missing log file is a typed `FS_NOT_FOUND`, never a silent empty result.
 
 - `server.start/stop/restart/kill` return immediately with the accepted state or a typed error; long outcomes arrive as `server.state_changed` events.
 - `server.kill` is the force path (ADR-0005 ladder, step 4). `stop` is the graceful path. The verbs are fixed: **start, stop, restart, kill**. "Launch" and "terminate" are not protocol words.

@@ -95,6 +95,10 @@ enum Commands {
         /// How many trailing lines to print
         #[arg(long, value_name = "N", default_value_t = 100)]
         lines: u32,
+        /// Page backward: return lines ending at or before this byte
+        /// offset (the previous page's startOffset)
+        #[arg(long, value_name = "OFFSET")]
+        before: Option<u64>,
     },
     /// Attach to a server console: log lines in, typed lines to stdin
     Attach { server_id: String },
@@ -249,11 +253,12 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             server_id,
             follow,
             lines,
+            before,
         } => {
             if *follow {
                 follow_logs(&client, server_id).await
             } else {
-                recent_logs(&cli, &client, server_id, *lines).await
+                recent_logs(&cli, &client, server_id, *lines, *before).await
             }
         }
         Commands::Attach { server_id } => attach(&client, server_id).await,
@@ -401,13 +406,18 @@ async fn lifecycle(cli: &Cli, client: &Client, method: &str, server_id: &str) ->
     Ok(())
 }
 
-async fn recent_logs(cli: &Cli, client: &Client, server_id: &str, lines: u32) -> CmdResult {
-    let value = client
-        .request(
-            methods::LOGS_RANGE,
-            serde_json::json!({"serverId": server_id, "maxLines": lines}),
-        )
-        .await?;
+async fn recent_logs(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    lines: u32,
+    before: Option<u64>,
+) -> CmdResult {
+    let mut params = serde_json::json!({"serverId": server_id, "maxLines": lines});
+    if let Some(offset) = before {
+        params["beforeOffset"] = serde_json::json!(offset);
+    }
+    let value = client.request(methods::LOGS_RANGE, params).await?;
     if cli.json {
         print_json(&value);
         return Ok(());
@@ -419,7 +429,8 @@ async fn recent_logs(cli: &Cli, client: &Client, server_id: &str, lines: u32) ->
         }
     }
     if older {
-        eprintln!("(older lines exist; raise --lines to see more)");
+        let cursor = value["startOffset"].as_u64().unwrap_or(0);
+        eprintln!("(older lines exist; page back with --before {cursor})");
     }
     Ok(())
 }

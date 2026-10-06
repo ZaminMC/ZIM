@@ -381,6 +381,7 @@ impl Engine {
         &self,
         server_id: &ServerId,
         max_lines: u32,
+        before_offset: Option<u64>,
     ) -> Result<zamin_protocol::logs::LogRangeResult, EngineError> {
         let root = {
             let registry = self.registry_lock();
@@ -390,10 +391,11 @@ impl Engine {
                 .ok_or_else(|| not_found(server_id))?
         };
         let server_id = server_id.to_string();
-        let result =
-            tokio::task::spawn_blocking(move || tail_of_latest_log(&root, &server_id, max_lines))
-                .await
-                .map_err(|e| EngineError::Internal(format!("log read task failed: {e}")))?;
+        let result = tokio::task::spawn_blocking(move || {
+            range_of_latest_log(&root, &server_id, max_lines, before_offset)
+        })
+        .await
+        .map_err(|e| EngineError::Internal(format!("log read task failed: {e}")))?;
         result.map_err(EngineError::Protocol)
     }
 
@@ -456,12 +458,23 @@ pub fn to_protocol(error: &zamin_core::error::CoreError) -> ProtocolError {
     crate::actor::to_protocol_error(error)
 }
 
-/// Sync tail read of `logs/latest.log` under the server root, through the
-/// rooted filesystem's containment checks. Runs inside `spawn_blocking`.
-fn tail_of_latest_log(
+/// Sync ranged read of `logs/latest.log` under the server root, through
+/// the rooted filesystem's containment checks. Runs inside `spawn_blocking`.
+///
+/// Returns the last `max_lines` lines that end at or before `cursor` (where
+/// `None` means the end of the file), plus the byte offset where the first
+/// returned line starts — the client's next `beforeOffset`.
+///
+/// The read walks the file backward in [`LOG_RANGE_WINDOW_BYTES`] windows,
+/// accumulating bytes until the requested lines are complete, so one call
+/// reads roughly the page plus one window — never the whole file, and a
+/// tail never re-reads from offset 0 (PERFORMANCE-BUDGETS). A single
+/// overlong line is the one unbounded case and is served whole.
+fn range_of_latest_log(
     root: &Path,
     server_id: &str,
     max_lines: u32,
+    before_offset: Option<u64>,
 ) -> Result<zamin_protocol::logs::LogRangeResult, ProtocolError> {
     use zamin_protocol::logs::{LogRangeResult, LOG_RANGE_MAX_LINES, LOG_RANGE_WINDOW_BYTES};
 
@@ -492,52 +505,102 @@ fn tail_of_latest_log(
         .map_err(|e| to_protocol(&e))?
         .len();
 
-    if len == 0 {
+    // Resolve the cursor. A cursor past the current end of the file means
+    // the file rotated or truncated under the client: its offsets no
+    // longer address this content, and honoring them would serve garbled
+    // pages — a typed error beats silent nonsense.
+    let cursor = match before_offset {
+        None => len,
+        Some(offset) if offset <= len => offset,
+        Some(offset) => {
+            return Err(ProtocolError::new(
+                ErrorCode::LogCursorInvalid,
+                format!(
+                    "beforeOffset {offset} is beyond the current end of {FILE} ({len} bytes); \
+                     the file was rotated or truncated — page from the tail again."
+                ),
+            ));
+        }
+    };
+
+    // The answer is empty without any byte range to walk: at the file
+    // start there is nothing before the cursor.
+    if cursor == 0 {
         return Ok(LogRangeResult {
             file: FILE.to_owned(),
             lines: Vec::new(),
             older_available: false,
+            start_offset: 0,
         });
     }
 
-    // Scan at most the trailing window; a partial first line (started
-    // before the window) is dropped and reported via older_available.
-    let window = len.min(LOG_RANGE_WINDOW_BYTES);
-    file.seek(SeekFrom::Start(len - window))
-        .map_err(|source| zamin_core::error::CoreError::Io {
-            path: path.clone(),
-            source,
-        })
-        .map_err(|e| to_protocol(&e))?;
-    let mut buf = Vec::with_capacity(window as usize);
-    file.read_to_end(&mut buf)
-        .map_err(|source| zamin_core::error::CoreError::Io {
-            path: path.clone(),
-            source,
-        })
-        .map_err(|e| to_protocol(&e))?;
-    let text = String::from_utf8_lossy(&buf);
-
-    let mut raw_lines: Vec<&str> = text.split('\n').collect();
-    let mut older_available = window < len;
-    if window < len {
-        // The first element is the cut-off remainder of an older line.
-        if !raw_lines.is_empty() {
-            raw_lines.remove(0);
+    // Walk backward from the cursor, prepending windows, until the buffer
+    // spans [window_start, cursor) with at least `max_lines` complete
+    // lines inside — or the file start is reached. `buf` always ends at
+    // the cursor, so its tail rules are fixed; only its head is partial
+    // until the file start is covered.
+    let mut buf: Vec<u8> = Vec::new();
+    let mut window_start = cursor;
+    while window_start > 0 {
+        let window = window_start.min(LOG_RANGE_WINDOW_BYTES);
+        window_start -= window;
+        let mut chunk = vec![0u8; window as usize];
+        file.seek(SeekFrom::Start(window_start))
+            .map_err(|source| zamin_core::error::CoreError::Io {
+                path: path.clone(),
+                source,
+            })
+            .map_err(|e| to_protocol(&e))?;
+        file.read_exact(&mut chunk)
+            .map_err(|source| zamin_core::error::CoreError::Io {
+                path: path.clone(),
+                source,
+            })
+            .map_err(|e| to_protocol(&e))?;
+        let mut merged = Vec::with_capacity(chunk.len() + buf.len());
+        merged.extend_from_slice(&chunk);
+        merged.extend_from_slice(&buf);
+        buf = merged;
+        if window_start == 0 || complete_lines_in(&buf, window_start, cursor, len) >= max_lines {
+            break;
         }
     }
-    // A trailing "" after the final newline is not a line.
-    if raw_lines.last().is_some_and(|l| l.is_empty()) {
-        raw_lines.pop();
-    }
 
-    if raw_lines.len() > max_lines {
-        let drop = raw_lines.len() - max_lines;
-        raw_lines.drain(..drop);
-        older_available = true;
-    }
+    // Parse the accumulated buffer once. `window_start` is where buf
+    // begins in the file; the head rule (drop the partial first part
+    // unless the buffer starts at the file start) and the tail rule (drop
+    // the part past the cursor, or the "" artifact of a final newline)
+    // together select exactly the complete lines inside [window_start,
+    // cursor).
+    let text = String::from_utf8_lossy(&buf);
+    let parts: Vec<&str> = text.split('\n').collect();
+    let head = usize::from(window_start > 0);
+    let tail = if cursor < len || parts.last().is_some_and(|l| l.is_empty()) {
+        1
+    } else {
+        0
+    };
+    let included_end = parts.len().saturating_sub(tail);
+    let included = if head < included_end {
+        &parts[head..included_end]
+    } else {
+        &[][..]
+    };
 
-    let lines = raw_lines
+    // Serve the LAST max_lines of the included lines; anything above them
+    // (or an unread window head) is what `olderAvailable` offers.
+    let served = included.len().min(max_lines);
+    let first_served = included.len() - served;
+
+    // Byte offset of the first served line: sum the lengths of every part
+    // before it, counting each part's delimiter.
+    let start_offset = window_start
+        + parts[..head + first_served]
+            .iter()
+            .map(|part| part.len() as u64 + 1)
+            .sum::<u64>();
+
+    let lines = included[first_served..]
         .iter()
         .map(|raw| zamin_core::logparse::parse_line(raw, 0))
         .collect();
@@ -545,6 +608,23 @@ fn tail_of_latest_log(
     Ok(LogRangeResult {
         file: FILE.to_owned(),
         lines,
-        older_available,
+        older_available: start_offset > 0,
+        start_offset,
     })
+}
+
+/// Count the complete lines inside `buf`, which spans `[buf_start, cursor)`
+/// of the file. The head part is complete only at the file start; the tail
+/// part is complete only when the buffer ends at the file's end with a
+/// final line (not a newline artifact).
+fn complete_lines_in(buf: &[u8], buf_start: u64, cursor: u64, len: u64) -> usize {
+    let text = String::from_utf8_lossy(buf);
+    let parts = text.split('\n').count();
+    let head = usize::from(buf_start > 0);
+    let tail = if cursor < len || text.ends_with('\n') {
+        1
+    } else {
+        0
+    };
+    parts.saturating_sub(head + tail)
 }

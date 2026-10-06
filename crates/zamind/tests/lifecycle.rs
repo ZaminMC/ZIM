@@ -541,3 +541,96 @@ async fn register_and_remove_are_broadcast_on_the_events_stream() {
     assert_eq!(removed["serverId"], "demo");
     assert_eq!(removed["reason"], "removed");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_range_pages_backward_by_byte_offset() {
+    let data_dir = scoped_dir("data-log-page");
+    let root = make_server_root("root-log-page");
+    let log_dir = root.join("logs");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let mut contents = String::new();
+    for i in 0..120 {
+        contents.push_str(&format!(
+            "[05:30:{:02}] [Server thread/INFO]: page line {i}\n",
+            i % 60
+        ));
+    }
+    std::fs::write(log_dir.join("latest.log"), &contents).unwrap();
+
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("log-page");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    register_server(&mut client, "test", &root).await;
+
+    // Page 1 (tail): the last 40 of 120 lines, with a cursor pointing at
+    // the start of the first served line.
+    let page1 = client
+        .request(
+            methods::LOGS_RANGE,
+            json!({"serverId": "test", "maxLines": 40}),
+        )
+        .await
+        .expect("tail page");
+    let lines1 = page1["lines"].as_array().expect("lines array");
+    assert_eq!(lines1.len(), 40);
+    assert_eq!(lines1[0]["line"], "page line 80");
+    assert_eq!(lines1[39]["line"], "page line 119");
+    assert_eq!(page1["olderAvailable"], true);
+    let cursor1 = page1["startOffset"].as_u64().expect("startOffset");
+    assert!(cursor1 > 0);
+
+    // Page 2: lines ending at or before page 1's first line — exactly the
+    // preceding 40, contiguous with page 1.
+    let page2 = client
+        .request(
+            methods::LOGS_RANGE,
+            json!({"serverId": "test", "maxLines": 40, "beforeOffset": cursor1}),
+        )
+        .await
+        .expect("second page");
+    let lines2 = page2["lines"].as_array().expect("lines array");
+    assert_eq!(lines2.len(), 40);
+    assert_eq!(lines2[0]["line"], "page line 40");
+    assert_eq!(lines2[39]["line"], "page line 79");
+    assert_eq!(page2["olderAvailable"], true);
+    let cursor2 = page2["startOffset"].as_u64().expect("startOffset");
+    assert!(cursor2 > 0 && cursor2 < cursor1);
+
+    // Page 3: back to the file start; nothing older remains.
+    let page3 = client
+        .request(
+            methods::LOGS_RANGE,
+            json!({"serverId": "test", "maxLines": 40, "beforeOffset": cursor2}),
+        )
+        .await
+        .expect("third page");
+    let lines3 = page3["lines"].as_array().expect("lines array");
+    assert_eq!(lines3.len(), 40);
+    assert_eq!(lines3[0]["line"], "page line 0");
+    assert_eq!(lines3[39]["line"], "page line 39");
+    assert_eq!(page3["olderAvailable"], false);
+    assert_eq!(page3["startOffset"], 0);
+
+    // Cursor 0 is a valid exhausted cursor: an honest empty page.
+    let exhausted = client
+        .request(
+            methods::LOGS_RANGE,
+            json!({"serverId": "test", "maxLines": 40, "beforeOffset": 0}),
+        )
+        .await
+        .expect("exhausted cursor");
+    assert_eq!(exhausted["lines"].as_array().expect("lines array").len(), 0);
+    assert_eq!(exhausted["olderAvailable"], false);
+    assert_eq!(exhausted["startOffset"], 0);
+
+    // A cursor past the current end of the file means rotation or
+    // truncation happened: typed error, never garbled pages.
+    let stale = client
+        .request(
+            methods::LOGS_RANGE,
+            json!({"serverId": "test", "maxLines": 40, "beforeOffset": contents.len() as u64 + 999}),
+        )
+        .await
+        .expect_err("stale cursor");
+    assert_eq!(stale["code"], "LOG_CURSOR_INVALID");
+}

@@ -403,7 +403,10 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
             match ServerId::parse(&params.server_id) {
                 Ok(server_id) => {
                     let max_lines = params.max_lines.unwrap_or(200);
-                    match engine.log_range(&server_id, max_lines).await {
+                    match engine
+                        .log_range(&server_id, max_lines, params.before_offset)
+                        .await
+                    {
                         Ok(result) => json_ok(id, result),
                         Err(e) => dispatch_error(id, e),
                     }

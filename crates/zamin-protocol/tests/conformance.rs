@@ -257,4 +257,11 @@ fn new_protocol_error_codes_serialize_to_registered_strings() {
     let not_found = ProtocolError::new(ErrorCode::ProtocolMethodNotFound, "No such method.");
     let wire = serde_json::to_value(&not_found).unwrap();
     assert_eq!(wire["code"], "PROTOCOL_METHOD_NOT_FOUND");
+
+    let stale_cursor = ProtocolError::new(
+        ErrorCode::LogCursorInvalid,
+        "beforeOffset 99 is beyond the current end of logs/latest.log (10 bytes).",
+    );
+    let wire = serde_json::to_value(&stale_cursor).unwrap();
+    assert_eq!(wire["code"], "LOG_CURSOR_INVALID");
 }
