@@ -96,6 +96,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 ```
 
 - Streams: `events`, `logs`, `metrics` (semantics per ADR-0006).
+- Registry changes ride the `events` stream like any lifecycle event: `server.register` publishes `state_changed` (`unknown → not-running`, `reason:"registered"`) and `server.remove` publishes (`not-running → unknown`, `reason:"removed"`). Clients with an open subscription learn about new and gone servers without polling.
 - `seq` is a u64, monotonic per server per stream, assigned once at ingest.
 - Cursor models: `events` — `seq`-based against a bounded replay ring, older → `{cursorInvalid:true}` and the client re-snapshots. `logs` — `{file, offset}`; the daemon validates file identity (rotation changes identity) and answers `cursorInvalid` rather than serving garbage.
 - `metrics` delivers latest-wins samples; history comes from an explicit range query.

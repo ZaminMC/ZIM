@@ -498,3 +498,37 @@ async fn logs_range_tails_the_file_backed_history() {
         .expect_err("ghost server");
     assert_eq!(error["code"], "SERVER_NOT_FOUND");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn register_and_remove_are_broadcast_on_the_events_stream() {
+    let data_dir = scoped_dir("data-registry-events");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("registry-events");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+
+    // Subscribe BEFORE registering: the registration must arrive as a live
+    // event, not only in later snapshots (ADR-0006 reconcile channel).
+    subscribe_events(&mut client, None).await;
+
+    let root = make_server_root("root-registry-events");
+    register_server(&mut client, "demo", &root).await;
+    let registered = wait_for_state(&mut client, ServerState::NotRunning, Duration::from_secs(5))
+        .await
+        .expect("registered event");
+    assert_eq!(registered["serverId"], "demo");
+    assert_eq!(registered["from"], "unknown");
+    assert_eq!(registered["reason"], "registered");
+
+    client
+        .request(
+            methods::SERVER_REMOVE,
+            json!({"requestId": uuid::Uuid::now_v7().to_string(), "serverId": "demo"}),
+        )
+        .await
+        .expect("remove accepted");
+    let removed = wait_for_state(&mut client, ServerState::Unknown, Duration::from_secs(5))
+        .await
+        .expect("removed event");
+    assert_eq!(removed["serverId"], "demo");
+    assert_eq!(removed["reason"], "removed");
+}

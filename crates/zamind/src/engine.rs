@@ -239,6 +239,15 @@ impl Engine {
         };
         marker::write_marker(&details_root, &server_id).map_err(|e| to_protocol(&e))?;
         let _ = std::fs::create_dir_all(server_dir(&self.inner.data_dir, server_id.as_str()));
+        // The events stream is the reconcile channel (ADR-0006): clients
+        // with an open subscription must learn about new servers without
+        // polling, so registration is broadcast as a transition.
+        self.publish_registry_event(
+            &server_id,
+            ServerState::Unknown,
+            ServerState::NotRunning,
+            "registered",
+        );
         Ok(ServerDetails {
             server_id: server_id.to_string(),
             display_name: display,
@@ -280,6 +289,13 @@ impl Engine {
             .remove(server_id)
             .map_err(|e| to_protocol(&e))?;
         let _ = std::fs::remove_dir_all(server_dir(&self.inner.data_dir, server_id.as_str()));
+        // Mirror of the registration broadcast: open panels drop the entry.
+        self.publish_registry_event(
+            server_id,
+            ServerState::NotRunning,
+            ServerState::Unknown,
+            "removed",
+        );
         Ok(())
     }
 
@@ -389,6 +405,30 @@ impl Engine {
             "servers": servers.len(),
             "running": servers.iter().filter(|s| s.state == ServerState::Running).count(),
         })
+    }
+
+    /// Broadcast a registry-driven transition (registration, removal).
+    /// These are state changes from the registry's point of view, not the
+    /// actor's, so they are published here rather than in an actor.
+    fn publish_registry_event(
+        &self,
+        server_id: &ServerId,
+        from: ServerState,
+        to: ServerState,
+        reason: &str,
+    ) {
+        self.inner.hub.publish_event(
+            Some(server_id.to_string()),
+            zamin_protocol::streams::CoreEvent::ServerStateChanged {
+                server_id: server_id.to_string(),
+                from,
+                to,
+                reason: Some(reason.to_owned()),
+                exit_code: None,
+                error: None,
+                crash: None,
+            },
+        );
     }
 }
 
