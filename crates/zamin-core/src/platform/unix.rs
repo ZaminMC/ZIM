@@ -82,7 +82,7 @@ impl ProcessOps for UnixProcessOps {
             .kill_on_drop(false)
             .process_group(0); // own process group; pgid == pid
 
-        let mut child = command.spawn()?;
+        let child = command.spawn()?;
         let pid = child.id().ok_or(PlatformError::ProcessGone { pid: 0 })?;
         Ok(Spawned::new(Box::new(UnixHandle { pid, child })))
     }
@@ -138,7 +138,7 @@ mod tests {
     fn identity_of_self_is_stable() {
         let me = std::process::id();
         let identity = proc_start_marker(me).expect("own /proc entry exists");
-        assert_eq!(proc_start_marker(me), Some(identity));
+        assert_eq!(proc_start_marker(me), Some(identity.clone()));
         assert!(identity.contains('/'));
     }
 

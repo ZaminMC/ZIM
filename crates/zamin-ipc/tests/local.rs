@@ -63,6 +63,7 @@ async fn connect_without_daemon_is_no_daemon() {
 #[cfg(unix)]
 #[tokio::test]
 async fn stale_socket_is_reclaimed() {
+    use std::fs::Permissions;
     use std::os::unix::fs::PermissionsExt;
 
     let endpoint = Endpoint::unique_for_test("stale");
