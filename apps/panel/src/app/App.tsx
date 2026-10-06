@@ -6,12 +6,14 @@
 
 import { useEffect, useMemo } from "react";
 import { useConnection } from "../state/connection";
+import { activeProfile, useConnections } from "../state/connections";
 import { useServers } from "../state/servers";
 import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
 import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
 import { IconDashboard, IconPlus, IconServer, IconSparkles } from "../ui/icons";
+import { ConnectionsModal } from "./ConnectionsModal";
 import { Dashboard } from "./Dashboard";
 import { NewServerModal } from "./NewServerModal";
 import { Palette } from "./Palette";
@@ -36,6 +38,8 @@ export function App() {
   const setNewServerOpen = useUi((s) => s.setNewServerOpen);
   const paletteOpen = useUi((s) => s.paletteOpen);
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
+  const setConnectionsOpen = useUi((s) => s.setConnectionsOpen);
+  const activeConnection = useConnections((s) => activeProfile(s));
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -150,6 +154,14 @@ export function App() {
             </span>
             <button
               className={styles.kbdHint}
+              onClick={() => setConnectionsOpen(true)}
+              aria-label="Switch connection"
+              title={`Connection: ${activeConnection.name}`}
+            >
+              {activeConnection.id === "local" ? "Local" : "Remote"}
+            </button>
+            <button
+              className={styles.kbdHint}
               onClick={() => setPaletteOpen(true)}
               aria-label="Open command palette"
               title="Command palette"
@@ -170,6 +182,7 @@ export function App() {
 
       {newServerOpen ? <NewServerModal /> : null}
       {paletteOpen ? <Palette /> : null}
+      <ConnectionsModal />
     </div>
   );
 }

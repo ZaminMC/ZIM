@@ -14,6 +14,9 @@ export interface ClientInfo {
 
 export interface HelloParams {
   protocol: number;
+  /** Remote transports require the token (ADR-0011); local transports
+   *  ignore it — the OS user + socket ACL is the credential there. */
+  auth?: string;
   client: ClientInfo;
 }
 

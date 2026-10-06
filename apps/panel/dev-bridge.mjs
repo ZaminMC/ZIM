@@ -6,11 +6,21 @@
 // Frame format (zamin-protocol framing.rs): u32 little-endian byte count +
 // payload, capped at 16 MiB.
 //
+// Local mode (default): every session relays to the local daemon socket.
+// Remote mode (ADR-0011): a session whose URL carries
+//   ?remote=<host:port>&fingerprint=<sha256-hex>
+// relays instead over TLS to a zaminagent. The fingerprint pins the
+// agent's self-signed certificate; omitting it accepts any certificate
+// (the documented skip-verify escape hatch — the bridge logs a warning).
+// The token never crosses the bridge: the panel sends it as hello.auth
+// inside the TLS tunnel.
+//
 // Usage: node dev-bridge.mjs [--endpoint /path/to/zamind.sock] [--port 8787]
 
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
+import tls from "node:tls";
 import { WebSocketServer } from "ws";
 
 const MAX_FRAME_LENGTH = 16 * 1024 * 1024;
@@ -37,6 +47,50 @@ function defaultEndpoint() {
       ? process.env.XDG_RUNTIME_DIR
       : path.join(os.tmpdir(), `zamind-runtime-${process.getuid?.() ?? 0}`);
   return path.join(runtimeDir, "zamind", "zamind.sock");
+}
+
+// ADR-0011: the session target comes from the WebSocket URL, so one bridge
+// serves the local fleet and any number of remote agents side by side.
+function parseTarget(url) {
+  const parsed = new URL(url, "http://localhost");
+  const remote = parsed.searchParams.get("remote");
+  if (!remote) return { kind: "local" };
+  const [host, portStr] = remote.split(":");
+  const fingerprint = (parsed.searchParams.get("fingerprint") ?? "")
+    .replace(/:/g, "")
+    .toLowerCase();
+  return {
+    kind: "remote",
+    host,
+    port: Number.parseInt(portStr, 10) || 7443,
+    fingerprint,
+  };
+}
+
+function connectTarget(target) {
+  if (target.kind === "local") return net.createConnection(endpoint);
+  if (!target.fingerprint) {
+    console.warn(
+      `[dev-bridge] remote ${target.host}:${target.port} without a pinned fingerprint — ` +
+        "accepting any server certificate (insecure mode)",
+    );
+  }
+  return tls.connect({
+    host: target.host,
+    port: target.port,
+    // The pin (when present) IS the verification; no CA, no trust store.
+    rejectUnauthorized: false,
+    checkServerIdentity: (hostname, cert) => {
+      if (!target.fingerprint) return undefined;
+      const actual = (cert.fingerprint256 ?? "").replace(/:/g, "").toLowerCase();
+      if (actual !== target.fingerprint) {
+        return new Error(
+          `agent fingerprint ${actual} does not match the pinned ${target.fingerprint}`,
+        );
+      }
+      return undefined;
+    },
+  });
 }
 
 function encodeFrame(payload) {
@@ -73,6 +127,7 @@ const endpoint = args.endpoint ?? defaultEndpoint();
 const wss = new WebSocketServer({ host: "127.0.0.1", port: args.port }, () => {
   console.log(`[dev-bridge] listening on ws://127.0.0.1:${args.port}`);
   console.log(`[dev-bridge] daemon endpoint: ${endpoint}`);
+  console.log("[dev-bridge] remote sessions: ws url ?remote=<host:port>&fingerprint=<sha256>");
 });
 
 wss.on("error", (error) => {
@@ -80,8 +135,11 @@ wss.on("error", (error) => {
   process.exitCode = 1;
 });
 
-wss.on("connection", (ws) => {
-  const socket = net.createConnection(endpoint);
+wss.on("connection", (ws, req) => {
+  const target = parseTarget(req.url ?? "/");
+  const label =
+    target.kind === "remote" ? `agent ${target.host}:${target.port}` : `daemon ${endpoint}`;
+  const socket = connectTarget(target);
   const decoder = new FrameDecoder();
   let wireDead = false;
 
@@ -93,7 +151,7 @@ wss.on("connection", (ws) => {
   };
 
   socket.on("connect", () => {
-    console.log("[dev-bridge] browser session connected to the daemon");
+    console.log(`[dev-bridge] browser session connected to the ${label}`);
   });
 
   socket.on("data", (chunk) => {
@@ -112,7 +170,7 @@ wss.on("connection", (ws) => {
 
   socket.on("close", kill);
   socket.on("error", (error) => {
-    console.error(`[dev-bridge] daemon socket: ${error.message}`);
+    console.error(`[dev-bridge] ${label}: ${error.message}`);
     kill();
   });
 

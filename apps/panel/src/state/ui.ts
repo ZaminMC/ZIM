@@ -17,6 +17,7 @@ interface UiState {
   activeTab: string | null;
   newServerOpen: boolean;
   paletteOpen: boolean;
+  connectionsOpen: boolean;
   /** Verb currently in flight per server ("start" | "stop" | …). */
   pending: Record<string, string>;
   /** Last failed dispatch per server. */
@@ -26,6 +27,7 @@ interface UiState {
   setActive: (serverId: string | null) => void;
   setNewServerOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
+  setConnectionsOpen: (open: boolean) => void;
   setPending: (serverId: string, verb: string | null) => void;
   setActionError: (serverId: string, error: ActionError | null) => void;
 }
@@ -37,6 +39,7 @@ export const useUi = create<UiState>()(
       activeTab: null,
       newServerOpen: false,
       paletteOpen: false,
+      connectionsOpen: false,
       pending: {},
       actionErrors: {},
 
@@ -59,6 +62,7 @@ export const useUi = create<UiState>()(
       setActive: (serverId) => set({ activeTab: serverId }),
       setNewServerOpen: (open) => set({ newServerOpen: open }),
       setPaletteOpen: (open) => set({ paletteOpen: open }),
+      setConnectionsOpen: (open) => set({ connectionsOpen: open }),
       setPending: (serverId, verb) =>
         set((state) => {
           const pending = { ...state.pending };

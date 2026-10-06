@@ -5,7 +5,6 @@
 
 import { ProtocolClient } from "../protocol/client";
 import { TauriTransport, WsTransport } from "../protocol/transport";
-import type { Transport } from "../protocol/transport";
 import {
   crashNotification,
   deliver,
@@ -16,6 +15,7 @@ import {
 import type { JobOutcomeName } from "../integration/notifications";
 import { logWarn } from "../logger";
 import { useConnection } from "./connection";
+import { transportSpec, useConnections } from "./connections";
 import { useServers } from "./servers";
 import { useJobs } from "./jobs";
 import { getServer } from "./actions";
@@ -23,9 +23,15 @@ import { getServer } from "./actions";
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const bridgeUrl = import.meta.env.VITE_BRIDGE_URL ?? "ws://127.0.0.1:8787";
 
-export const client = new ProtocolClient((): Promise<Transport> =>
-  isTauri ? Promise.resolve(new TauriTransport()) : Promise.resolve(new WsTransport(bridgeUrl)),
-);
+// The transport is chosen per connect: the active connection profile
+// (ADR-0011) decides local socket vs. remote agent relay. Switching
+// profiles goes through `reconnectWire`.
+export const client = new ProtocolClient(() => {
+  if (isTauri) return Promise.resolve(new TauriTransport());
+  const spec = transportSpec(bridgeUrl, useConnections.getState());
+  client.setAuth(spec.auth);
+  return Promise.resolve(new WsTransport(spec.url));
+});
 
 if (import.meta.env.DEV) {
   // Dev diagnostics hook: browser-console access to the live client.
@@ -42,6 +48,14 @@ export function startWire(): void {
   useConnection.getState().bind(client);
   void client.connect().catch(() => {}); // failures schedule their own retries
   void wireEvents();
+}
+
+/** Re-open the wire against the currently active connection profile — the
+ *  operator switched profiles in the connections modal (ADR-0011). */
+export function reconnectWire(): void {
+  void client.reconnect().catch((error: unknown) =>
+    logWarn("wire", "profile switch reconnect failed", error),
+  );
 }
 
 // --- notifications (Phase 7 taxonomy: only while the operator is away) ---

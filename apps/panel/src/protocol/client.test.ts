@@ -388,6 +388,58 @@ describe("ProtocolClient", () => {
     expect(statuses).toContain("connecting");
     await client.dispose();
   });
+
+  it("sends hello.auth only when set, and the next handshake picks up changes", async () => {
+    const client = makeClient();
+
+    // Phase 1: no credential — local semantics, no auth field at all.
+    void client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = transports[0]!;
+    const firstHello = first.sentRequest("daemon.hello");
+    expect(firstHello.params).not.toHaveProperty("auth");
+    first.push(rpcResult(firstHello.id, helloResult));
+
+    // Phase 2: a credential is set; reconnect re-handshakes with it.
+    client.setAuth("secret-token");
+    const reconnected = client.reconnect();
+    await vi.advanceTimersByTimeAsync(0);
+    const second = transports[1]!;
+    expect(first.stopped).toBe(1);
+    const secondHello = second.sentRequest("daemon.hello");
+    expect(secondHello.params.auth).toBe("secret-token");
+    second.push(rpcResult(secondHello.id, helloResult));
+    await reconnected;
+
+    // Phase 3: cleared — the next handshake drops the field again.
+    client.setAuth(undefined);
+    const third = client.reconnect();
+    await vi.advanceTimersByTimeAsync(0);
+    const thirdTransport = transports[2]!;
+    expect(thirdTransport.sentRequest("daemon.hello").params).not.toHaveProperty("auth");
+    thirdTransport.push(
+      rpcResult(thirdTransport.sentRequest("daemon.hello").id, helloResult),
+    );
+    await third;
+    await client.dispose();
+  });
+
+  it("reconnect replaces the live transport without waiting for the retry schedule", async () => {
+    const client = makeClient();
+    void client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = transports[0]!;
+    first.push(rpcResult(first.sentRequest("daemon.hello").id, helloResult));
+
+    const reconnected = client.reconnect();
+    await vi.advanceTimersByTimeAsync(0);
+    const second = transports[1]!;
+    second.push(rpcResult(second.sentRequest("daemon.hello").id, helloResult));
+    await reconnected;
+    expect(transports.length).toBe(2);
+    expect(first.stopped).toBe(1);
+    await client.dispose();
+  });
 });
 
 describe("ProtocolRequestError", () => {

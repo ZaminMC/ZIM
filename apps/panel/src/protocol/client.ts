@@ -114,6 +114,8 @@ export class ProtocolClient {
   private lastFailure: unknown = null;
   private hello: HelloResult | null = null;
   private status: ClientStatus = "offline";
+  /** Credential for the next handshake (remote transport, ADR-0011). */
+  private auth: string | undefined;
 
   constructor(
     private readonly createTransport: () => Promise<Transport>,
@@ -131,6 +133,31 @@ export class ProtocolClient {
    *  the retry schedule; observe `status` for progress. */
   async connect(): Promise<void> {
     await this.connectOnce();
+  }
+
+  /** Drop the current connection (and any pending retry) and open a fresh
+   *  one — the operator switched connection profiles (ADR-0011). The new
+   *  handshake picks up the credential set via `setAuth`. */
+  async reconnect(): Promise<void> {
+    if (this.disposed) return;
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    const transport = this.transport;
+    if (transport) {
+      this.generation += 1; // stale-guard everything still in flight
+      this.hello = null;
+      this.transport = null;
+      for (const sub of this.subs.values()) {
+        sub.subscriptionId = null;
+      }
+      this.rejectAllPending(new ConnectionLostError());
+      this.retryAttempt = 0;
+      await transport.stop().catch(() => {});
+      this.setStatus("offline");
+    }
+    await this.connect();
   }
 
   /** Tear everything down: no reconnects, no pending replies. */
@@ -167,6 +194,13 @@ export class ProtocolClient {
   /** The last transport-level failure, for diagnostics surfaces. */
   get lastError(): unknown {
     return this.lastFailure;
+  }
+
+  /** Set the hello `auth` credential, read by the next handshake — i.e. by
+   *  `connect()` / `reconnect()`. `undefined` means local semantics (the
+   *  daemon ignores auth on local transports). */
+  setAuth(auth: string | undefined): void {
+    this.auth = auth;
   }
 
   private setStatus(status: ClientStatus): void {
@@ -282,6 +316,7 @@ export class ProtocolClient {
   private async helloExchange(): Promise<HelloResult> {
     return this.request<HelloResult>("daemon.hello", {
       protocol: PROTOCOL_VERSION,
+      ...(this.auth === undefined ? {} : { auth: this.auth }),
       client: { name: CLIENT_NAME, version: CLIENT_VERSION },
     });
   }
