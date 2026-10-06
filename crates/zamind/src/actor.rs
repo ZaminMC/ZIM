@@ -287,9 +287,7 @@ impl Actor {
             .clone()
             .map(Ok)
             .unwrap_or_else(|| select_java(&self.managed_java_root, required))
-            .map_err(|e| {
-                self.preflight_failure(e)
-            })?;
+            .map_err(|e| self.preflight_failure(e))?;
         let java_info = tokio::task::spawn_blocking({
             let java = java.clone();
             move || zamin_core::java::inspect(&java)
