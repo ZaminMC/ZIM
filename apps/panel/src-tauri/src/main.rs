@@ -159,6 +159,7 @@ async fn autostart_set(enabled: bool) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(HostState::default())
         .invoke_handler(tauri::generate_handler![
             daemon_connect,

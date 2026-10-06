@@ -32,4 +32,46 @@ describe("buildCommands", () => {
     expect(byId("verb-restart")?.disabled).toBe(false);
     expect(byId("verb-kill")?.disabled).toBe(false);
   });
+
+  it("hides the autostart command where the host cannot deliver it", () => {
+    const commands = buildCommands(
+      null,
+      null,
+      { newServer: () => {}, lifecycle: () => {} },
+      { autostart: { available: false }, toggleAutostart: () => {} },
+    );
+    expect(commands.find((command) => command.id === "autostart")).toBeUndefined();
+  });
+
+  it("offers the autostart toggle with the honest label for the current state", () => {
+    const off = buildCommands(
+      null,
+      null,
+      { newServer: () => {}, lifecycle: () => {} },
+      { autostart: { available: true, enabled: false }, toggleAutostart: () => {} },
+    );
+    const offCommand = off.find((command) => command.id === "autostart");
+    expect(offCommand?.label).toBe("Start with the system");
+
+    const on = buildCommands(
+      null,
+      null,
+      { newServer: () => {}, lifecycle: () => {} },
+      { autostart: { available: true, enabled: true }, toggleAutostart: () => {} },
+    );
+    const onCommand = on.find((command) => command.id === "autostart");
+    expect(onCommand?.label).toBe("Stop starting with the system");
+  });
+
+  it("runs the toggle through the command", () => {
+    let toggled = 0;
+    const commands = buildCommands(
+      null,
+      null,
+      { newServer: () => {}, lifecycle: () => {} },
+      { autostart: { available: true, enabled: false }, toggleAutostart: () => (toggled += 1) },
+    );
+    commands.find((command) => command.id === "autostart")?.run();
+    expect(toggled).toBe(1);
+  });
 });

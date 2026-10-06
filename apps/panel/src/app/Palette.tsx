@@ -2,10 +2,12 @@
 // Commands are context-aware: lifecycle verbs for the active server are
 // offered only when the state allows them.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { killServer, restartServer, startServer, stopServer } from "../state/actions";
 import { describeError } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
+import { autostartStatus, setAutostart } from "../integration/autostart";
+import type { AutostartStatus } from "../integration/autostart";
 import { availableVerbs } from "./ServerView";
 import { useServers } from "../state/servers";
 import { useUi } from "../state/ui";
@@ -26,10 +28,26 @@ export function buildCommands(
     newServer: () => void;
     lifecycle: (verb: LifecycleVerb) => void;
   },
+  integration?: {
+    autostart: AutostartStatus;
+    toggleAutostart: () => void;
+  },
 ): Command[] {
   const commands: Command[] = [
     { id: "new-server", label: "Register a new server…", run: actions.newServer },
   ];
+  if (integration?.autostart.available) {
+    // Login autostart (Phase 7): offered only where the host can deliver
+    // it — a plain browser reports unavailable instead.
+    commands.push({
+      id: "autostart",
+      label: integration.autostart.enabled
+        ? "Stop starting with the system"
+        : "Start with the system",
+      hint: "login autostart",
+      run: integration.toggleAutostart,
+    });
+  }
   if (activeServerId && activeState) {
     const verbs = availableVerbs(activeState as never);
     const capitalize = (verb: string) => verb.charAt(0).toUpperCase() + verb.slice(1);
@@ -55,45 +73,77 @@ export function Palette() {
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
+  const [autostart, setAutostartState] = useState<AutostartStatus>({ available: false });
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    let live = true;
+    void autostartStatus().then((status) => {
+      if (live) setAutostartState(status);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const toggleAutostart = useCallback(() => {
+    const current = autostart;
+    if (!current.available) return;
+    close(false);
+    // Optimistic flip, reconciled by the host's answer; a refusal puts the
+    // honest state back. An unavailable host never gets here — the command
+    // is hidden in that case.
+    setAutostartState({ available: true, enabled: !current.enabled });
+    void setAutostart(!current.enabled)
+      .then((done) => {
+        if (done) return;
+        setAutostartState(current);
+      })
+      .catch(() => setAutostartState(current));
+  }, [autostart, close]);
+
   const commands = useMemo(
     () =>
-      buildCommands(activeTab, activeServer?.state ?? null, {
-        newServer: () => {
-          close(false);
-          openNewServer(true);
+      buildCommands(
+        activeTab,
+        activeServer?.state ?? null,
+        {
+          newServer: () => {
+            close(false);
+            openNewServer(true);
+          },
+          lifecycle: (verb) => {
+            if (!activeTab) return;
+            const serverId = activeTab;
+            close(false);
+            setPending(serverId, verb);
+            const run =
+              verb === "start"
+                ? startServer
+                : verb === "stop"
+                  ? stopServer
+                  : verb === "restart"
+                    ? restartServer
+                    : killServer;
+            void run(serverId)
+              .catch((error: unknown) => {
+                const described = describeError(error);
+                useUi.getState().setActionError(serverId, {
+                  code: described.code,
+                  message: described.title,
+                  remediation: described.remediation,
+                });
+              })
+              .finally(() => setPending(serverId, null));
+          },
         },
-        lifecycle: (verb) => {
-          if (!activeTab) return;
-          const serverId = activeTab;
-          close(false);
-          setPending(serverId, verb);
-          const run =
-            verb === "start"
-              ? startServer
-              : verb === "stop"
-                ? stopServer
-                : verb === "restart"
-                  ? restartServer
-                  : killServer;
-          void run(serverId)
-            .catch((error: unknown) => {
-              const described = describeError(error);
-              useUi.getState().setActionError(serverId, {
-                code: described.code,
-                message: described.title,
-                remediation: described.remediation,
-              });
-            })
-            .finally(() => setPending(serverId, null));
-        },
-      }),
-    [activeTab, activeServer?.state, close, openNewServer, setPending],
+        { autostart, toggleAutostart },
+      ),
+    [activeTab, activeServer?.state, autostart, close, openNewServer, setPending, toggleAutostart],
   );
 
   const filtered = commands.filter((command) =>
@@ -120,7 +170,7 @@ export function Palette() {
           setSelected((index) => Math.min(index + 1, filtered.length - 1));
         } else if (event.key === "ArrowUp") {
           event.preventDefault();
-          setSelected((index) => Math.max(index - 1, 0));
+          setSelected((index) => Math.max(index - 1, filtered.length - 1));
         } else if (event.key === "Enter") {
           event.preventDefault();
           runSelected();

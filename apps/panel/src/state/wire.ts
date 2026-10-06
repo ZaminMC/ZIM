@@ -6,6 +6,14 @@
 import { ProtocolClient } from "../protocol/client";
 import { TauriTransport, WsTransport } from "../protocol/transport";
 import type { Transport } from "../protocol/transport";
+import {
+  crashNotification,
+  deliver,
+  isUnfocused,
+  jobNotification,
+  shouldNotify,
+} from "../integration/notifications";
+import type { JobOutcomeName } from "../integration/notifications";
 import { logWarn } from "../logger";
 import { useConnection } from "./connection";
 import { useServers } from "./servers";
@@ -36,6 +44,38 @@ export function startWire(): void {
   void wireEvents();
 }
 
+// --- notifications (Phase 7 taxonomy: only while the operator is away) ---
+
+function serverName(serverId: string): string {
+  return useServers.getState().servers[serverId]?.displayName ?? serverId;
+}
+
+function notifyCrash(serverId: string, phase: string, exitCode?: number): void {
+  const focus = isUnfocused();
+  if (!shouldNotify(focus)) return;
+  void deliver(
+    crashNotification({
+      displayName: serverName(serverId),
+      phase,
+      exitCode,
+    }),
+  );
+}
+
+function notifyJob(jobId: string, outcome: JobOutcomeName): void {
+  const focus = isUnfocused();
+  if (!shouldNotify(focus)) return;
+  const job = useJobs.getState().jobs[jobId];
+  if (!job) return;
+  void deliver(
+    jobNotification({
+      kind: job.kind,
+      outcome,
+      serverName: job.serverId === undefined ? undefined : serverName(job.serverId),
+    }),
+  );
+}
+
 async function wireEvents(): Promise<void> {
   await client.subscribe("events", undefined, {
     onPayload: (notification) => {
@@ -53,6 +93,7 @@ async function wireEvents(): Promise<void> {
       }
       if (event.type === "jobCompleted") {
         useJobs.getState().completed(event.jobId, event.outcome, event.error);
+        notifyJob(event.jobId, event.outcome);
         return;
       }
 
@@ -77,6 +118,7 @@ async function wireEvents(): Promise<void> {
           error: event.error,
           resolved: false,
         });
+        notifyCrash(event.serverId, event.crash.phase, event.crash.exitCode);
       }
     },
     onRegistered: (result) => {

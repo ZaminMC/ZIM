@@ -23,6 +23,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 zamin-bridge = { path = "../../../crates/zamin-bridge" }
 zamin-ipc = { path = "../../../crates/zamin-ipc" }
 
+# Desktop notifications (freedesktop / Windows toast): the webview decides
+# the taxonomy, this plugin performs the OS call.
+tauri-plugin-notification = "2"
+
 # Login autostart (HKCU Run key) — the Windows half of the §12.1 seam.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
