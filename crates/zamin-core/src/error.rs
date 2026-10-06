@@ -63,6 +63,16 @@ pub enum CoreError {
     #[error("no compatible java runtime found for requirement {requirement:?}")]
     JavaNotFound { requirement: String },
 
+    #[error("java major {found} does not satisfy the required major {required}")]
+    JavaIncompatible { found: u32, required: u32 },
+
+    #[error("only {available_mb} MiB free at {path:?}; at least {required_mb} MiB is required")]
+    InsufficientDisk {
+        path: PathBuf,
+        available_mb: u64,
+        required_mb: u64,
+    },
+
     #[error("port {port} is already in use")]
     PortInUse { port: u16 },
 

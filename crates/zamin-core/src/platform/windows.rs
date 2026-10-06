@@ -3,10 +3,12 @@
 //! kill servers, ADR-0001), creation-time process identity, CTRL_BREAK
 //! graceful signal, and job-based tree termination.
 
-use std::path::PathBuf;
+use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
+use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
@@ -209,5 +211,28 @@ impl ProcessOps for WindowsProcessOps {
             }
         }
         Ok(())
+    }
+
+    fn fs_free_bytes(&self, path: &Path) -> Result<u64, PlatformError> {
+        // GetDiskFreeSpaceExW answers for the volume containing `path`;
+        // the caller only needs a sane, unprivileged free-space number.
+        let mut wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut free: u64 = 0;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_mut_ptr(),
+                &mut free,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(free)
     }
 }

@@ -25,6 +25,12 @@ pub struct ServerSettingsDefaults {
     pub max_memory_mb: Option<u32>,
     pub extra_jvm_args: Option<Vec<String>>,
     pub java_path: Option<PathBuf>,
+    /// The Minecraft version this server runs (e.g. "1.21.1"). Drives the
+    /// derived Java-major requirement when `javaMajorRequired` is absent.
+    pub mc_version: Option<String>,
+    /// Direct override of the required Java major version; wins over the
+    /// value derived from `mcVersion` (ADR-0005 preflight).
+    pub java_major_required: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,6 +86,8 @@ pub struct EffectiveSettings {
     pub max_memory_mb: Option<u32>,
     pub extra_jvm_args: Vec<String>,
     pub java_path: Option<PathBuf>,
+    pub mc_version: Option<String>,
+    pub java_major_required: Option<u32>,
 }
 
 impl EffectiveSettings {
@@ -88,7 +96,7 @@ impl EffectiveSettings {
     pub fn provenance(
         global: &ServerSettingsDefaults,
         per_server: &ServerSettingsDefaults,
-    ) -> [Provenance; 7] {
+    ) -> [Provenance; 9] {
         [
             field_provenance(global.stop_timeout_secs, per_server.stop_timeout_secs),
             field_provenance(global.startup_timeout_secs, per_server.startup_timeout_secs),
@@ -100,6 +108,8 @@ impl EffectiveSettings {
                 per_server.extra_jvm_args.clone(),
             ),
             field_provenance(global.java_path.clone(), per_server.java_path.clone()),
+            field_provenance(global.mc_version.clone(), per_server.mc_version.clone()),
+            field_provenance(global.java_major_required, per_server.java_major_required),
         ]
     }
 }
@@ -141,6 +151,13 @@ pub fn layer(
             .java_path
             .clone()
             .or_else(|| global.java_path.clone()),
+        mc_version: per_server
+            .mc_version
+            .clone()
+            .or_else(|| global.mc_version.clone()),
+        java_major_required: per_server
+            .java_major_required
+            .or(global.java_major_required),
     }
 }
 
@@ -242,6 +259,31 @@ mod tests {
         let prov = EffectiveSettings::provenance(&ServerSettingsDefaults::default(), &per);
         assert_eq!(prov[0], Provenance::Custom, "stop timeout is custom");
         assert_eq!(prov[1], Provenance::Global, "startup timeout is global");
+    }
+
+    #[test]
+    fn java_requirement_layers_and_prefers_direct_override() {
+        // Derived from mcVersion when no direct override exists.
+        let global = ServerSettingsDefaults {
+            mc_version: Some("1.21.1".to_owned()),
+            ..Default::default()
+        };
+        let effective = layer(&global, &ServerSettingsDefaults::default());
+        assert_eq!(effective.mc_version.as_deref(), Some("1.21.1"));
+        assert_eq!(effective.java_major_required, None);
+
+        // The direct override wins over a derived value.
+        let per = ServerSettingsDefaults {
+            java_major_required: Some(25),
+            ..Default::default()
+        };
+        let effective = layer(&global, &per);
+        assert_eq!(effective.java_major_required, Some(25));
+        assert_eq!(
+            effective.mc_version.as_deref(),
+            Some("1.21.1"),
+            "mcVersion still visible for the UI"
+        );
     }
 
     #[test]

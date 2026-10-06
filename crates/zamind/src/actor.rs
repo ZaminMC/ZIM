@@ -23,6 +23,11 @@ use crate::hub::HubHandle;
 const TICK: Duration = Duration::from_millis(250);
 const GRACEFUL_GRACE: Duration = Duration::from_secs(10);
 
+/// Disk-headroom sanity floor for a start attempt: 1 GiB. A "sanity"
+/// check, not a sizing tool — a fresh server needs this much for the jar,
+/// libraries, and first world files; more is always better.
+const MIN_DISK_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024;
+
 pub enum ActorCommand {
     Start {
         reply: oneshot::Sender<Result<ServerState, ProtocolError>>,
@@ -281,6 +286,21 @@ impl Actor {
         .map_err(|e| as_internal(e.to_string()))?
         .map_err(|e| self.preflight_failure(e))?;
 
+        // ADR-0005 preflight: the selected runtime must satisfy the
+        // required Java major — declared directly, or derived from the
+        // configured Minecraft version.
+        if let Some(required) = settings
+            .java_major_required
+            .or_else(|| settings.mc_version.as_deref().and_then(java_major_for))
+        {
+            if !java_info.satisfies(required) {
+                return Err(self.preflight_failure(CoreError::JavaIncompatible {
+                    found: java_info.major,
+                    required,
+                }));
+            }
+        }
+
         let jar = {
             let cfg = self.load_server_config().await;
             cfg.jar.unwrap_or_else(|| "server.jar".to_owned())
@@ -386,6 +406,40 @@ impl Actor {
 
         if let Some(port) = settings.port {
             zamin_core::net::check_available(port)?;
+        }
+
+        // Disk headroom sanity (ADR-0005): starting a server onto a full
+        // disk produces the ugliest mid-world-generation crashes; require
+        // a modest floor before spawn.
+        let free = {
+            let path = self.root.clone();
+            match tokio::task::spawn_blocking(move || platform::process().fs_free_bytes(&path))
+                .await
+            {
+                Ok(Ok(free)) => free,
+                Ok(Err(source)) => {
+                    return Err(CoreError::Io {
+                        path: self.root.clone(),
+                        source: match source {
+                            zamin_core::error::PlatformError::Io(io) => io,
+                            other => std::io::Error::other(other.to_string()),
+                        },
+                    });
+                }
+                Err(e) => {
+                    return Err(CoreError::Io {
+                        path: self.root.clone(),
+                        source: std::io::Error::other(e.to_string()),
+                    });
+                }
+            }
+        };
+        if free < MIN_DISK_HEADROOM_BYTES {
+            return Err(CoreError::InsufficientDisk {
+                path: self.root.clone(),
+                available_mb: free / (1024 * 1024),
+                required_mb: MIN_DISK_HEADROOM_BYTES / (1024 * 1024),
+            });
         }
 
         // Directory writability: create and remove a probe file.
@@ -918,6 +972,13 @@ fn select_java() -> Result<PathBuf, CoreError> {
     })
 }
 
+/// Required Java major for a configured Minecraft version; `None` when no
+/// version is configured or the table does not know it (unknown future
+/// versioning must not block a start, ADR-0005).
+fn java_major_for(mc_version: &str) -> Option<u32> {
+    zamin_core::java::required_major(mc_version)
+}
+
 pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
     use zamin_core::error::CoreError as E;
     match error {
@@ -981,6 +1042,26 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             format!("No compatible Java runtime found ({requirement})."),
         )
         .with_remediation(&["install_java", "choose_runtime"]),
+        E::JavaIncompatible { found, required } => ProtocolError::new(
+            ErrorCode::JavaIncompatible,
+            format!(
+                "The selected Java runtime reports major {found}, but this server requires major {required}."
+            ),
+        )
+        .with_context("found", *found as u64)
+        .with_context("required", *required as u64)
+        .with_remediation(&["install_java", "choose_runtime"]),
+        E::InsufficientDisk {
+            path,
+            available_mb,
+            required_mb,
+        } => ProtocolError::new(
+            ErrorCode::DiskFull,
+            format!(
+                "Only {available_mb} MiB free at {path:?}; at least {required_mb} MiB is required to start a server."
+            ),
+        )
+        .with_remediation(&["free_space"]),
         E::PortInUse { port } => ProtocolError::new(
             ErrorCode::PortInUse,
             format!("Port {port} is already in use."),

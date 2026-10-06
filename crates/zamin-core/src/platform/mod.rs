@@ -19,7 +19,7 @@ pub mod paths;
 // Platform-specific discovery data (install roots, executable naming).
 pub use imp::{java_exe_name, java_install_roots};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::error::PlatformError;
@@ -103,6 +103,10 @@ pub trait ProcessOps: Send + Sync {
     /// adopted Windows servers the original Job Object is unreachable, so
     /// the kill degrades to the single verified process.
     fn force_kill(&self, pid: u32) -> Result<(), PlatformError>;
+
+    /// Bytes still free on the filesystem containing `path` (unprivileged
+    /// view). Used by the disk-headroom preflight check (ADR-0005).
+    fn fs_free_bytes(&self, path: &Path) -> Result<u64, PlatformError>;
 
     /// Run a short-lived process to completion and capture its output.
     /// Blocking by design; async callers go through `spawn_blocking`.

@@ -284,3 +284,45 @@ async fn duplicate_start_is_idempotent() {
         .await
         .expect("stops cleanly after duplicate start");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn java_incompatible_preflight_is_typed() {
+    // The fake server always reports java.version = 21.0.3; requiring a
+    // newer major must produce a typed JAVA_INCOMPATIBLE preflight
+    // failure, not a crash or a boot attempt.
+    let data_dir = scoped_dir("data-java");
+    let root = make_server_root("root-java");
+    write_server_config(&data_dir, "test", "javaMajorRequired = 25\n");
+
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("java");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    register_server(&mut client, "test", &root).await;
+    subscribe_events(&mut client, Some("test")).await;
+
+    let error = start_server(&mut client, "test")
+        .await
+        .expect_err("start with incompatible java must fail preflight");
+    assert_eq!(error["code"], "JAVA_INCOMPATIBLE", "{error}");
+    assert_eq!(
+        error["context"]["found"], 21,
+        "found major comes from the runtime inspection"
+    );
+    assert_eq!(error["context"]["required"], 25);
+    wait_list_state(
+        &mut client,
+        "test",
+        "failed-preflight",
+        Duration::from_secs(5),
+    )
+    .await;
+
+    // Recovery: relaxing the requirement lets the same server start.
+    write_server_config(&data_dir, "test", "javaMajorRequired = 17\n");
+    start_server(&mut client, "test")
+        .await
+        .expect("start after relaxing requirement");
+    wait_for_state(&mut client, ServerState::Running, Duration::from_secs(15))
+        .await
+        .expect("server reaches running with satisfied requirement");
+}

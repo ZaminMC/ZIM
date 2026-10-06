@@ -2,7 +2,7 @@
 //! `setpgid(0, 0)`), `/proc` start-time + boot-id identity, SIGTERM/SIGKILL
 //! to the group.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use crate::error::PlatformError;
@@ -131,6 +131,23 @@ impl ProcessOps for UnixProcessOps {
             _ => Err(err.into()),
         }
     }
+
+    fn fs_free_bytes(&self, path: &Path) -> Result<u64, PlatformError> {
+        let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
+            PlatformError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path contains a NUL byte",
+            ))
+        })?;
+        let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
+        let ok = unsafe { libc::statvfs(c_path.as_ptr(), &mut vfs) };
+        if ok != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        // f_bavail: free blocks for unprivileged users — the honest number
+        // for a daemon that must not count reserved space it cannot use.
+        Ok(vfs.f_bavail as u64 * vfs.f_frsize as u64)
+    }
 }
 
 /// `/proc/<pid>/stat` starttime (field 22) plus the boot id: stable across
@@ -177,5 +194,13 @@ mod tests {
             working_dir: PathBuf::from("/tmp"),
         };
         assert_eq!(spec.working_dir, PathBuf::from("/tmp"));
+    }
+
+    #[test]
+    fn fs_free_bytes_reports_a_plausible_tmpfs() {
+        let free = process()
+            .fs_free_bytes(Path::new("/tmp"))
+            .expect("statvfs on /tmp works");
+        assert!(free > 0, "free space must be positive, got {free}");
     }
 }
