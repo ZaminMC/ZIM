@@ -114,6 +114,11 @@ pub struct ServerCreateParams {
     /// `server.properties`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// Explicit `java` executable for the new server. Omit to let the
+    /// daemon pick (system candidates, then its managed runtimes) at
+    /// start time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub java_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

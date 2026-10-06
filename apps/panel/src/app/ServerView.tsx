@@ -5,7 +5,7 @@
 // resulting state.
 
 import { useEffect, useState } from "react";
-import { getServer, killServer, restartServer, startServer, stopServer } from "../state/actions";
+import { getServer, killServer, restartServer, startServer, stopServer, writeWholeFile } from "../state/actions";
 import { describeError, LIFECYCLE_VERBS } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
 import type { ServerState } from "../protocol/types";
@@ -138,6 +138,34 @@ export function ServerView({ serverId }: { serverId: string }) {
             </button>
           </div>
           {actionError.code ? <span className={styles.codeChip}>{actionError.code}</span> : null}
+          {actionError.code === "NEEDS_EULA" ? (
+            <div className={styles.eulaRow}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  // The typed remediation, made one click wide: write the
+                  // acceptance through the same rooted filesystem the
+                  // daemon enforces, then retry the start.
+                  setActionError(serverId, null);
+                  void writeWholeFile(serverId, "eula.txt", new TextEncoder().encode("eula=true\n"))
+                    .then(() => dispatch("start"))
+                    .catch((error: unknown) => {
+                      const described = describeError(error);
+                      setActionError(serverId, {
+                        code: described.code,
+                        message: described.title,
+                        remediation: described.remediation,
+                      });
+                    });
+                }}
+              >
+                Accept EULA &amp; start
+              </Button>
+              <span className={styles.meta}>
+                Accepting means you agree to Minecraft's EULA (aka.ms/minecrafteula).
+              </span>
+            </div>
+          ) : null}
           {actionError.remediation.length > 0 ? (
             <ul className={styles.remediation}>
               {actionError.remediation.map((step) => (

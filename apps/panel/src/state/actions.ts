@@ -6,6 +6,11 @@ import type {
   BackupJobResult,
   BackupsListResult,
   CancelJobParams,
+  CatalogBuildsResult,
+  CatalogListResult,
+  CatalogVersionsResult,
+  JavaInstallResult,
+  JavaListResult,
   FilesCommitResult,
   Job,
   JobsListResult,
@@ -19,6 +24,8 @@ import type {
   RegisterServerParams,
   RegisterServerResult,
   RemoveServerParams,
+  ServerCreateParams,
+  ServerCreateResult,
   ServerDetails,
   ServerListResult,
   StdinParams,
@@ -264,4 +271,43 @@ export async function subscribeLogs(
     initialCursor,
   );
   return { dispose: () => handle.dispose(), result };
+}
+
+// --- software catalog & creation (§7b) ---
+
+export async function catalogList(): Promise<CatalogListResult> {
+  return client.request<CatalogListResult>("catalog.list");
+}
+
+export async function catalogVersions(project: string): Promise<CatalogVersionsResult> {
+  return client.request<CatalogVersionsResult>("catalog.versions", { project });
+}
+
+export async function catalogBuilds(
+  project: string,
+  version: string,
+): Promise<CatalogBuildsResult> {
+  return client.request<CatalogBuildsResult>("catalog.builds", { project, version });
+}
+
+export async function createServer(
+  params: Omit<ServerCreateParams, "requestId">,
+): Promise<ServerCreateResult> {
+  return client.request<ServerCreateResult>("server.create", {
+    ...params,
+    requestId: newRequestId(),
+  });
+}
+
+// --- java runtimes (§7c) ---
+
+export async function listJava(): Promise<JavaListResult> {
+  return client.request<JavaListResult>("java.list");
+}
+
+export async function installJava(majorVersion: number): Promise<JavaInstallResult> {
+  return client.request<JavaInstallResult>("java.install", {
+    requestId: newRequestId(),
+    majorVersion,
+  });
 }

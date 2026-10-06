@@ -128,6 +128,7 @@ impl Engine {
             root,
             runtime_dir,
             self.inner.data_dir.join("config.toml"),
+            self.managed_java_dir(),
             self.inner.hub.clone(),
             zamin_core::supervisor::state::ServerState::NotRunning,
         );
@@ -173,6 +174,7 @@ impl Engine {
                 root,
                 runtime_dir,
                 self.inner.data_dir.join("config.toml"),
+                self.managed_java_dir(),
                 self.inner.hub.clone(),
                 zamin_core::supervisor::state::ServerState::Adopting,
             )
@@ -1193,6 +1195,7 @@ impl Engine {
                         mc_version: Some(params.version.clone()),
                         java_major_required: java_major,
                         port: params.port,
+                        java_path: params.java_path.clone().map(PathBuf::from),
                         ..Default::default()
                     },
                 };

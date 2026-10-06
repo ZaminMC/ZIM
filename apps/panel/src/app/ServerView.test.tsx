@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   stopServer: vi.fn(),
   restartServer: vi.fn(),
   killServer: vi.fn(),
+  writeWholeFile: vi.fn(),
 }));
 
 vi.mock("../state/wire", () => ({ client: {}, startWire: vi.fn() }));
@@ -24,6 +25,7 @@ vi.mock("../state/actions", () => ({
   stopServer: mocks.stopServer,
   restartServer: mocks.restartServer,
   killServer: mocks.killServer,
+  writeWholeFile: mocks.writeWholeFile,
 }));
 
 describe("availableVerbs", () => {
@@ -131,5 +133,50 @@ describe("ServerView", () => {
     render(<ServerView serverId="alpha" />);
     fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() => expect(useServers.getState().crashes["alpha"]?.resolved).toBe(true));
+  });
+});
+
+describe("ServerView — EULA acceptance", () => {
+  beforeEach(() => {
+    useServers.setState({
+      servers: {
+        fresh: { serverId: "fresh", displayName: "Fresh", state: "not-running" },
+      },
+      crashes: {},
+    });
+    useUi.setState({ pending: {}, openTabs: ["fresh"], activeTab: "fresh" });
+    mocks.getServer.mockReset().mockResolvedValue({
+      serverId: "fresh",
+      displayName: "Fresh",
+      state: "not-running",
+    });
+  });
+
+  afterEach(cleanup);
+
+  it("turns the typed NEEDS_EULA into an accept-and-start affordance", async () => {
+    mocks.startServer.mockReset();
+    mocks.startServer
+      .mockRejectedValueOnce(
+        new ProtocolRequestError({
+          code: "NEEDS_EULA",
+          message: "The server cannot start: EULA is not accepted.",
+          remediation: ["accept_eula"],
+        }),
+      )
+      .mockResolvedValueOnce({ serverId: "fresh", state: "starting" });
+    mocks.writeWholeFile.mockReset().mockResolvedValue(undefined);
+
+    render(<ServerView serverId="fresh" />);
+    const start = await screen.findByRole("button", { name: "Start" });
+    fireEvent.click(start);
+
+    const accept = await screen.findByRole("button", { name: /Accept EULA & start/i });
+    fireEvent.click(accept);
+
+    await waitFor(() => expect(mocks.writeWholeFile).toHaveBeenCalled());
+    expect(mocks.writeWholeFile.mock.calls[0]?.[0]).toBe("fresh");
+    expect(mocks.writeWholeFile.mock.calls[0]?.[1]).toBe("eula.txt");
+    await waitFor(() => expect(mocks.startServer).toHaveBeenCalledTimes(2));
   });
 });

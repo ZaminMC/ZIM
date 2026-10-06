@@ -3,7 +3,7 @@
 //! channel; everything mutating happens here, serialized — double-start
 //! races and interleaved stdin are structurally impossible.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -67,6 +67,9 @@ pub struct Actor {
     root: PathBuf,
     runtime_dir: PathBuf,
     global_config_path: PathBuf,
+    /// The daemon's managed JDK root (`<data>/java`): auto-selection
+    /// considers fetched runtimes alongside system-wide candidates.
+    managed_java_root: PathBuf,
     hub: HubHandle,
 
     machine: StateMachine,
@@ -95,6 +98,7 @@ impl Actor {
         root: PathBuf,
         runtime_dir: PathBuf,
         global_config_path: PathBuf,
+        managed_java_root: PathBuf,
         hub: HubHandle,
         initial_state: zamin_core::supervisor::state::ServerState,
     ) -> Actor {
@@ -103,6 +107,7 @@ impl Actor {
             root,
             runtime_dir,
             global_config_path,
+            managed_java_root,
             hub,
             machine: StateMachine::new(initial_state),
             spawned: None,
@@ -122,6 +127,7 @@ impl Actor {
         root: PathBuf,
         runtime_dir: PathBuf,
         global_config_path: PathBuf,
+        managed_java_root: PathBuf,
         hub: HubHandle,
         initial_state: zamin_core::supervisor::state::ServerState,
     ) -> mpsc::Sender<ActorCommand> {
@@ -131,6 +137,7 @@ impl Actor {
             root,
             runtime_dir,
             global_config_path,
+            managed_java_root,
             hub,
             initial_state,
         );
@@ -271,15 +278,17 @@ impl Actor {
             return Err(self.preflight_failure(error));
         }
 
+        let required = settings
+            .java_major_required
+            .or_else(|| settings.mc_version.as_deref().and_then(java_major_for));
+
         let java = settings
             .java_path
             .clone()
             .map(Ok)
-            .unwrap_or_else(select_java)
+            .unwrap_or_else(|| select_java(&self.managed_java_root, required))
             .map_err(|e| {
-                self.preflight_failure(CoreError::JavaNotFound {
-                    requirement: e.to_string(),
-                })
+                self.preflight_failure(e)
             })?;
         let java_info = tokio::task::spawn_blocking({
             let java = java.clone();
@@ -291,11 +300,10 @@ impl Actor {
 
         // ADR-0005 preflight: the selected runtime must satisfy the
         // required Java major — declared directly, or derived from the
-        // configured Minecraft version.
-        if let Some(required) = settings
-            .java_major_required
-            .or_else(|| settings.mc_version.as_deref().and_then(java_major_for))
-        {
+        // configured Minecraft version. An explicit javaPath is
+        // authoritative: an incompatible pick is a typed failure, never
+        // a silent substitution.
+        if let Some(required) = required {
             if !java_info.satisfies(required) {
                 return Err(self.preflight_failure(CoreError::JavaIncompatible {
                     found: java_info.major,
@@ -1028,17 +1036,33 @@ async fn pump_logs(
     }
 }
 
-/// Pick the first inspectable candidate. The version requirement table
-/// applies once server config carries an MC version; until then any
-/// inspectable runtime is acceptable, newest enumeration order first.
-fn select_java() -> Result<PathBuf, CoreError> {
-    for candidate in zamin_core::java::candidate_paths() {
-        if zamin_core::java::inspect(&candidate).is_ok() {
-            return Ok(candidate);
+/// Pick the first inspectable candidate satisfying `required` (system
+/// candidates first, then the daemon's managed runtimes). With no
+/// requirement, the first inspectable runtime wins — the historical
+/// behavior. A requirement nobody satisfies is a typed JavaNotFound
+/// (or JavaIncompatible when candidates exist but are all too old),
+/// which the UI turns into its install affordance.
+fn select_java(managed_root: &Path, required: Option<u32>) -> Result<PathBuf, CoreError> {
+    let mut candidates = zamin_core::java::candidate_paths();
+    candidates.extend(zamin_core::java::managed_candidates(managed_root));
+    let mut all_too_old: Option<(u32, u32)> = None;
+    for candidate in candidates {
+        if let Ok(info) = zamin_core::java::inspect(&candidate) {
+            match required {
+                Some(required) if !info.satisfies(required) => {
+                    all_too_old = Some((info.major, required));
+                }
+                _ => return Ok(candidate),
+            }
         }
     }
-    Err(CoreError::JavaNotFound {
-        requirement: "any inspectable runtime".to_owned(),
+    Err(match all_too_old {
+        Some((found, required)) => CoreError::JavaIncompatible { found, required },
+        None => CoreError::JavaNotFound {
+            requirement: required
+                .map(|r| format!("java major {r}"))
+                .unwrap_or_else(|| "any inspectable runtime".to_owned()),
+        },
     })
 }
 

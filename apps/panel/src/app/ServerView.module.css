@@ -113,3 +113,10 @@
   background: var(--surface-3);
   color: var(--text);
 }
+
+.eulaRow {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}

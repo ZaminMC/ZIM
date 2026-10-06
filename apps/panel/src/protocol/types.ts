@@ -135,7 +135,12 @@ export interface MetricsSample {
 
 // --- jobs & backups (§7) ---
 
-export type JobKind = "server.create" | "backup.create" | "backup.restore" | "archive.extract";
+export type JobKind =
+  | "server.create"
+  | "backup.create"
+  | "backup.restore"
+  | "archive.extract"
+  | "java.install";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type JobOutcome = "succeeded" | "failed" | "cancelled";
 export type BackupTaken = "live" | "cold";
@@ -357,3 +362,81 @@ export interface JsonRpcNotification {
 }
 
 export type JsonRpcIncoming = JsonRpcResponse | JsonRpcNotification;
+
+// --- software catalog & creation (§7b) ---
+
+export interface CatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface CatalogListResult {
+  entries: CatalogEntry[];
+}
+
+export interface CatalogVersion {
+  id: string;
+  javaMajor?: number;
+}
+
+export interface CatalogVersionsResult {
+  project: string;
+  versions: CatalogVersion[];
+}
+
+export interface CatalogDownload {
+  name: string;
+  sha256: string;
+  size?: number;
+  url: string;
+}
+
+export interface CatalogBuild {
+  id: number;
+  channel: string;
+  time?: string;
+  download: CatalogDownload;
+}
+
+export interface CatalogBuildsResult {
+  project: string;
+  version: string;
+  javaMajor?: number;
+  builds: CatalogBuild[];
+}
+
+export interface ServerCreateParams {
+  requestId: string;
+  serverId: string;
+  displayName?: string;
+  project: string;
+  version: string;
+  build?: number;
+  templateId?: string;
+  port?: number;
+  javaPath?: string;
+}
+
+export type ServerCreateResult = BackupJobResult;
+
+// --- java runtimes (§7c) ---
+
+export interface JavaRuntime {
+  path: string;
+  major: number;
+  versionString: string;
+  vendor: string;
+  managed: boolean;
+}
+
+export interface JavaListResult {
+  runtimes: JavaRuntime[];
+}
+
+export interface JavaInstallParams {
+  requestId: string;
+  majorVersion: number;
+}
+
+export type JavaInstallResult = BackupJobResult;
