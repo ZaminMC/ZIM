@@ -11,6 +11,13 @@ import type {
   ServerSummary,
 } from "../protocol/types";
 
+/** What the sidebar and views know: a summary plus optional details. */
+export type ServerEntry = ServerSummary & {
+  software?: string;
+  version?: string;
+  port?: number;
+};
+
 export interface CrashInfo {
   serverId: string;
   phase: CrashClassification["phase"];
@@ -22,7 +29,7 @@ export interface CrashInfo {
 }
 
 interface ServersState {
-  servers: Record<string, ServerSummary>;
+  servers: Record<string, ServerEntry>;
   /** Load order: sidebar sorts by display name, not insertion. */
   replaceAll: (servers: ServerSummary[]) => void;
   /** Insert or refresh one server (e.g. after a `registered` event, which
@@ -41,7 +48,7 @@ export const useServers = create<ServersState>((set) => ({
 
   replaceAll: (servers) =>
     set((state) => {
-      const next: Record<string, ServerSummary> = {};
+      const next: Record<string, ServerEntry> = {};
       for (const server of servers) next[server.serverId] = server;
       const crashes = { ...state.crashes };
       for (const serverId of Object.keys(crashes)) {
@@ -94,6 +101,6 @@ export const useServers = create<ServersState>((set) => ({
 }));
 
 /** Sorted view for the sidebar. */
-export function sortedServers(servers: Record<string, ServerSummary>): ServerSummary[] {
+export function sortedServers(servers: Record<string, ServerEntry>): ServerEntry[] {
   return Object.values(servers).sort((a, b) => a.displayName.localeCompare(b.displayName));
 }

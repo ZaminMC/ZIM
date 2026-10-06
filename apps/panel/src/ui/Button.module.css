@@ -1,0 +1,78 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition:
+    background var(--speed-fast) var(--ease),
+    border-color var(--speed-fast) var(--ease),
+    transform var(--speed-fast) var(--ease);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+
+.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-2));
+}
+
+.busy {
+  position: relative;
+  color: transparent;
+}
+
+.busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-top-color: var(--text);
+  animation: spin 700ms linear infinite;
+}
+
+.busy.primary::after {
+  border-top-color: var(--accent-contrast);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

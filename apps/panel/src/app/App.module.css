@@ -1,4 +1,4 @@
-/* Panel shell: sidebar + top bar + content. */
+/* Panel shell: sidebar + top bar + tab strip + content. */
 
 .shell {
   display: grid;
@@ -6,7 +6,7 @@
   grid-template-rows: 48px 1fr;
   grid-template-areas:
     "topbar topbar"
-    "sidebar content";
+    "sidebar main";
   height: 100dvh;
   background: var(--bg);
   color: var(--text);
@@ -50,8 +50,39 @@
   gap: var(--space-2);
 }
 
+.sidebarHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.main {
+  grid-area: main;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
 .content {
-  grid-area: content;
   overflow-y: auto;
   padding: var(--space-5);
+}
+
+.badge {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.badgeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
 }

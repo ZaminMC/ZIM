@@ -1,12 +1,18 @@
-// Panel shell (P3-1): sidebar server list + connection badge. The full
-// vertical slice (detail view, terminal, palette, crash card) builds on
-// this layout in the next slice.
+// Panel shell: sidebar (server list + New server), tab strip, content area,
+// command palette, and modals. Ctrl/Cmd+K is the keyboard surface for the
+// §53 journey.
 
 import { useEffect, useMemo } from "react";
 import { useConnection } from "../state/connection";
-import { sortedServers, useServers } from "../state/servers";
+import { useServers } from "../state/servers";
+import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
+import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
+import { NewServerModal } from "./NewServerModal";
+import { Palette } from "./Palette";
+import { ServerView } from "./ServerView";
+import { TabStrip } from "./TabStrip";
 import styles from "./App.module.css";
 import listStyles from "./ServerList.module.css";
 
@@ -19,7 +25,27 @@ export function App() {
   const daemon = useConnection((s) => s.daemon);
   const lastError = useConnection((s) => s.lastError);
   const serverMap = useServers((s) => s.servers);
-  const servers = useMemo(() => sortedServers(serverMap), [serverMap]);
+  const servers = useMemo(() => Object.values(serverMap), [serverMap]);
+  const activeTab = useUi((s) => s.activeTab);
+  const openServer = useUi((s) => s.openServer);
+  const newServerOpen = useUi((s) => s.newServerOpen);
+  const setNewServerOpen = useUi((s) => s.setNewServerOpen);
+  const paletteOpen = useUi((s) => s.paletteOpen);
+  const setPaletteOpen = useUi((s) => s.setPaletteOpen);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen(!useUi.getState().paletteOpen);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setPaletteOpen]);
+
+  const sorted = [...servers].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const activeServer = activeTab ? serverMap[activeTab] : undefined;
 
   return (
     <div className={styles.shell}>
@@ -30,51 +56,68 @@ export function App() {
             {daemon ? `${daemon.name} v${daemon.version}` : "\u00a0"}
           </span>
         </div>
-        <ConnectionBadge status={status} detail={lastError} />
+        <span className={styles.badge} title={lastError ?? undefined}>
+          <span
+            className={styles.badgeDot}
+            style={{
+              background:
+                status === "ready"
+                  ? "var(--success)"
+                  : status === "connecting"
+                    ? "var(--warning)"
+                    : "var(--danger)",
+            }}
+          />
+          {status === "ready" ? "daemon online" : status === "connecting" ? "connecting…" : "daemon offline"}
+        </span>
       </header>
 
       <nav className={styles.sidebar} aria-label="Servers">
-        <ServerList servers={servers} />
+        <div className={styles.sidebarHead}>
+          <span>Servers</span>
+        </div>
+        <Button variant="primary" onClick={() => setNewServerOpen(true)}>
+          + New server
+        </Button>
+        {sorted.length > 0 ? (
+          <ul className={listStyles.list}>
+            {sorted.map((server) => (
+              <li
+                key={server.serverId}
+                className={listStyles.item}
+                onClick={() => openServer(server.serverId)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") openServer(server.serverId);
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`Open ${server.displayName}`}
+              >
+                <StatusDot state={server.state} />
+                <span className={listStyles.name}>{server.displayName}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </nav>
 
-      <main className={styles.content}>
-        {servers.length === 0 && status === "ready" ? (
-          <p className={listStyles.empty}>
-            No servers registered yet. Register one with
-            <code> zamin register &lt;id&gt; &lt;path&gt;</code>, or wait for the next
-            slice: the New Server flow lives here.
-          </p>
-        ) : null}
-      </main>
+      <div className={styles.main}>
+        <TabStrip />
+        <main className={styles.content}>
+          {activeServer ? (
+            <ServerView serverId={activeServer.serverId} />
+          ) : (
+            <p className={listStyles.empty}>
+              {servers.length === 0
+                ? "No servers yet. Use “+ New server” (or the Ctrl+K palette) to register an existing server directory."
+                : "Pick a server from the sidebar, or press Ctrl+K for commands."}
+            </p>
+          )}
+        </main>
+      </div>
+
+      {newServerOpen ? <NewServerModal /> : null}
+      {paletteOpen ? <Palette /> : null}
     </div>
-  );
-}
-
-function ConnectionBadge({ status, detail }: { status: string; detail: string | null }) {
-  const tone =
-    status === "ready" ? "var(--success)" : status === "connecting" ? "var(--warning)" : "var(--danger)";
-  const label = status === "ready" ? "daemon online" : status === "connecting" ? "connecting…" : "daemon offline";
-  return (
-    <span
-      title={detail ?? undefined}
-      style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center", color: "var(--text-muted)" }}
-    >
-      <span style={{ width: 8, height: 8, borderRadius: "50%", background: tone, display: "inline-block" }} />
-      {label}
-    </span>
-  );
-}
-
-function ServerList({ servers }: { servers: ReturnType<typeof sortedServers> }) {
-  if (servers.length === 0) return null;
-  return (
-    <ul className={listStyles.list}>
-      {servers.map((server) => (
-        <li key={server.serverId} className={listStyles.item}>
-          <StatusDot state={server.state} />
-          <span className={listStyles.name}>{server.displayName}</span>
-        </li>
-      ))}
-    </ul>
   );
 }

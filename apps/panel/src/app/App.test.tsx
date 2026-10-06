@@ -53,6 +53,6 @@ describe("App shell", () => {
   it("nudges toward registration when the registry is empty", () => {
     useConnection.setState({ status: "ready", daemon: { name: "zamind", version: "1" } });
     render(<App />);
-    expect(screen.getByText(/No servers registered yet/)).toBeTruthy();
+    expect(screen.getByText(/No servers yet/)).toBeTruthy();
   });
 });

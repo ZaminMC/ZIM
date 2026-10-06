@@ -18,6 +18,11 @@ export const client = new ProtocolClient((): Promise<Transport> =>
   isTauri ? Promise.resolve(new TauriTransport()) : Promise.resolve(new WsTransport(bridgeUrl)),
 );
 
+if (import.meta.env.DEV) {
+  // Dev diagnostics hook: browser-console access to the live client.
+  (window as unknown as { __zaminClient?: ProtocolClient }).__zaminClient = client;
+}
+
 let started = false;
 
 /** Idempotent: bind stores, connect, and keep the events stream open. */

@@ -1,0 +1,58 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.input {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.hint {
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  line-height: 1.5;
+}
+
+.row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.alert {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--danger-strong);
+  line-height: 1.5;
+}
+
+.remediation {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
+  color: var(--text-muted);
+}
