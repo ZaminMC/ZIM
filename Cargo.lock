@@ -753,6 +753,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zamin-bridge"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "tokio",
+ "tracing",
+ "zamin-ipc",
+ "zamin-protocol",
+]
+
+[[package]]
 name = "zamin-cli"
 version = "0.1.0"
 dependencies = [

@@ -3,11 +3,16 @@ resolver = "2"
 members = [
     "crates/zamin-protocol",
     "crates/zamin-ipc",
+    "crates/zamin-bridge",
     "crates/zamin-core",
     "crates/zamind",
     "crates/zamin-cli",
     "crates/testing/fake-mc-server",
 ]
+# The panel's Tauri host is a standalone crate (tauri pulls webkit2gtk and
+# friends, which are machine dependencies, not workspace ones). Build it in
+# place: `cargo build` inside apps/panel/src-tauri.
+exclude = ["apps/panel/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

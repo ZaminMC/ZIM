@@ -1,0 +1,16 @@
+[package]
+name = "zamin-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+
+zamin-ipc = { path = "../zamin-ipc" }
+
+[dev-dependencies]
+zamin-protocol = { path = "../zamin-protocol" }
