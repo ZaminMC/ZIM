@@ -10,6 +10,9 @@
 # Usage:
 #   install-linux.sh <payload-dir>         install (idempotent, upgrades too)
 #   install-linux.sh --autostart on|off    toggle login autostart (no payload)
+#   install-linux.sh --service on|off      toggle the systemd user unit for
+#                                          the daemon (no payload; survives
+#                                          logout, restarts on failure)
 #   install-linux.sh --uninstall           remove everything this script installed
 #   install-linux.sh --prefix DIR          install root (default: $HOME/.local)
 #
@@ -18,6 +21,7 @@
 #   $D/applications/mc.zamin.panel.desktop        (Exec rewritten to $P/bin/zamin-panel)
 #   $D/icons/hicolor/**/mc.zamin.panel.*
 #   $C/autostart/mc.zamin.panel.desktop           (only via --autostart on)
+#   $C/systemd/user/mc.zamin.daemon.service       (only via --service on)
 #
 # Never touched: daemon-owned state (XDG data zaminpanel/ tree, server roots).
 
@@ -31,6 +35,8 @@ prefix="${HOME}/.local"
 payload=""
 action="install"
 autostart=""
+service=""
+SERVICE_UNIT=mc.zamin.daemon.service
 
 die() { echo "install-linux: $1" >&2; exit 1; }
 info() { echo "install-linux: $1"; }
@@ -53,6 +59,14 @@ while [ $# -gt 0 ]; do
             case "$2" in
                 on|off) action="autostart"; autostart="$2" ;;
                 *) die "--autostart needs on|off" ;;
+            esac
+            shift
+            ;;
+        --service)
+            [ $# -ge 2 ] || die "--service needs on|off"
+            case "$2" in
+                on|off) action="service"; service="$2" ;;
+                *) die "--service needs on|off" ;;
             esac
             shift
             ;;
@@ -100,6 +114,56 @@ if [ "$action" = "autostart" ]; then
     exit 0
 fi
 
+# --- service toggle (independent of any payload) ----------------------------
+service_path="${CONFIG}/systemd/user/${SERVICE_UNIT}"
+
+# systemd is optional (musl boxes, containers, WSL1): the unit file is
+# always managed honestly; the enable step is best-effort with a report.
+service_systemctl() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    systemctl --user "$@"
+}
+
+if [ "$action" = "service" ]; then
+    if [ "$service" = "on" ]; then
+        [ -x "${prefix}/bin/zamind" ] ||
+            die "no installed daemon at ${prefix}/bin/zamind — install first"
+        mkdir -p "${CONFIG}/systemd/user"
+        {
+            echo "[Unit]"
+            echo "Description=zamind — the ZaminPanel daemon"
+            echo "Documentation=https://github.com/ZaminMC/ZaminPanel"
+            echo "StartLimitIntervalSec=60"
+            echo "StartLimitBurst=4"
+            echo ""
+            echo "[Service]"
+            echo "ExecStart=${prefix}/bin/zamind"
+            echo "Restart=on-failure"
+            echo "RestartSec=3"
+            echo "PrivateTmp=true"
+            echo "NoNewPrivileges=true"
+            echo ""
+            echo "[Install]"
+            echo "WantedBy=default.target"
+        } > "$service_path"
+        info "service unit written: $service_path"
+        if service_systemctl daemon-reload && \
+            service_systemctl enable --now "${SERVICE_UNIT}"; then
+            info "service ON: enabled and started (systemd user scope)"
+        else
+            info "warning: unit installed but not enabled — systemctl --user is"
+            info "warning: unavailable or refused here (container/WSL/no bus). It"
+            info "warning: activates on a real systemd user session."
+        fi
+    else
+        service_systemctl disable --now "${SERVICE_UNIT}" 2>/dev/null || true
+        [ -f "$service_path" ] && rm -f "$service_path"
+        service_systemctl daemon-reload 2>/dev/null || true
+        info "service OFF"
+    fi
+    exit 0
+fi
+
 # --- uninstall --------------------------------------------------------------
 if [ "$action" = "uninstall" ]; then
     for bin in $BINS; do
@@ -111,6 +175,9 @@ if [ "$action" = "uninstall" ]; then
         find "${DATA}/icons/hicolor" -name "${APP}.*" -exec rm -f {} +
     fi
     [ -f "$autostart_path" ] && rm -f "$autostart_path"
+    service_systemctl disable --now "${SERVICE_UNIT}" 2>/dev/null || true
+    [ -f "$service_path" ] && rm -f "$service_path"
+    service_systemctl daemon-reload 2>/dev/null || true
     command -v update-desktop-database >/dev/null 2>&1 &&
         update-desktop-database "${DATA}/applications" 2>/dev/null || true
     info "uninstalled from ${prefix} and ${DATA} (daemon data was not touched)"
@@ -153,3 +220,4 @@ info "installed: ${prefix}/bin/{zamin-panel,zamind,zamin}"
 info "desktop:   ${DATA}/applications/${APP}.desktop"
 info "icons:     ${DATA}/icons/hicolor (theme ${APP})"
 info "autostart stays off until: install-linux.sh --autostart on"
+info "daemon service stays off until: install-linux.sh --service on"

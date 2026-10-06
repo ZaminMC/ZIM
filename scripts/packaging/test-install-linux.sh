@@ -86,6 +86,22 @@ grep -q "^Exec=$PREFIX/bin/zamin-panel$" "$AUTO" || fail "autostart Exec wrong"
 [ ! -f "$AUTO" ] || fail "autostart entry not removed"
 ok "autostart on/off writes and removes the XDG entry"
 
+# 3b. service on/off — unit file managed honestly, enable best-effort
+"$INSTALL" --service on > "$WORK/service.log" 2>&1 || fail "service on failed"
+UNIT="$XDG_CONFIG_HOME/systemd/user/mc.zamin.daemon.service"
+[ -f "$UNIT" ] || fail "systemd user unit missing"
+grep -q "^ExecStart=$PREFIX/bin/zamind$" "$UNIT" ||
+    fail "unit ExecStart not pointed at the installed daemon"
+grep -q "^Restart=on-failure$" "$UNIT" || fail "unit does not restart on failure"
+grep -q "^WantedBy=default.target$" "$UNIT" || fail "unit not wanted by default.target"
+if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify "$UNIT" 2>"$WORK/verify.log" ||
+        fail "systemd-analyze verify rejected the unit: $(cat "$WORK/verify.log")"
+fi
+"$INSTALL" --service off > "$WORK/service-off.log" 2>&1 || fail "service off failed"
+[ ! -f "$UNIT" ] || fail "unit survived --service off"
+ok "service on/off writes and removes a valid systemd user unit"
+
 # 4. missing payload piece is a hard error
 mkdir -p "$WORK/broken/bin"
 if "$INSTALL" "$WORK/broken" > "$WORK/broken.log" 2>&1; then
@@ -97,6 +113,7 @@ ok "a broken payload is rejected with a typed message"
 
 # 5. uninstall
 "$INSTALL" "$PAYLOAD" > "$WORK/reinstall.log" 2>&1
+"$INSTALL" --service on > "$WORK/service-again.log" 2>&1
 "$INSTALL" --uninstall > "$WORK/uninstall.log" 2>&1 || fail "uninstall failed"
 for bin in zamin-panel zamind zamin; do
     [ ! -f "$PREFIX/bin/$bin" ] || fail "$bin survived uninstall"
@@ -104,6 +121,8 @@ done
 [ ! -f "$DESKTOP" ] || fail "desktop entry survived uninstall"
 [ ! -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/mc.zamin.panel.svg" ] ||
     fail "icons survived uninstall"
+[ ! -f "$XDG_CONFIG_HOME/systemd/user/mc.zamin.daemon.service" ] ||
+    fail "systemd user unit survived uninstall"
 ok "uninstall removes exactly what install added"
 
 echo "test-install-linux: ALL PASS"
