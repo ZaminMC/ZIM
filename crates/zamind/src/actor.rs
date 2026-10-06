@@ -377,12 +377,32 @@ impl Actor {
 
     async fn load_server_config(&self) -> ServerConfigFile {
         let path = self.server_config_path();
-        match tokio::task::spawn_blocking(move || config::load_server(&path)).await {
+        let load_path = path.clone();
+        match tokio::task::spawn_blocking(move || config::load_server(&load_path)).await {
             Ok(Ok(file)) => file,
-            Ok(Err(_)) | Err(_) => ServerConfigFile {
-                schema_version: config::CONFIG_SCHEMA_VERSION,
-                ..ServerConfigFile::default()
-            },
+            // A corrupt or unreadable per-server file must be loud (the
+            // registry/config policy): surface exactly what was ignored,
+            // then run with defaults so the daemon stays usable.
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    server = %self.server_id,
+                    "per-server config {path:?} unreadable ({error}); using defaults"
+                );
+                ServerConfigFile {
+                    schema_version: config::CONFIG_SCHEMA_VERSION,
+                    ..ServerConfigFile::default()
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    server = %self.server_id,
+                    "per-server config load panicked: {e}; using defaults"
+                );
+                ServerConfigFile {
+                    schema_version: config::CONFIG_SCHEMA_VERSION,
+                    ..ServerConfigFile::default()
+                }
+            }
         }
     }
 

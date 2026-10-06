@@ -123,8 +123,15 @@ impl Registry {
             root,
             created_at_ms: now_ms(),
         };
+        // Insert, persist, and roll back on a failed save: memory and
+        // disk must not diverge (an entry visible here but absent after a
+        // restart would be a silent lie).
         self.entries.insert(entry.server_id.clone(), entry);
-        self.save()?;
+        let result = self.save();
+        if result.is_err() {
+            self.entries.remove(&server_id);
+            result?;
+        }
         self.entries
             .get(&server_id)
             .ok_or_else(|| CoreError::ServerNotRegistered {

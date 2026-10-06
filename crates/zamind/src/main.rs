@@ -81,11 +81,6 @@ fn main() {
 async fn run(config: DaemonConfig) {
     let engine = engine::Engine::new(config.data_dir.clone()).await;
 
-    // Adoption pass: servers the previous daemon left running come back as
-    // `adopting` and are verified against their recorded process identity
-    // (ADR-0005). No process is ever killed here.
-    engine.adopt_existing_servers().await;
-
     let mut server = match IpcServer::bind(config.endpoint.clone()).await {
         Ok(server) => server,
         Err(zamin_ipc::IpcError::AlreadyRunning) => {
@@ -97,6 +92,14 @@ async fn run(config: DaemonConfig) {
             std::process::exit(1);
         }
     };
+
+    // Adoption pass, AFTER the single-instance bind: a second daemon must
+    // exit without doing adoption work against a hub it is about to throw
+    // away. Servers the previous daemon left running come back as
+    // `adopting` and are verified against their recorded process identity
+    // (ADR-0005). No process is ever killed here.
+    engine.adopt_existing_servers().await;
+
     tracing::info!(
         "daemon {:?} listening (protocol {}, data dir {:?})",
         config.endpoint,
