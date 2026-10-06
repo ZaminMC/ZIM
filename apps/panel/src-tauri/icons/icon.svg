@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- ZaminPanel mark: a Z drawn as two server slats + a diagonal,
+       one running-state LED. Colors are the panel's own tokens. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b222c"/>
+      <stop offset="1" stop-color="#0e1116"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"
+        stroke="#3a4553" stroke-width="10"/>
+
+  <!-- top slat -->
+  <rect x="136" y="124" width="240" height="52" rx="26" fill="#6ca7f2"/>
+  <!-- bottom slat -->
+  <rect x="136" y="336" width="240" height="52" rx="26" fill="#6ca7f2"/>
+  <!-- diagonal: right end of the top slat down to the left end of the bottom slat -->
+  <line x1="348" y1="150" x2="164" y2="362" stroke="#8ab8f5"
+        stroke-width="52" stroke-linecap="round"/>
+
+  <!-- running LED on the top slat -->
+  <circle cx="168" cy="150" r="14" fill="#4ade80"/>
+</svg>
