@@ -325,6 +325,10 @@ export interface PlayersListResult {
   online?: number;
   max?: number;
   sample: PlayerSample[];
+  /** Log-derived roster: joins not yet followed by a leave. Empty unless
+   *  this daemon's log pumps saw the joins (adopted servers answer
+   *  honestly empty). */
+  roster?: PlayerSample[];
   latencyMs: number;
   version?: string;
   motd?: string;

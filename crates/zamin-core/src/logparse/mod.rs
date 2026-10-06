@@ -102,6 +102,42 @@ pub fn is_stopping(line: &str) -> bool {
     lower.contains("stopping server") || lower.contains("stopping the server")
 }
 
+/// A join/leave observed in the server's own log — the log-roster half of
+/// `players.list` (the ping sample caps at 12 names; the log does not).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayerLogEvent {
+    Joined(String),
+    Left(String),
+}
+
+/// Vanilla/Paper join/leave lines: `Steve joined the game`,
+/// `Steve left the game`. The name must be a legal Minecraft username
+/// ([A-Za-z0-9_]{1,16}) — that is what keeps a player *chatting* "Notch
+/// joined the game" (`<Steve> Notch joined the game`) out of the roster:
+/// the `<Steve> ` prefix breaks the username charset.
+pub fn player_event(message: &str) -> Option<PlayerLogEvent> {
+    let message = message.trim();
+    let joined = message.strip_suffix(" joined the game");
+    let name = match joined {
+        Some(name) => name,
+        None => message.strip_suffix(" left the game")?,
+    };
+    let name = name.trim();
+    let event = if message.ends_with(" joined the game") {
+        PlayerLogEvent::Joined(name.to_owned())
+    } else {
+        PlayerLogEvent::Left(name.to_owned())
+    };
+    if !is_valid_username(name) {
+        return None;
+    }
+    Some(event)
+}
+
+fn is_valid_username(name: &str) -> bool {
+    (1..=16).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Bounded ring: the daemon's in-memory backscroll, bounded by *servers*,
 /// never by clients (ADR-0006).
 #[derive(Debug)]
@@ -194,6 +230,38 @@ mod tests {
         assert!(!is_startup_complete("Starting minecraft server"));
         assert!(is_stopping("Stopping server"));
         assert!(!is_stopping("Server started"));
+    }
+
+    #[test]
+    fn join_and_leave_lines_parse() {
+        assert_eq!(
+            player_event("Steve joined the game"),
+            Some(PlayerLogEvent::Joined("Steve".to_owned()))
+        );
+        assert_eq!(
+            player_event("Steve_left_2 left the game"),
+            Some(PlayerLogEvent::Left("Steve_left_2".to_owned()))
+        );
+        // Trailing whitespace is display noise, not part of the name.
+        assert_eq!(
+            player_event("Alex joined the game  "),
+            Some(PlayerLogEvent::Joined("Alex".to_owned()))
+        );
+    }
+
+    #[test]
+    fn chat_and_garbage_never_join_the_roster() {
+        // A player chatting the phrase: the `<Steve> ` prefix breaks the
+        // username charset.
+        assert_eq!(player_event("<Steve> Notch joined the game"), None);
+        // Empty and absurd "names".
+        assert_eq!(player_event("joined the game"), None);
+        assert_eq!(
+            player_event("This name is far too long for a player joined the game"),
+            None
+        );
+        assert_eq!(player_event("Steve joined the server"), None);
+        assert_eq!(player_event(""), None);
     }
 
     #[test]

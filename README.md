@@ -67,8 +67,9 @@ integration harnesses find their binaries.
 
 Windows ships as a per-user NSIS installer or a portable zip; Linux as an
 AppImage or a portable tar.gz that doubles as the installer payload. Every
-layout carries all three binaries — `zamin-panel`, `zamind`, `zamin` — and
-the panel brings the daemon up on first contact (ADR-0010).
+layout carries all four binaries — `zamin-panel`, `zamind`, `zamin`,
+`zaminagent` — and the panel brings the daemon up on first contact
+(ADR-0010).
 
 Linux, no root, XDG everywhere:
 
@@ -88,3 +89,33 @@ window is hidden or blurred — and the Ctrl+K palette offers "Start with the
 system" where the host can deliver it. Bundles are built and tested by
 [.github/workflows/bundle.yml](.github/workflows/bundle.yml) on both OS
 lanes; the remaining §23 proof (clean VM installs) is manual by design.
+
+## Remote (Phase 8)
+
+A headless box runs the same binaries as a desktop. On the box: install
+from the portable payload, keep the daemon alive with the service unit,
+and expose the agent:
+
+```sh
+# read what the agent printed at startup (also in journalctl --user):
+#   certificate fingerprint (pin this on remote clients): ab:cd:…
+#   token file "/home/you/.local/share/zaminpanel/agent/token"
+
+P=./zaminpanel-0.1.0/install-linux.sh
+$P ./zaminpanel-0.1.0         # bins + launcher + icons (no root)
+$P --service on               # zamind as a systemd user unit
+$P --agent-service on         # zaminagent as a systemd user unit
+```
+
+Windows boxes mirror it: `install-windows.ps1 payload -Service on` and
+`-AgentService on` create per-user Task Scheduler logon tasks.
+
+On the desktop, the panel's footer has a connection chip (default
+"Local"): add the box — address `host:port`, the token from its token
+file, and the fingerprint the agent printed (the pin is the server
+identity; the token is the credential, sent as `daemon.hello` `auth`
+inside TLS). Everything works as if the server were local: fleet,
+lifecycle, console, files, backups. See
+[ADR-0011](docs/adr/0011-remote-transport-agent-tls-auth.md) for the
+threat model — no CA, no trust store; a pinned fingerprint or an explicit,
+discouraged skip-verify.

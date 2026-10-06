@@ -21,7 +21,8 @@ pub struct PlayerSample {
 }
 
 /// Where this listing came from. v0 ships the Server List Ping; the log
-/// join/leave roster arrives with the workspace's player history.
+/// join/leave roster rides along in `roster` (the ping sample caps at 12
+/// names; the log does not).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlayersSource {
@@ -39,6 +40,12 @@ pub struct PlayersListResult {
     /// The server's own preview of who is on (vanilla caps the sample at
     /// 12 names — not the full roster).
     pub sample: Vec<PlayerSample>,
+    /// The log-roster: players whose join lines have not been followed by
+    /// a leave. Empty unless the daemon's log pumps saw a join — adopted
+    /// servers report nothing here until they are restarted by this
+    /// daemon (honest emptiness, not a guess).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roster: Vec<PlayerSample>,
     /// Round-trip latency of the status exchange, milliseconds.
     pub latency_ms: u32,
     /// The server's version string, when reported.

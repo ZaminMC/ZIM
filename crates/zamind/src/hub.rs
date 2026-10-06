@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
+use zamin_core::logparse::{self, PlayerLogEvent};
 use zamin_protocol::streams::{
     CoreEvent, LogLine, StreamCursor, StreamKind, StreamNotification, StreamPayload,
 };
@@ -59,6 +60,11 @@ struct Inner {
     subscribers: HashMap<String, SubscriberState>,
     rings: BTreeMap<String, ServerRings>,
     log_total: BTreeMap<String, u64>,
+    /// Live player rosters, derived from join/leave log lines (ADR-0011's
+    /// phase carried this refinement: the ping sample caps at 12 names,
+    /// the log does not). One set per server; emptied when the server's
+    /// process exits.
+    rosters: BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 /// Cloneable handle into the hub for publishers (actors) and sessions.
@@ -76,6 +82,7 @@ impl HubHandle {
                     subscribers: HashMap::new(),
                     rings: BTreeMap::new(),
                     log_total: BTreeMap::new(),
+                    rosters: BTreeMap::new(),
                 }),
             }),
         }
@@ -128,9 +135,13 @@ impl HubHandle {
         let mut first_seq = None;
         {
             let Inner {
-                rings, log_total, ..
+                rings,
+                log_total,
+                rosters,
+                ..
             } = &mut *inner;
             let rings = rings.entry(server_id.to_owned()).or_default();
+            let roster = rosters.entry(server_id.to_owned()).or_default();
             for line in lines {
                 *log_total.entry(server_id.to_owned()).or_default() += 1;
                 let seq = self.hub.seq.fetch_add(1, Ordering::SeqCst);
@@ -139,6 +150,20 @@ impl HubHandle {
                 rings.logs.push_back(line);
                 while rings.logs.len() > LOG_RING {
                     rings.logs.pop_front();
+                }
+            }
+            // The roster reads the same lines the ring stores — one parse
+            // pass per batch, applied after the ring so nothing delays the
+            // fan-out path.
+            for line in &batch {
+                match logparse::player_event(&line.line) {
+                    Some(PlayerLogEvent::Joined(name)) => {
+                        roster.insert(name);
+                    }
+                    Some(PlayerLogEvent::Left(name)) => {
+                        roster.remove(&name);
+                    }
+                    None => {}
                 }
             }
         }
@@ -261,6 +286,34 @@ impl HubHandle {
             .get(server_id)
             .map(|r| r.logs.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// The live roster: players whose joins have not been followed by a
+    /// leave, sorted for stable display. Empty for a server that never
+    /// logged a join — including adopted servers (their history predates
+    /// this daemon's log pumps).
+    pub fn roster(&self, server_id: &str) -> Vec<String> {
+        let inner = self
+            .hub
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        inner
+            .rosters
+            .get(server_id)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// The server's process is gone; nobody is on it. Called by the log
+    /// pump when the stdout pipe closes.
+    pub fn clear_roster(&self, server_id: &str) {
+        self.hub
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .rosters
+            .remove(server_id);
     }
 }
 

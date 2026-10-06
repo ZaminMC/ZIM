@@ -1021,6 +1021,10 @@ async fn pump_logs(
                         if !pending.is_empty() {
                             hub.publish_logs(&server_id, std::mem::take(&mut pending));
                         }
+                        // The stdout pipe closed: the process is gone, and
+                        // with it everyone on it (ADR-0005 — the next boot
+                        // starts an empty room).
+                        hub.clear_roster(&server_id);
                         break;
                     }
                 }

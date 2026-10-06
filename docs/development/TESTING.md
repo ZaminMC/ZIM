@@ -61,8 +61,20 @@ Everything here must pass on both CI lanes and, where filesystem state is involv
 - Notifications taxonomy (pure, in `apps/panel/src/integration/notifications.test.ts`): hidden or blurred → notify; focused → silent · crash content names the server, the phase, and the exit code when known · job content distinguishes succeeded/failed/cancelled and resolves unknown kinds honestly.
 - Integration seam (`apps/panel/src/integration/autostart.test.ts`): outside Tauri the toggle reports unavailable and refuses to pretend; inside Tauri it mirrors the host, maps an undeterminable state to unavailable, and stays honest on host refusal.
 - Palette: the autostart command is hidden where the host cannot deliver it and labeled by the current state ("Start with the system" / "Stop starting with the system").
-- Install script (`scripts/packaging/test-install-linux.sh`, runs in the bundle workflow): install → Exec rewritten → icons → idempotent upgrade → autostart on/off → broken-payload rejection → clean uninstall. Plus `shellcheck` on all packaging scripts and `desktop-file-validate` on the entry.
+- Install script (`scripts/packaging/test-install-linux.sh`, runs in the bundle workflow): install (all four binaries) → Exec rewritten → icons → idempotent upgrade → autostart on/off → daemon and agent service units on/off (plus `systemd-analyze verify`) → broken-payload rejection → clean uninstall. Plus `shellcheck` on all packaging scripts and `desktop-file-validate` on the entry.
+- Install script, Windows lane (`scripts/packaging/test-install-windows.ps1`): layout → Start Menu launcher → idempotent upgrade → logon-task toggles (a Task Scheduler refusal is an honest pass; the off toggle always cleans up) → typed errors → clean uninstall.
 - The §23 proof of done — clean Win11 + Ubuntu/Arch VM installs — stays a documented manual step; `bundle.yml` exists so those VMs only ever install artifacts that already built, tested, and packaged green.
+
+## Services & remote (required coverage)
+
+The remote path is the security boundary of the product (ADR-0011); every rule below is enforced by a test that fails loudly when the rule breaks:
+
+- TLS material: the self-signed certificate is generated once per install and reloaded identically (same fingerprint) · the key and token files are 0600 · a fresh install yields a different fingerprint · the printed fingerprint matches an independent SHA-256 of the certificate.
+- The auth gate (before any local daemon connection exists): missing/empty `auth` → `AUTH_REQUIRED` · wrong token → `AUTH_REJECTED`, connection closed · first frame not a readable `daemon.hello` request → Null-id `PROTOCOL_INVALID_REQUEST` (never a guessed id) · first frame not `daemon.hello` at all → `PROTOCOL_VERSION_UNSUPPORTED`, mirroring the daemon's own rule · token comparison digests both sides first (fixed-length, constant-time).
+- The relay: an authenticated hello round-trips and post-handshake frames relay both directions · the agent cannot reach its daemon → typed `DAEMON_UNREACHABLE` · one remote connection maps to one daemon session · either side closing ends the session.
+- The transport rejects what it must: a plaintext peer never receives protocol data (at most a TLS alert) · a wrong pinned fingerprint fails the TLS handshake · `InsecureSkipVerify` works but is an explicit, documented mode.
+- The panel side: connection profiles persist to localStorage (local default, add/remove/activate remotes, active-id fallback on remove) · `transportSpec` derives the bridge relay URL + hello credential per profile · the client sends `hello.auth` only when a credential is set, and `reconnect()` swaps the live transport and re-handshakes with the new credential without waiting for the retry schedule.
+- Player roster (log-roster refinement): join/leave lines parse only with a legal username charset (a chat line saying the phrase never joins the roster) · joins/leaves over the real daemon end-to-end (fake-mc-server `join`/`leave` over stdin → pumps → hub → `players.list`) · the roster dies with the server process · the ping side stays its own honest shape.
 
 ## Fixtures
 

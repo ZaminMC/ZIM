@@ -260,6 +260,17 @@ fn main() {
                         std::process::exit(0);
                     }
                     "list" => info("There are 0 of a max of 20 players online"),
+                    // Join/leave simulation: drives the log-roster path
+                    // end to end (players.list, PlayersView) without a
+                    // real client.
+                    other if other.starts_with("join ") => {
+                        let name = other[5..].trim();
+                        info(&format!("{name} joined the game"));
+                    }
+                    other if other.starts_with("leave ") => {
+                        let name = other[6..].trim();
+                        info(&format!("{name} left the game"));
+                    }
                     "save-off" => info("Turned off world auto-saving"),
                     "save-on" => info("Turned on world auto-saving"),
                     "save-all" => {

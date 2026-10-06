@@ -65,17 +65,35 @@ export function PlayersView({ serverId }: { serverId: string }) {
         </div>
       ) : null}
 
+      {result && result.roster && result.roster.length > 0 ? (
+        <div className={styles.rosterBlock}>
+          <span className={styles.rosterLabel}>On right now — live from the log</span>
+          <ul className={styles.names}>
+            {result.roster.map((player) => (
+              <li key={`roster-${player.name}`} className={styles.player}>
+                {player.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {result && result.sample.length > 0 ? (
-        <ul className={styles.names}>
-          {result.sample.map((player) => (
-            <li key={player.id ?? player.name} className={styles.player}>
-              {player.name}
-            </li>
-          ))}
-          {online !== null && online > result.sample.length ? (
-            <li className={styles.more}>+{online - result.sample.length} more (server preview caps at 12)</li>
+        <div className={styles.rosterBlock}>
+          {result.roster && result.roster.length > 0 ? (
+            <span className={styles.rosterLabel}>The server's own status preview</span>
           ) : null}
-        </ul>
+          <ul className={styles.names}>
+            {result.sample.map((player) => (
+              <li key={player.id ?? player.name} className={styles.player}>
+                {player.name}
+              </li>
+            ))}
+            {online !== null && online > result.sample.length ? (
+              <li className={styles.more}>+{online - result.sample.length} more (server preview caps at 12)</li>
+            ) : null}
+          </ul>
+        </div>
       ) : null}
     </section>
   );

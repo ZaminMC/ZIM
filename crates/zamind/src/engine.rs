@@ -602,6 +602,13 @@ impl Engine {
                             id: entry.id,
                         })
                         .collect(),
+                    roster: self
+                        .inner
+                        .hub
+                        .roster(server_id.as_str())
+                        .into_iter()
+                        .map(|name| zamin_protocol::players::PlayerSample { name, id: None })
+                        .collect(),
                     latency_ms: latency,
                     version: status.version.as_ref().and_then(|v| v.name.clone()),
                     motd,
@@ -615,6 +622,13 @@ impl Engine {
                 online: None,
                 max: None,
                 sample: Vec::new(),
+                roster: self
+                    .inner
+                    .hub
+                    .roster(server_id.as_str())
+                    .into_iter()
+                    .map(|name| zamin_protocol::players::PlayerSample { name, id: None })
+                    .collect(),
                 latency_ms: latency,
                 version: None,
                 motd: None,
