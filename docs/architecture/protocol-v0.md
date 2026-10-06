@@ -59,6 +59,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `daemon` | `daemon.hello`, `daemon.status` |
 | `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream) |
 | `jobs` | `jobs.list`, `jobs.get`, `jobs.cancel` |
+| `backups` (Phase 5) | `backup.create`, `backup.restore`, `backups.list` |
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
 | `logs` | `logs.range` (file-backed historical read) |
 | `players` | `players.list` (Server List Ping: online/max, the server's name sample, latency, version, MOTD) |
@@ -119,6 +120,14 @@ Implemented for the daemon's first release; the file set is specified now, imple
 - Events: `job.started`, `job.progress`, `job.completed` with `outcome: succeeded | failed | cancelled` and, on failure, a typed error. Three event types, not five — outcome is data, not an event kind.
 - `kind` values in v0: `server.create` (registration scaffolding), `backup.create`, `backup.restore`, `archive.extract`. Download kinds arrive with the software catalog.
 - `jobs.cancel` is a request: the job observes it at its next cancellation point; the state transition to `cancelled` is authoritative.
+- Finished job history is bounded on the daemon (the oldest finished records drop first); a pruned id answers `JOB_NOT_FOUND`, which is a re-snapshot signal, not a protocol error.
+
+### 7a. Backups (Phase 5)
+
+- `backup.create {requestId, serverId, label?}` returns the running `Job` immediately. For a running server the archive walk is wrapped in the ADR-0009 save window (`save-off` → `save-all` → settle → walk → `save-on`; `save-on` runs even when the job fails or is cancelled). A cold backup skips the window. Retention (`backupKeep`, layered setting, built-in default 10) prunes after each success.
+- `backup.restore {requestId, serverId, backupId}` returns the running `Job`. Refused with `SERVER_ALREADY_RUNNING` unless the server is `not-running` — files a running server holds open cannot be replaced. The extract goes through the full ADR-0009 trap list (zip-slip, Windows-reserved names, case-fold collisions, size/entry limits, link entries); commit failure rolls the previous files back (`RestoreRolledBack` surfaces as a typed error, never a half-restored root).
+- `backups.list {serverId}` reads the per-server manifests, newest first: `{backups: [{backupId, createdAtMs, sizeBytes, totalBytes, fileCount, label?, taken: "live" | "cold"}]}`. An unknown `backupId` is a typed `FS_NOT_FOUND`.
+- Archives live under the daemon's data dir (`backups/<serverId>/<backupId>.tar.gz` + `.json` manifests); clients never see paths — only ids.
 
 ## 8. Files
 

@@ -4,7 +4,7 @@
 // visible and the card outlives its welcome.
 
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CrashCard } from "./CrashCard";
 import { useServers } from "../state/servers";
 
@@ -63,5 +63,16 @@ describe("CrashCard", () => {
   it("renders nothing for a server without a crash", () => {
     render(<CrashCard serverId="quiet" />);
     expect(screen.queryByRole("status", { name: "Crash report" })).toBeNull();
+  });
+
+  it("offers the recovery jump to the backups surface", () => {
+    seedCrash();
+    const onRecover = vi.fn();
+    render(<CrashCard serverId="survival" onRecover={onRecover} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recover from a backup" }));
+    expect(onRecover).toHaveBeenCalledOnce();
+    // The card stays: acknowledging is a separate decision.
+    expect(screen.queryByRole("status", { name: "Crash report" })).not.toBeNull();
   });
 });

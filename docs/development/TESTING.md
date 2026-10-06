@@ -26,6 +26,9 @@
 - `--ignore-stop` — stdin `stop` has no effect (forces ladder step 3)
 - `--slow-stop-ms N` — shutdown takes N ms (forces timeouts)
 - `--flood-stdout N` / `--flood-stderr N` — N lines/s forever
+- `--flood-unbounded` — as fast as the process can emit (true capacity measurement)
+- `--port N` — answer Server List Pings on the port from `server.properties`/this flag
+- stdin `save-off` / `save-all` / `save-on` — Paper-faithful replies ("Turned off world auto-saving", "Saved the game"), so the live-backup save window is testable end to end
 
 Lifecycle tests spawn it through the real supervisor and real IPC. No test may sleep-and-hope: state changes are awaited via events.
 
@@ -34,6 +37,10 @@ Like the real thing, the mimic owns `logs/latest.log` in its working directory (
 ## Lifecycle matrix (required coverage)
 
 start · stop · restart · crash during startup · crash while running · stop timeout → ladder escalation · hang on stop · duplicate start · start during stopping · adoption after daemon restart · foreign PID in registry (never adopt, never kill) · kill tree (child of child) · each preflight failure · port conflict · daemon restart while running · client disconnect/reconnect with cursor replay.
+
+## Backups (required coverage)
+
+Roundtrip (create → manifest → list → tamper → restore → byte-identical) · zip-slip rejection · absolute/backslash/dot-component names · Windows reserved names per component, case-insensitively, extension or not · case-fold collisions · entry/size limits · link and device entries rejected · cancel between files (staging cleaned, root untouched) · commit failure rolls the live tree back · retention keeps the newest N · disk-full is a typed error · restore refused while running · live save window observed in the server's own log · job events (started/progress/completed) over the wire. These are the enforcement of ADR-0009 for archives — a missing one is a security regression.
 
 ## Fixtures
 

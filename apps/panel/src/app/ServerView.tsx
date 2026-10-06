@@ -148,7 +148,10 @@ export function ServerView({ serverId }: { serverId: string }) {
         </div>
       ) : null}
 
-      <CrashCard serverId={serverId} />
+      <CrashCard
+        serverId={serverId}
+        onRecover={() => setLowerView("backups")}
+      />
       <div className={styles.viewSwitch} role="tablist" aria-label="Output view">
         <button
           role="tab"

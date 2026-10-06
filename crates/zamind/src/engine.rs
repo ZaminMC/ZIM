@@ -794,14 +794,26 @@ impl Engine {
             .into());
         }
         let state = self.describe_state(server_id).await;
-        if state != ServerState::NotRunning {
-            return Err(ProtocolError::new(
-                ErrorCode::ServerAlreadyRunning,
-                format!(
-                    "Server {server_id} is {state:?}; stop it before restoring a backup — open files cannot be replaced."
-                ),
-            )
-            .into());
+        // Everything that holds no open server files is restorable. There
+        // is more than one "stopped" state (ADR-0005): `not-running` (never
+        // started / reset) and `stopped` (a graceful stop ended it) — plus
+        // the failure states where the process is gone. Only live-ish
+        // states refuse; the smoke test caught exactly this: a graceful
+        // stop lands on `stopped`, not `not-running`.
+        match state {
+            ServerState::NotRunning
+            | ServerState::Stopped
+            | ServerState::FailedPreflight
+            | ServerState::Crashed => {}
+            other => {
+                return Err(ProtocolError::new(
+                    ErrorCode::ServerAlreadyRunning,
+                    format!(
+                        "Server {server_id} is {other:?}; stop it before restoring a backup — open files cannot be replaced."
+                    ),
+                )
+                .into());
+            }
         }
 
         Ok(self.inner.jobs.spawn(

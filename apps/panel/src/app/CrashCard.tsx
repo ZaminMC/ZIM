@@ -2,12 +2,23 @@
 // classified at crash time (ADR-0005). Stays until the server starts
 // again (resolved by the next transition) or the operator dismisses it —
 // both paths flip `resolved` in the store, which hides the card.
+//
+// Crash recovery (Phase 5): the card is also the doorway to the backups
+// surface — restore-from-backup is the recovery path when a crash left
+// the server files unusable, so the card offers the jump directly.
 
 import { useServers } from "../state/servers";
 import { Button } from "../ui/Button";
 import styles from "./CrashCard.module.css";
 
-export function CrashCard({ serverId }: { serverId: string }) {
+export function CrashCard({
+  serverId,
+  onRecover,
+}: {
+  serverId: string;
+  /** Opens the backups surface (restore flow). */
+  onRecover?: () => void;
+}) {
   const crash = useServers((s) => s.crashes[serverId]);
   const resolveCrash = useServers((s) => s.resolveCrash);
   if (!crash || crash.resolved) return null;
@@ -52,6 +63,9 @@ export function CrashCard({ serverId }: { serverId: string }) {
         <Button variant="primary" onClick={() => resolveCrash(serverId)}>
           Acknowledge
         </Button>
+        {onRecover ? (
+          <Button onClick={onRecover}>Recover from a backup</Button>
+        ) : null}
       </div>
     </aside>
   );

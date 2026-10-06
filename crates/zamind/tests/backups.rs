@@ -268,6 +268,26 @@ async fn restore_is_refused_while_running() {
     );
 
     stop_server(&mut client, "demo").await;
+    wait_list_state(&mut client, "demo", "stopped", LONG).await;
+
+    // After a graceful stop the state is `stopped`, not `not-running` —
+    // the restore must be ALLOWED there too (the browser smoke caught
+    // exactly this: a strict not-running check bricked restores after a
+    // normal stop).
+    let restored = client
+        .request(
+            methods::BACKUP_RESTORE,
+            json!({
+                "requestId": uuid::Uuid::now_v7().to_string(),
+                "serverId": "demo",
+                "backupId": backup_id,
+            }),
+        )
+        .await
+        .expect("restore after a graceful stop is allowed");
+    let restore_job = restored["job"]["jobId"].as_str().unwrap().to_owned();
+    let (outcome, error, _, _) = wait_job_done(&mut client, &restore_job, LONG).await;
+    assert_eq!(outcome, "Succeeded", "{error:?}");
 }
 
 #[tokio::test]
