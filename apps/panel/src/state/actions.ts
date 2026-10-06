@@ -4,6 +4,7 @@
 
 import type {
   FilesCommitResult,
+  PlayersListResult,
   FilesListResult,
   FilesReadResult,
   FilesWriteResult,
@@ -82,6 +83,12 @@ export async function killServer(serverId: string): Promise<LifecycleResult> {
 export async function sendStdin(serverId: string, line: string): Promise<void> {
   const params: StdinParams = { requestId: newRequestId(), serverId, line };
   await client.request("server.stdin", params);
+}
+
+// --- players (§5) ---
+
+export async function listPlayers(serverId: string): Promise<PlayersListResult> {
+  return client.request<PlayersListResult>("players.list", { serverId });
 }
 
 // --- files (§8) ---

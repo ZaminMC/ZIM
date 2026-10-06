@@ -90,6 +90,11 @@ pub trait ProcessOps: Send + Sync {
     /// True only if `pid` is alive *and* its start marker matches.
     fn is_alive(&self, identity: &ProcessIdentity) -> bool;
 
+    /// Whether ANY live process owns `pid` right now — marker-agnostic.
+    /// Adoption uses this to tell "the recorded server is gone" (safe to
+    /// reset) from "the pid was reused by something else" (never touch).
+    fn pid_exists(&self, pid: u32) -> bool;
+
     /// Ladder step 3: best-effort OS-graceful signal to the process group
     /// (CTRL_BREAK on Windows, SIGTERM on Linux). Windows signals only
     /// reach processes sharing the daemon's console; failure is reported,

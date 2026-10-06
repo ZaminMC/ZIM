@@ -1,0 +1,71 @@
+/* Players card: the server's own answer, rendered plainly. */
+
+.players {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.count {
+  font-size: var(--text-m);
+}
+
+.latency {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+  font-variant-numeric: tabular-nums;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.motd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-m);
+}
+
+.version {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.alert {
+  background: var(--surface-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--text-s);
+}
+
+.names {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.player {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 14px;
+  font-size: var(--text-s);
+}
+
+.more {
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  align-self: center;
+}

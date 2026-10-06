@@ -812,3 +812,72 @@ fn base64_decode(value: &str) -> Vec<u8> {
     }
     out
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn players_list_pings_the_running_server() {
+    let data_dir = scoped_dir("data-players");
+    let root = make_server_root("root-players");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("players");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    register_server(&mut client, "test", &root).await;
+
+    // No port configured: the honest typed refusal, not a fake empty room.
+    let error = client
+        .request(methods::PLAYERS_LIST, json!({"serverId": "test"}))
+        .await
+        .expect_err("no port");
+    assert_eq!(error["code"], "PROTOCOL_INVALID_REQUEST");
+
+    // Configure a port, start the fake server, and ping it for real.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    write_server_config(&data_dir, "test", &format!("port = {port}\n"));
+    // The fake server binds what Paper would: server.properties in its root.
+    std::fs::write(
+        root.join("server.properties"),
+        format!("server-port={port}\n"),
+    )
+    .unwrap();
+    start_server(&mut client, "test")
+        .await
+        .expect("start accepted");
+    wait_list_state(&mut client, "test", "running", Duration::from_secs(30)).await;
+
+    let result = client
+        .request(methods::PLAYERS_LIST, json!({"serverId": "test"}))
+        .await
+        .expect("players ping");
+    assert_eq!(result["source"], "ping");
+    assert_eq!(result["online"], 1);
+    assert_eq!(result["max"], 20);
+    assert_eq!(result["sample"][0]["name"], "SmokeBot");
+    assert_eq!(result["version"], "1.21.1");
+    assert_eq!(result["motd"], "A fake server");
+    assert!(result["latencyMs"].as_u64().is_some());
+
+    client
+        .request(
+            methods::SERVER_STOP,
+            json!({"requestId": uuid::Uuid::now_v7().to_string(), "serverId": "test"}),
+        )
+        .await
+        .expect("stop accepted");
+    wait_list_state(&mut client, "test", "stopped", Duration::from_secs(30)).await;
+
+    // A stopped server does not answer: an empty room, never an error.
+    let result = client
+        .request(methods::PLAYERS_LIST, json!({"serverId": "test"}))
+        .await
+        .expect("players ping after stop");
+    assert!(result["online"].is_null());
+    assert_eq!(result["sample"].as_array().unwrap().len(), 0);
+
+    // Unregistered → the usual typed miss.
+    let error = client
+        .request(methods::PLAYERS_LIST, json!({"serverId": "ghost"}))
+        .await
+        .expect_err("ghost");
+    assert_eq!(error["code"], "SERVER_NOT_FOUND");
+}

@@ -927,6 +927,33 @@ impl Actor {
                 pid = record.pid,
                 "recorded process identity does not match; surfaced as unknown"
             );
+
+            // A dead recorded process is a stale record, not a mystery: the
+            // state machine's Reset returns it to not-running so the server
+            // can be started again. A LIVE pid whose identity mismatches is
+            // someone else's process — it stays unknown and untouchable
+            // (ADR-0005: never adopt, never kill a foreign pid).
+            if !platform::process().pid_exists(record.pid) {
+                self.machine.apply(LifecycleCommand::Reset).ok();
+                self.clear_runtime_record();
+                self.hub.publish_event(
+                    Some(self.server_id.clone()),
+                    zamin_protocol::streams::CoreEvent::ServerStateChanged {
+                        server_id: self.server_id.clone(),
+                        from: ServerState::Unknown,
+                        to: ServerState::NotRunning,
+                        reason: Some("recorded process is gone".to_owned()),
+                        exit_code: None,
+                        error: None,
+                        crash: None,
+                    },
+                );
+                tracing::info!(
+                    server = %self.server_id,
+                    pid = record.pid,
+                    "recorded process no longer exists; reset to not-running"
+                );
+            }
         }
         tokio::spawn(self.run(rx));
         tx

@@ -517,6 +517,80 @@ impl Engine {
             .await
     }
 
+    /// `players.list`: a Server List Ping against the server's configured
+    /// port. A server that is off, or has no port configured, answers
+    /// with an honest "nobody" shape — that is a normal state, not an
+    /// error (the Players page renders it as an empty room).
+    pub async fn players_list(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::players::PlayersListResult, EngineError> {
+        // Validates registration before any ping attempt.
+        self.file_root(server_id)?;
+        let data_dir = self.inner.data_dir.clone();
+        let id = server_id.to_string();
+        let port = tokio::task::spawn_blocking(move || {
+            let global =
+                zamin_core::config::load_global(&data_dir.join("config.toml")).unwrap_or_default();
+            let per = zamin_core::config::load_server(
+                &data_dir.join("servers").join(&id).join("config.toml"),
+            )
+            .unwrap_or_default();
+            zamin_core::config::layer(&global.defaults, &per.settings).port
+        })
+        .await
+        .map_err(|e| EngineError::Internal(format!("settings task failed: {e}")))?;
+        let Some(port) = port else {
+            return Err(EngineError::Protocol(ProtocolError::new(
+                ErrorCode::ProtocolInvalidRequest,
+                format!(
+                    "Server {server_id} has no port configured — the players surface needs \
+                     the server's port to ping it."
+                ),
+            )));
+        };
+
+        let started = tokio::time::Instant::now();
+        let addr = format!("127.0.0.1:{port}");
+        let ping = zamin_core::ping::server_list_ping(&addr, "127.0.0.1", port).await;
+        let latency = started.elapsed().as_millis() as u32;
+        match ping {
+            Ok(status) => {
+                let motd = status.motd();
+                Ok(zamin_protocol::players::PlayersListResult {
+                    source: zamin_protocol::players::PlayersSource::Ping,
+                    online: status.players.online,
+                    max: status.players.max,
+                    sample: status
+                        .players
+                        .sample
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|entry| zamin_protocol::players::PlayerSample {
+                            name: entry.name,
+                            id: entry.id,
+                        })
+                        .collect(),
+                    latency_ms: latency,
+                    version: status.version.as_ref().and_then(|v| v.name.clone()),
+                    motd,
+                })
+            }
+            // Unreachable is a shape, not an error: the room is simply
+            // empty (server off, starting, or lying about its port).
+            // Latency still reports the attempt.
+            Err(_) => Ok(zamin_protocol::players::PlayersListResult {
+                source: zamin_protocol::players::PlayersSource::Ping,
+                online: None,
+                max: None,
+                sample: Vec::new(),
+                latency_ms: latency,
+                version: None,
+                motd: None,
+            }),
+        }
+    }
+
     /// Broadcast a registry-driven transition (registration, removal).
     /// These are state changes from the registry's point of view, not the
     /// actor's, so they are published here rather than in an actor.

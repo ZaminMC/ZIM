@@ -14,6 +14,7 @@ pub mod fsops;
 pub mod java;
 pub mod logparse;
 pub mod net;
+pub mod ping;
 pub mod platform;
 pub mod server;
 pub mod supervisor;

@@ -61,6 +61,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `jobs` | `jobs.list`, `jobs.get`, `jobs.cancel` |
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
 | `logs` | `logs.range` (file-backed historical read) |
+| `players` | `players.list` (Server List Ping: online/max, the server's name sample, latency, version, MOTD) |
 | `streams` | `streams.subscribe`, `streams.unsubscribe` |
 
 - `logs.range` is the file-backed historical read: the tail of the server's own `logs/latest.log`, through the rooted filesystem (ADR-0006's catch-up path).
@@ -81,6 +82,8 @@ Implemented for the daemon's first release; the file set is specified now, imple
 - `olderAvailable` is exactly `startOffset > 0` — a scroll-up affordance, not an error.
 - Reads walk the file backward in bounded windows (8 MiB), so a page costs roughly the page plus one window regardless of file size; a tail never re-reads from offset 0.
 - A `beforeOffset` beyond the file's current length means rotation or truncation happened; the daemon answers a typed `LOG_CURSOR_INVALID` and the client restarts from the tail. A missing log file is a typed `FS_NOT_FOUND`, never a silent empty result.
+
+- `players.list {serverId}` asks the server itself with a Server List Ping (vanilla flow, no plugins): `{source: "ping", online, max, sample: [{name, id?}], latencyMs, version?, motd?}`. The sample is the server's own preview (vanilla caps it at 12 names), not the full roster. A server that does not answer (off, starting) is an empty-room result with `online: null` — a normal state, never an error; a server with no port configured is a typed `PROTOCOL_INVALID_REQUEST`.
 
 - `server.start/stop/restart/kill` return immediately with the accepted state or a typed error; long outcomes arrive as `server.state_changed` events.
 - `server.kill` is the force path (ADR-0005 ladder, step 4). `stop` is the graceful path. The verbs are fixed: **start, stop, restart, kill**. "Launch" and "terminate" are not protocol words.

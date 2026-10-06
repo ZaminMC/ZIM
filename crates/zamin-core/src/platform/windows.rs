@@ -182,6 +182,10 @@ impl ProcessOps for WindowsProcessOps {
             .is_some_and(|found| found.start_marker == identity.start_marker)
     }
 
+    fn pid_exists(&self, pid: u32) -> bool {
+        self.identity(pid).is_some()
+    }
+
     fn signal_graceful(&self, pid: u32) -> Result<(), PlatformError> {
         // Works only while the child shares the daemon's console; a
         // windowless daemon still has a hidden console that children

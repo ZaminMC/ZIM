@@ -246,6 +246,23 @@ export interface FilesCommitResult {
   sizeBytes: number;
 }
 
+// --- players (§5, Server List Ping) ---
+
+export interface PlayerSample {
+  name: string;
+  id?: string;
+}
+
+export interface PlayersListResult {
+  source: "ping";
+  online?: number;
+  max?: number;
+  sample: PlayerSample[];
+  latencyMs: number;
+  version?: string;
+  motd?: string;
+}
+
 // --- errors (§3) ---
 
 export interface ProtocolErrorObject {

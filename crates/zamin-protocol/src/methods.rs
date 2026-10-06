@@ -24,6 +24,8 @@ pub const STREAMS_NOTIFICATION: &str = "streams.notification";
 
 pub const LOGS_RANGE: &str = "logs.range";
 
+pub const PLAYERS_LIST: &str = "players.list";
+
 // Specified in v0, implemented with the file manager (protocol spec §8).
 pub const FILES_LIST: &str = "files.list";
 pub const FILES_READ: &str = "files.read";

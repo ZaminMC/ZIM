@@ -19,6 +19,7 @@ pub mod handshake;
 pub mod jobs;
 pub mod logs;
 pub mod methods;
+pub mod players;
 pub mod server;
 pub mod streams;
 

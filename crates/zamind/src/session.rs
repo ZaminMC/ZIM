@@ -535,6 +535,19 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
+        methods::PLAYERS_LIST => {
+            let params: zamin_protocol::players::PlayersListParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.players_list(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::STREAMS_UNSUBSCRIBE => {
             let params: UnsubscribeParams = match request.parse_params() {
                 Ok(params) => params,

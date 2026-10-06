@@ -99,6 +99,10 @@ impl ProcessOps for UnixProcessOps {
         }
     }
 
+    fn pid_exists(&self, pid: u32) -> bool {
+        proc_start_marker(pid).is_some()
+    }
+
     fn signal_graceful(&self, pid: u32) -> Result<(), PlatformError> {
         let group = -(pid as i32);
         let ok = unsafe { libc::kill(group, libc::SIGTERM) };

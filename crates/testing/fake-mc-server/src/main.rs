@@ -141,15 +141,81 @@ fn info(msg: &str) {
     emit(&paper_line("Server thread/INFO", msg));
 }
 
+/// Answer Server List Pings forever: read the handshake + status request
+/// (their bytes are irrelevant here), then send a deterministic Paper-ish
+/// status JSON and a pong. One thread per connection; the pings are rare.
+fn serve_status(listener: TcpListener) {
+    thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            thread::spawn(move || {
+                use std::io::{Read, Write};
+                let mut stream = stream;
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf); // handshake + status request
+
+                let json = r#"{"version":{"name":"1.21.1","protocol":767},
+                    "players":{"max":20,"online":1,
+                               "sample":[{"name":"SmokeBot","id":"069a79f4-44e9-4726-a5be-fca90e38aaf5"}]},
+                    "description":{"text":"A fake server"}}"#;
+                let mut packet = vec![0x00]; // status response packet id
+                write_varint(&mut packet, json.len() as u32);
+                packet.extend_from_slice(json.as_bytes());
+                let mut wire = Vec::new();
+                write_varint(&mut wire, packet.len() as u32);
+                wire.extend_from_slice(&packet);
+
+                let mut pong = vec![0x01]; // pong packet id
+                write_varint(&mut pong, 8);
+                pong.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+                write_varint(&mut wire, pong.len() as u32);
+                wire.extend_from_slice(&pong);
+
+                let _ = stream.write_all(&wire);
+            });
+        }
+    });
+}
+
+fn write_varint(buf: &mut Vec<u8>, mut value: u32) {
+    loop {
+        let mut byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        buf.push(byte);
+        if value == 0 {
+            return;
+        }
+    }
+}
+
 fn main() {
     let flags = parse_flags();
 
     // Hold the port like a real server would, so the supervisor's
-    // port-listening validation observes the real thing.
-    let _listener = flags.port.map(|port| {
+    // port-listening validation observes the real thing — and answer
+    // Server List Pings on it, the way Paper does, so the players
+    // surface has a faithful counterpart in tests.
+    // Paper reads its port from server.properties in the working
+    // directory (the root); --port overrides, like a focused test flag.
+    let port = flags.port.or_else(|| {
+        std::fs::read_to_string("server.properties")
+            .ok()
+            .and_then(|props| {
+                props.lines().find_map(|line| {
+                    let (key, value) = line.split_once('=')?;
+                    (key.trim() == "server-port").then(|| value.trim().parse::<u16>().ok())?
+                })
+            })
+    });
+    let listener = port.map(|port| {
         TcpListener::bind(("127.0.0.1", port))
             .unwrap_or_else(|e| panic!("cannot bind port {port}: {e}"))
     });
+    if let Some(listener) = listener {
+        serve_status(listener);
+    }
 
     info("Starting minecraft server version 1.21.1");
     info("Loading properties");
