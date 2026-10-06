@@ -414,6 +414,127 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
+        methods::FILES_LIST => {
+            let params: zamin_protocol::files::FilesListParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    let offset = params.offset.unwrap_or(0);
+                    let limit = params
+                        .limit
+                        .unwrap_or(zamin_protocol::files::FILES_LIST_DEFAULT_LIMIT)
+                        .clamp(1, zamin_protocol::files::FILES_LIST_MAX_LIMIT);
+                    match engine
+                        .files_list(&server_id, &params.path, offset, limit)
+                        .await
+                    {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_READ => {
+            let params: zamin_protocol::files::FilesReadParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    match engine
+                        .files_read(&server_id, &params.path, params.offset, params.max_bytes)
+                        .await
+                    {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_WRITE => {
+            let params: zamin_protocol::files::FilesWriteParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    match engine
+                        .files_write(&server_id, params.staging_id, &params.content)
+                        .await
+                    {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_COMMIT => {
+            let params: zamin_protocol::files::FilesCommitParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    match engine
+                        .files_commit(&server_id, &params.staging_id, &params.target)
+                        .await
+                    {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_MKDIR => {
+            let params: zamin_protocol::files::FilesMkdirParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.files_mkdir(&server_id, &params.path).await {
+                    Ok(()) => json_ok(id, EmptyResult {}),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_RENAME => {
+            let params: zamin_protocol::files::FilesRenameParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    match engine
+                        .files_rename(&server_id, &params.from, &params.to)
+                        .await
+                    {
+                        Ok(()) => json_ok(id, EmptyResult {}),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_DELETE => {
+            let params: zamin_protocol::files::FilesDeleteParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.files_delete(&server_id, &params.path).await {
+                    Ok(()) => json_ok(id, EmptyResult {}),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::STREAMS_UNSUBSCRIBE => {
             let params: UnsubscribeParams = match request.parse_params() {
                 Ok(params) => params,

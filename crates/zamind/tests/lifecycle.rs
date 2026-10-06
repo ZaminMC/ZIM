@@ -634,3 +634,181 @@ async fn logs_range_pages_backward_by_byte_offset() {
         .expect_err("stale cursor");
     assert_eq!(stale["code"], "LOG_CURSOR_INVALID");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_surface_manages_a_server_root_over_the_wire() {
+    let data_dir = scoped_dir("data-files");
+    let root = make_server_root("root-files");
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("files");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+    register_server(&mut client, "test", &root).await;
+
+    // mkdir -p through the rooted filesystem.
+    let ok = client
+        .request(
+            methods::FILES_MKDIR,
+            json!({"serverId": "test", "path": "plugins/EssentialsX"}),
+        )
+        .await
+        .expect("mkdir");
+    assert!(ok.as_object().expect("empty result object").is_empty());
+    assert!(root.join("plugins/EssentialsX").is_dir());
+
+    // Staged upload: two chunks, then commit with one atomic rename.
+    let staged = client
+        .request(
+            methods::FILES_WRITE,
+            // base64("hello ")
+            json!({"serverId": "test", "content": "aGVsbG8g"}),
+        )
+        .await
+        .expect("write chunk 1");
+    let staging_id = staged["stagingId"].as_str().expect("staging id").to_owned();
+    assert!(staging_id.starts_with("stage-"));
+
+    let staged = client
+        .request(
+            methods::FILES_WRITE,
+            // base64("world!")
+            json!({"serverId": "test", "stagingId": staging_id, "content": "d29ybGQh"}),
+        )
+        .await
+        .expect("write chunk 2");
+    assert_eq!(staged["bytesStaged"], 12);
+
+    let committed = client
+        .request(
+            methods::FILES_COMMIT,
+            json!({"serverId": "test", "stagingId": staging_id, "target": "plugins/EssentialsX/config.yml"}),
+        )
+        .await
+        .expect("commit");
+    assert_eq!(committed["path"], "plugins/EssentialsX/config.yml");
+    assert_eq!(committed["sizeBytes"], 12);
+    assert_eq!(
+        std::fs::read(root.join("plugins/EssentialsX/config.yml")).unwrap(),
+        b"hello world!"
+    );
+    // The staging handle is consumed: committing it again is a typed miss.
+    let error = client
+        .request(
+            methods::FILES_COMMIT,
+            json!({"serverId": "test", "stagingId": staging_id, "target": "again.txt"}),
+        )
+        .await
+        .expect_err("staging gone");
+    assert_eq!(error["code"], "FS_NOT_FOUND");
+
+    // Paged listing: directories first, totals across pages.
+    let listed = client
+        .request(
+            methods::FILES_LIST,
+            json!({"serverId": "test", "path": "plugins", "offset": 0, "limit": 1}),
+        )
+        .await
+        .expect("list page 1");
+    assert_eq!(listed["total"], 1); // just the EssentialsX directory so far
+    assert_eq!(listed["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["entries"][0]["kind"], "directory");
+
+    // Chunked read with eof and total size.
+    let chunk = client
+        .request(
+            methods::FILES_READ,
+            json!({"serverId": "test", "path": "plugins/EssentialsX/config.yml", "offset": 6, "maxBytes": 100}),
+        )
+        .await
+        .expect("read chunk");
+    assert_eq!(chunk["totalBytes"], 12);
+    let decoded = base64_decode(chunk["data"].as_str().expect("data"));
+    assert_eq!(decoded, b"world!");
+    assert!(chunk["eof"].as_bool().unwrap());
+
+    // Rename and delete, both root-contained.
+    client
+        .request(
+            methods::FILES_RENAME,
+            json!({"serverId": "test", "from": "plugins/EssentialsX/config.yml", "to": "plugins/config.yml"}),
+        )
+        .await
+        .expect("rename");
+    assert!(root.join("plugins/config.yml").is_file());
+
+    client
+        .request(
+            methods::FILES_DELETE,
+            json!({"serverId": "test", "path": "plugins/config.yml"}),
+        )
+        .await
+        .expect("delete file");
+    assert!(!root.join("plugins/config.yml").exists());
+
+    // `..` never reaches the disk.
+    let error = client
+        .request(
+            methods::FILES_READ,
+            json!({"serverId": "test", "path": "../../../etc/passwd", "offset": 0, "maxBytes": 10}),
+        )
+        .await
+        .expect_err("escape");
+    assert_eq!(error["code"], "FS_PATH_ESCAPES_ROOT");
+
+    // A symlink pointing outside is listed but denied.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/etc", root.join("plugins/escape-link")).unwrap();
+        let listed = client
+            .request(
+                methods::FILES_LIST,
+                json!({"serverId": "test", "path": "plugins"}),
+            )
+            .await
+            .expect("list with symlink");
+        let entries = listed["entries"].as_array().unwrap();
+        let link = entries
+            .iter()
+            .find(|e| e["name"] == "escape-link")
+            .expect("symlink listed");
+        assert_eq!(link["symlinkOutside"], true);
+    }
+
+    // Unregistered server → SERVER_NOT_FOUND, before any filesystem touch.
+    let error = client
+        .request(
+            methods::FILES_LIST,
+            json!({"serverId": "ghost", "path": "."}),
+        )
+        .await
+        .expect_err("ghost");
+    assert_eq!(error["code"], "SERVER_NOT_FOUND");
+}
+
+fn base64_decode(value: &str) -> Vec<u8> {
+    // The test suite has no base64 dependency; decode the standard
+    // alphabet by hand for the one place that needs it.
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let trim = value.trim_end_matches('=');
+    let mut out = Vec::new();
+    for chunk in trim.as_bytes().chunks(4) {
+        let mut acc = 0u32;
+        for (i, b) in chunk.iter().enumerate() {
+            let v = ALPHABET
+                .iter()
+                .position(|a| a == b)
+                .expect("valid base64 char") as u32;
+            acc |= v << (18 - 6 * i);
+        }
+        let bytes = chunk.len();
+        if bytes >= 2 {
+            out.push((acc >> 16) as u8);
+        }
+        if bytes >= 3 {
+            out.push((acc >> 8) as u8);
+        }
+        if bytes >= 4 {
+            out.push(acc as u8);
+        }
+    }
+    out
+}

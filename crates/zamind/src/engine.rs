@@ -409,6 +409,114 @@ impl Engine {
         })
     }
 
+    /// Resolve a registered server's root for a file-manager call, or the
+    /// typed SERVER_NOT_FOUND.
+    fn file_root(&self, server_id: &ServerId) -> Result<PathBuf, EngineError> {
+        let registry = self.registry_lock();
+        registry
+            .get(server_id)
+            .map(|e| e.root.clone())
+            .ok_or_else(|| not_found(server_id))
+            .map_err(EngineError::Protocol)
+    }
+
+    /// Run one sync file-manager operation off the async runtime.
+    async fn file_op<T>(
+        &self,
+        server_id: &ServerId,
+        op: impl FnOnce(&Path) -> Result<T, ProtocolError> + Send + 'static,
+    ) -> Result<T, EngineError>
+    where
+        T: Send + 'static,
+    {
+        let root = self.file_root(server_id)?;
+        tokio::task::spawn_blocking(move || op(&root))
+            .await
+            .map_err(|e| EngineError::Internal(format!("file operation task failed: {e}")))?
+            .map_err(EngineError::Protocol)
+    }
+
+    pub async fn files_list(
+        &self,
+        server_id: &ServerId,
+        path: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Result<zamin_protocol::files::FilesListResult, EngineError> {
+        let path = path.to_owned();
+        self.file_op(server_id, move |root| {
+            crate::files::list(root, &path, offset, limit)
+        })
+        .await
+    }
+
+    pub async fn files_read(
+        &self,
+        server_id: &ServerId,
+        path: &str,
+        offset: u64,
+        max_bytes: u32,
+    ) -> Result<zamin_protocol::files::FilesReadResult, EngineError> {
+        let path = path.to_owned();
+        self.file_op(server_id, move |root| {
+            crate::files::read(root, &path, offset, max_bytes)
+        })
+        .await
+    }
+
+    pub async fn files_write(
+        &self,
+        server_id: &ServerId,
+        staging_id: Option<String>,
+        content: &str,
+    ) -> Result<zamin_protocol::files::FilesWriteResult, EngineError> {
+        let content = content.to_owned();
+        self.file_op(server_id, move |root| {
+            crate::files::write(root, staging_id.as_deref(), &content)
+        })
+        .await
+    }
+
+    pub async fn files_commit(
+        &self,
+        server_id: &ServerId,
+        staging_id: &str,
+        target: &str,
+    ) -> Result<zamin_protocol::files::FilesCommitResult, EngineError> {
+        let staging_id = staging_id.to_owned();
+        let target = target.to_owned();
+        self.file_op(server_id, move |root| {
+            crate::files::commit(root, &staging_id, &target)
+        })
+        .await
+    }
+
+    pub async fn files_mkdir(&self, server_id: &ServerId, path: &str) -> Result<(), EngineError> {
+        let path = path.to_owned();
+        self.file_op(server_id, move |root| crate::files::mkdir(root, &path))
+            .await
+    }
+
+    pub async fn files_rename(
+        &self,
+        server_id: &ServerId,
+        from: &str,
+        to: &str,
+    ) -> Result<(), EngineError> {
+        let from = from.to_owned();
+        let to = to.to_owned();
+        self.file_op(server_id, move |root| {
+            crate::files::rename(root, &from, &to)
+        })
+        .await
+    }
+
+    pub async fn files_delete(&self, server_id: &ServerId, path: &str) -> Result<(), EngineError> {
+        let path = path.to_owned();
+        self.file_op(server_id, move |root| crate::files::delete(root, &path))
+            .await
+    }
+
     /// Broadcast a registry-driven transition (registration, removal).
     /// These are state changes from the registry's point of view, not the
     /// actor's, so they are published here rather than in an actor.

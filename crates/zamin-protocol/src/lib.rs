@@ -13,6 +13,7 @@
 
 pub mod envelope;
 pub mod error;
+pub mod files;
 pub mod framing;
 pub mod handshake;
 pub mod jobs;

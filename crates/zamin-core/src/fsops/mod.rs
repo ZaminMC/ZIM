@@ -25,6 +25,9 @@ pub struct ListingEntry {
     pub name: String,
     pub kind: EntryKind,
     pub size: Option<u64>,
+    /// Last modification time, Unix epoch milliseconds. None when the
+    /// platform metadata could not be read.
+    pub modified_ms: Option<u64>,
     /// A symlink resolving outside the root. Listed so the UI can show it;
     /// operating on it is denied.
     pub symlink_outside: bool,
@@ -197,11 +200,18 @@ impl RootedFs {
                     Err(_) => true,
                 }
             };
-            let size = meta.filter(|m| m.is_file()).map(|m| m.len());
+            let size = meta.as_ref().filter(|m| m.is_file()).map(|m| m.len());
+            let modified_ms = meta.and_then(|m| {
+                m.modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64)
+            });
             entries.push(ListingEntry {
                 name,
                 kind,
                 size,
+                modified_ms,
                 symlink_outside,
             });
         }

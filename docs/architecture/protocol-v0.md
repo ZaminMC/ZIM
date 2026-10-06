@@ -117,10 +117,26 @@ Implemented for the daemon's first release; the file set is specified now, imple
 - `kind` values in v0: `server.create` (registration scaffolding), `backup.create`, `backup.restore`, `archive.extract`. Download kinds arrive with the software catalog.
 - `jobs.cancel` is a request: the job observes it at its next cancellation point; the state transition to `cancelled` is authoritative.
 
-## 8. Files (shapes specified; implemented Phase 4)
+## 8. Files
 
-- Paths in every `files.*` call are **server-root-relative**, POSIX-style (`plugins/EssentialsX.jar`). `..` and absolute paths are rejected (`FS_OUTSIDE_ROOT`) — the rooted filesystem is the only filesystem.
-- Reads and writes are chunked: `files.read {serverId, path, offset, maxBytes}` → `{data(base64), eof, sha256?}`; writes stage to a temp file and finalize with `files.commit {serverId, stagingId, target}` (atomic rename). Clients never send one giant message.
+- Paths in every `files.*` call are **server-root-relative**, POSIX-style (`plugins/EssentialsX.jar`). `..` and absolute paths are rejected (`FS_PATH_ESCAPES_ROOT`) — the rooted filesystem (ADR-0009) is the only filesystem. Symlinks that resolve outside the root are listed (with `symlinkOutside: true`) but every operation on them is denied.
+- Reads and writes are chunked; clients never send or receive one giant frame.
+
+```json
+→ {"jsonrpc":"2.0","id":20,"method":"files.list",
+   "params":{"serverId":"production","path":"plugins","offset":0,"limit":500}}
+
+← {"jsonrpc":"2.0","id":20,"result":{
+     "path":"plugins","total":2,
+     "entries":[{"name":"EssentialsX","kind":"directory","modifiedMs":1730803200000},
+                {"name":"EssentialsX.jar","kind":"file","sizeBytes":2048000,"modifiedMs":1730803200000}]}}
+```
+
+- `files.list` pages directories-first, alphabetical (the daemon's canonical order); `limit` defaults to 500 and is capped at 2000; `total` is the whole directory's count so clients know when to stop.
+- `files.read {serverId, path, offset, maxBytes}` → `{data(base64), eof, totalBytes}` — `maxBytes` is capped at 1 MiB; `eof` is true when the chunk reaches the end of the file; an `offset` past the end is a typed `PROTOCOL_INVALID_REQUEST`.
+- `files.write {serverId, stagingId?, content}` → `{stagingId, bytesStaged}` — the first chunk omits `stagingId` and opens a staging file under the server root (`.zamin-staging/`, contained like everything else); later chunks append. `content` is base64 (standard alphabet), capped at 1 MiB decoded per chunk.
+- `files.commit {serverId, stagingId, target}` → `{path, sizeBytes}` — one atomic rename; readers of `target` see old or new content, never a partial file. A consumed or forged staging handle is a typed `FS_NOT_FOUND`.
+- `files.mkdir {serverId, path}` creates with parents. `files.rename {serverId, from, to}` renames within the root. `files.delete {serverId, path}` removes a file or an EMPTY directory — recursive deletion is a job-sized operation and does not belong in a synchronous method.
 
 ## 9. Conventions
 

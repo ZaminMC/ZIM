@@ -5,6 +5,7 @@
 
 mod actor;
 mod engine;
+mod files;
 mod hub;
 mod session;
 
