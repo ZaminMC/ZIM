@@ -186,6 +186,66 @@ export interface LogRangeResult {
   startOffset: number;
 }
 
+// --- files (§8, ADR-0009 rooted filesystem) ---
+
+export type EntryKind = "file" | "directory";
+
+export interface FilesEntry {
+  name: string;
+  kind: EntryKind;
+  sizeBytes?: number;
+  modifiedMs?: number;
+  symlinkOutside?: boolean;
+}
+
+export interface FilesListParams {
+  serverId: string;
+  path: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface FilesListResult {
+  path: string;
+  entries: FilesEntry[];
+  total: number;
+}
+
+export interface FilesReadParams {
+  serverId: string;
+  path: string;
+  offset: number;
+  maxBytes: number;
+}
+
+export interface FilesReadResult {
+  data: string;
+  eof: boolean;
+  totalBytes: number;
+}
+
+export interface FilesWriteParams {
+  serverId: string;
+  stagingId?: string;
+  content: string;
+}
+
+export interface FilesWriteResult {
+  stagingId: string;
+  bytesStaged: number;
+}
+
+export interface FilesCommitParams {
+  serverId: string;
+  stagingId: string;
+  target: string;
+}
+
+export interface FilesCommitResult {
+  path: string;
+  sizeBytes: number;
+}
+
 // --- errors (§3) ---
 
 export interface ProtocolErrorObject {

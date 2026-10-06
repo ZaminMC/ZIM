@@ -1,0 +1,205 @@
+/* Files browser + editor: same surfaces as the shell (table rows, chips,
+ * the design tokens), with an editor pane that shares the console's mono
+ * voice. */
+
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  font-size: var(--text-s);
+  color: var(--text-muted);
+}
+
+.crumb {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: var(--text-s);
+}
+
+.crumb:hover {
+  text-decoration: underline;
+}
+
+.crumbGap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.separator {
+  color: var(--text-faint);
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-s);
+}
+
+.table th {
+  text-align: left;
+  color: var(--text-faint);
+  font-weight: 500;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.denied {
+  color: var(--text-faint);
+}
+
+.name {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--text-s);
+  font-family: var(--font-mono);
+}
+
+.name:hover {
+  color: var(--accent);
+}
+
+.badge {
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.num {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rowActions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.rowButton {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--text-s);
+  padding: 2px 6px;
+}
+
+.rowButton:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.emptyDir {
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.moreNote {
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  margin: 0;
+}
+
+.alert {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--text-s);
+}
+
+.codeChip {
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.editorBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.editorPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  color: var(--text-muted);
+}
+
+.dirty {
+  color: var(--warning);
+  font-size: var(--text-s);
+}
+
+.clean {
+  color: var(--success);
+  font-size: var(--text-s);
+}
+
+.editorArea {
+  width: 100%;
+  min-height: 360px;
+  resize: vertical;
+  background: var(--term-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.editorArea:focus {
+  outline: 1px solid var(--accent);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}

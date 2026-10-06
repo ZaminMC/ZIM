@@ -15,6 +15,7 @@ import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
 import { Console } from "./Console";
 import { CrashCard } from "./CrashCard";
+import { FilesView } from "./FilesView";
 import { LogViewer } from "./LogViewer";
 import styles from "./ServerView.module.css";
 
@@ -43,9 +44,9 @@ export function ServerView({ serverId }: { serverId: string }) {
   const setPending = useUi((s) => s.setPending);
   const actionError = useUi((s) => s.actionErrors[serverId]);
   const setActionError = useUi((s) => s.setActionError);
-  // Which lower surface the tab shows: the interactive console or the
-  // paged log viewer. Panel-local, deliberately not persisted.
-  const [lowerView, setLowerView] = useState<"console" | "logs">("console");
+  // Which lower surface the tab shows: the interactive console, the paged
+  // log viewer, or the file browser. Panel-local, not persisted.
+  const [lowerView, setLowerView] = useState<"console" | "logs" | "files">("console");
 
   // Details (software/version/port) arrive via server.get; refresh when the
   // server boots, since software identity is only knowable then.
@@ -161,11 +162,21 @@ export function ServerView({ serverId }: { serverId: string }) {
         >
           Logs
         </button>
+        <button
+          role="tab"
+          aria-selected={lowerView === "files"}
+          className={`${styles.viewTab} ${lowerView === "files" ? styles.viewTabActive : ""}`}
+          onClick={() => setLowerView("files")}
+        >
+          Files
+        </button>
       </div>
       {lowerView === "console" ? (
         <Console serverId={serverId} running={server.state === "running"} />
-      ) : (
+      ) : lowerView === "logs" ? (
         <LogViewer serverId={serverId} />
+      ) : (
+        <FilesView serverId={serverId} />
       )}
     </div>
   );
