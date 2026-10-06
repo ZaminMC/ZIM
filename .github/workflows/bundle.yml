@@ -57,8 +57,8 @@ jobs:
       - name: install-linux.sh round trip
         run: ./scripts/packaging/test-install-linux.sh
 
-      - name: Build the daemon and CLI (release)
-        run: cargo build --release -p zamind -p zamin-cli
+      - name: Build the daemon, CLI, and agent (release)
+        run: cargo build --release -p zamind -p zamin-cli -p zamin-agent
 
       - name: Panel frontend build (also feeds the host's context macro)
         run: npm ci && npm run build
@@ -112,8 +112,11 @@ jobs:
           cache: npm
           cache-dependency-path: apps/panel/package-lock.json
 
-      - name: Build the daemon and CLI (release)
-        run: cargo build --release -p zamind -p zamin-cli
+      - name: Build the daemon, CLI, and agent (release)
+        run: cargo build --release -p zamind -p zamin-cli -p zamin-agent
+
+      - name: Install + logon-task round trip (sandboxed)
+        run: ./scripts/packaging/test-install-windows.ps1
 
       - name: Panel frontend build (also feeds the host's context macro)
         run: npm ci && npm run build

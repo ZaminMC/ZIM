@@ -4,8 +4,9 @@
 # Layout is the contract install-linux.sh consumes, and it is runnable in
 # place: ./bin/zamin-panel resolves its sibling zamind by construction.
 #
+# Payload layout:
 #   zaminpanel-<version>/
-#     bin/{zamin-panel,zamind,zamin}
+#     bin/{zamin-panel,zamind,zamin,zaminagent}
 #     share/applications/mc.zamin.panel.desktop
 #     share/icons/hicolor/**/mc.zamin.panel.*
 #     README.txt
@@ -25,7 +26,7 @@ OUT="$3"
 HERE=$(CD=$(dirname "$0"); CD=$(cd "$CD" && pwd); echo "$CD")
 REPO_ROOT=$(cd "$HERE/../.." && pwd)
 
-for bin in zamin-panel zamind zamin; do
+for bin in zamin-panel zamind zamin zaminagent; do
     [ -f "$BINS/$bin" ] || die "bins-dir is missing $bin"
 done
 
@@ -35,7 +36,7 @@ PAYLOAD="$ROOT/zaminpanel-$VERSION"
 
 mkdir -p "$PAYLOAD/bin" "$PAYLOAD/share/applications"
 
-for bin in zamin-panel zamind zamin; do
+for bin in zamin-panel zamind zamin zaminagent; do
     cp "$BINS/$bin" "$PAYLOAD/bin/$bin"
     chmod 755 "$PAYLOAD/bin/$bin"
 done

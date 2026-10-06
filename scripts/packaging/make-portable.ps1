@@ -1,7 +1,7 @@
 # make-portable.ps1 — assemble the Windows portable zip (§23 Phase 7).
 #
 #   ZaminPanel-<version>-windows-x64/
-#     zamin-panel.exe  zamind.exe  zamin.exe
+#     zamin-panel.exe  zamind.exe  zamin.exe  zaminagent.exe
 #     README.txt
 #
 # Usage: make-portable.ps1 -BinsDir <dir> -Version <v> -OutDir <dir>
@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-foreach ($bin in @("zamin-panel.exe", "zamind.exe", "zamin.exe")) {
+foreach ($bin in @("zamin-panel.exe", "zamind.exe", "zamin.exe", "zaminagent.exe")) {
     if (-not (Test-Path (Join-Path $BinsDir $bin))) {
         throw "make-portable: bins-dir is missing $bin"
     }
@@ -24,7 +24,7 @@ $root = Join-Path $OutDir "ZaminPanel-$Version-windows-x64"
 if (Test-Path $root) { Remove-Item -Recurse -Force $root }
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
-foreach ($bin in @("zamin-panel.exe", "zamind.exe", "zamin.exe")) {
+foreach ($bin in @("zamin-panel.exe", "zamind.exe", "zamin.exe", "zaminagent.exe")) {
     Copy-Item (Join-Path $BinsDir $bin) (Join-Path $root $bin)
 }
 
@@ -38,6 +38,7 @@ Contents:
   zamin-panel.exe   the desktop panel
   zamind.exe        the resident daemon (one per user; owns every server)
   zamin.exe         the CLI (zamin list | start | stop | logs -f | attach)
+  zaminagent.exe    the remote bridge (TLS + token; see ADR-0011)
 
 Daemon state lives under %LOCALAPPDATA%\ZaminPanel; server roots are the
 ones you register. Deleting this folder never touches daemon state or

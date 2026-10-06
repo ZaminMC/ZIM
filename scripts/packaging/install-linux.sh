@@ -13,15 +13,19 @@
 #   install-linux.sh --service on|off      toggle the systemd user unit for
 #                                          the daemon (no payload; survives
 #                                          logout, restarts on failure)
+#   install-linux.sh --agent-service on|off
+#                                          same for the remote agent — the
+#                                          headless-box half of ADR-0011
 #   install-linux.sh --uninstall           remove everything this script installed
 #   install-linux.sh --prefix DIR          install root (default: $HOME/.local)
 #
 # Installed pieces (prefix $P, data $D = XDG_DATA_HOME, config $C = XDG_CONFIG_HOME):
-#   $P/bin/zamin-panel  $P/bin/zamind  $P/bin/zamin
+#   $P/bin/zamin-panel  $P/bin/zamind  $P/bin/zamin  $P/bin/zaminagent
 #   $D/applications/mc.zamin.panel.desktop        (Exec rewritten to $P/bin/zamin-panel)
 #   $D/icons/hicolor/**/mc.zamin.panel.*
 #   $C/autostart/mc.zamin.panel.desktop           (only via --autostart on)
 #   $C/systemd/user/mc.zamin.daemon.service       (only via --service on)
+#   $C/systemd/user/mc.zamin.agent.service        (only via --agent-service on)
 #
 # Never touched: daemon-owned state (XDG data zaminpanel/ tree, server roots).
 
@@ -29,7 +33,7 @@ set -eu
 
 APP=mc.zamin.panel
 PANEL_BIN=zamin-panel
-BINS="zamin-panel zamind zamin"
+BINS="zamin-panel zamind zamin zaminagent"
 
 prefix="${HOME}/.local"
 payload=""
@@ -37,6 +41,7 @@ action="install"
 autostart=""
 service=""
 SERVICE_UNIT=mc.zamin.daemon.service
+AGENT_UNIT=mc.zamin.agent.service
 
 die() { echo "install-linux: $1" >&2; exit 1; }
 info() { echo "install-linux: $1"; }
@@ -67,6 +72,14 @@ while [ $# -gt 0 ]; do
             case "$2" in
                 on|off) action="service"; service="$2" ;;
                 *) die "--service needs on|off" ;;
+            esac
+            shift
+            ;;
+        --agent-service)
+            [ $# -ge 2 ] || die "--agent-service needs on|off"
+            case "$2" in
+                on|off) action="agent-service"; service="$2" ;;
+                *) die "--agent-service needs on|off" ;;
             esac
             shift
             ;;
@@ -114,8 +127,7 @@ if [ "$action" = "autostart" ]; then
     exit 0
 fi
 
-# --- service toggle (independent of any payload) ----------------------------
-service_path="${CONFIG}/systemd/user/${SERVICE_UNIT}"
+# --- service toggles (independent of any payload) ---------------------------
 
 # systemd is optional (musl boxes, containers, WSL1): the unit file is
 # always managed honestly; the enable step is best-effort with a report.
@@ -124,31 +136,38 @@ service_systemctl() {
     systemctl --user "$@"
 }
 
-if [ "$action" = "service" ]; then
-    if [ "$service" = "on" ]; then
-        [ -x "${prefix}/bin/zamind" ] ||
-            die "no installed daemon at ${prefix}/bin/zamind — install first"
-        mkdir -p "${CONFIG}/systemd/user"
-        {
-            echo "[Unit]"
-            echo "Description=zamind — the ZaminPanel daemon"
-            echo "Documentation=https://github.com/ZaminMC/ZaminPanel"
-            echo "StartLimitIntervalSec=60"
-            echo "StartLimitBurst=4"
-            echo ""
-            echo "[Service]"
-            echo "ExecStart=${prefix}/bin/zamind"
-            echo "Restart=on-failure"
-            echo "RestartSec=3"
-            echo "PrivateTmp=true"
-            echo "NoNewPrivileges=true"
-            echo ""
-            echo "[Install]"
-            echo "WantedBy=default.target"
-        } > "$service_path"
-        info "service unit written: $service_path"
+# $1 unit, $2 description, $3 exec — one unit shape, two owners.
+write_unit() {
+    mkdir -p "${CONFIG}/systemd/user"
+    {
+        echo "[Unit]"
+        echo "Description=$2"
+        echo "Documentation=https://github.com/ZaminMC/ZaminPanel"
+        echo "StartLimitIntervalSec=60"
+        echo "StartLimitBurst=4"
+        echo ""
+        echo "[Service]"
+        echo "ExecStart=$3"
+        echo "Restart=on-failure"
+        echo "RestartSec=3"
+        echo "PrivateTmp=true"
+        echo "NoNewPrivileges=true"
+        echo ""
+        echo "[Install]"
+        echo "WantedBy=default.target"
+    } > "${CONFIG}/systemd/user/$1"
+}
+
+toggle_service() {
+    # $1 on|off, $2 unit, $3 binary, $4 description
+    unit_path="${CONFIG}/systemd/user/$2"
+    if [ "$1" = "on" ]; then
+        [ -x "${prefix}/bin/$3" ] ||
+            die "no installed $3 at ${prefix}/bin/$3 — install first"
+        write_unit "$2" "$4" "${prefix}/bin/$3"
+        info "service unit written: $unit_path"
         if service_systemctl daemon-reload && \
-            service_systemctl enable --now "${SERVICE_UNIT}"; then
+            service_systemctl enable --now "$2"; then
             info "service ON: enabled and started (systemd user scope)"
         else
             info "warning: unit installed but not enabled — systemctl --user is"
@@ -156,11 +175,20 @@ if [ "$action" = "service" ]; then
             info "warning: activates on a real systemd user session."
         fi
     else
-        service_systemctl disable --now "${SERVICE_UNIT}" 2>/dev/null || true
-        [ -f "$service_path" ] && rm -f "$service_path"
+        service_systemctl disable --now "$2" 2>/dev/null || true
+        [ -f "$unit_path" ] && rm -f "$unit_path"
         service_systemctl daemon-reload 2>/dev/null || true
         info "service OFF"
     fi
+}
+
+if [ "$action" = "service" ]; then
+    toggle_service "$service" "$SERVICE_UNIT" zamind "zamind — the ZaminPanel daemon"
+    exit 0
+fi
+
+if [ "$action" = "agent-service" ]; then
+    toggle_service "$service" "$AGENT_UNIT" zaminagent "zaminagent — the ZaminPanel remote agent"
     exit 0
 fi
 
@@ -175,8 +203,11 @@ if [ "$action" = "uninstall" ]; then
         find "${DATA}/icons/hicolor" -name "${APP}.*" -exec rm -f {} +
     fi
     [ -f "$autostart_path" ] && rm -f "$autostart_path"
-    service_systemctl disable --now "${SERVICE_UNIT}" 2>/dev/null || true
-    [ -f "$service_path" ] && rm -f "$service_path"
+    for unit in "$SERVICE_UNIT" "$AGENT_UNIT"; do
+        service_systemctl disable --now "$unit" 2>/dev/null || true
+        [ -f "${CONFIG}/systemd/user/$unit" ] &&
+            rm -f "${CONFIG}/systemd/user/$unit"
+    done
     service_systemctl daemon-reload 2>/dev/null || true
     command -v update-desktop-database >/dev/null 2>&1 &&
         update-desktop-database "${DATA}/applications" 2>/dev/null || true
@@ -216,8 +247,9 @@ command -v update-desktop-database >/dev/null 2>&1 &&
 command -v gtk-update-icon-cache >/dev/null 2>&1 &&
     gtk-update-icon-cache -q -t -f "${DATA}/icons/hicolor" 2>/dev/null || true
 
-info "installed: ${prefix}/bin/{zamin-panel,zamind,zamin}"
+info "installed: ${prefix}/bin/{zamin-panel,zamind,zamin,zaminagent}"
 info "desktop:   ${DATA}/applications/${APP}.desktop"
 info "icons:     ${DATA}/icons/hicolor (theme ${APP})"
 info "autostart stays off until: install-linux.sh --autostart on"
 info "daemon service stays off until: install-linux.sh --service on"
+info "remote agent service stays off until: install-linux.sh --agent-service on"

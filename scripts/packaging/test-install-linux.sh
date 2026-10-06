@@ -32,7 +32,7 @@ mkdir -p "$PAYLOAD/bin" "$PAYLOAD/share/applications" \
     "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
 
 # Stub binaries: exit 0 when executed.
-for bin in zamin-panel zamind zamin; do
+for bin in zamin-panel zamind zamin zaminagent; do
     printf '#!/bin/sh\nexit 0\n' > "$PAYLOAD/bin/$bin"
     chmod 755 "$PAYLOAD/bin/$bin"
 done
@@ -53,7 +53,7 @@ ok() { echo "test-install-linux: ok — $1"; }
 
 # 1. install
 "$INSTALL" "$PAYLOAD" > "$WORK/install.log" 2>&1 || fail "install exited nonzero"
-for bin in zamin-panel zamind zamin; do
+for bin in zamin-panel zamind zamin zaminagent; do
     [ -x "$PREFIX/bin/$bin" ] || fail "$bin not installed/executable"
 done
 ok "binaries installed to \$prefix/bin"
@@ -102,6 +102,20 @@ fi
 [ ! -f "$UNIT" ] || fail "unit survived --service off"
 ok "service on/off writes and removes a valid systemd user unit"
 
+# 3c. agent service on/off — the headless-box half of ADR-0011
+"$INSTALL" --agent-service on > "$WORK/agent-service.log" 2>&1 || fail "agent service on failed"
+AGENT_UNIT="$XDG_CONFIG_HOME/systemd/user/mc.zamin.agent.service"
+[ -f "$AGENT_UNIT" ] || fail "agent systemd user unit missing"
+grep -q "^ExecStart=$PREFIX/bin/zaminagent$" "$AGENT_UNIT" ||
+    fail "agent unit ExecStart not pointed at the installed agent"
+if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify "$AGENT_UNIT" 2>"$WORK/agent-verify.log" ||
+        fail "systemd-analyze verify rejected the agent unit: $(cat "$WORK/agent-verify.log")"
+fi
+"$INSTALL" --agent-service off > "$WORK/agent-service-off.log" 2>&1 || fail "agent service off failed"
+[ ! -f "$AGENT_UNIT" ] || fail "agent unit survived --agent-service off"
+ok "agent service on/off writes and removes a valid systemd user unit"
+
 # 4. missing payload piece is a hard error
 mkdir -p "$WORK/broken/bin"
 if "$INSTALL" "$WORK/broken" > "$WORK/broken.log" 2>&1; then
@@ -114,8 +128,9 @@ ok "a broken payload is rejected with a typed message"
 # 5. uninstall
 "$INSTALL" "$PAYLOAD" > "$WORK/reinstall.log" 2>&1
 "$INSTALL" --service on > "$WORK/service-again.log" 2>&1
+"$INSTALL" --agent-service on > "$WORK/agent-service-again.log" 2>&1
 "$INSTALL" --uninstall > "$WORK/uninstall.log" 2>&1 || fail "uninstall failed"
-for bin in zamin-panel zamind zamin; do
+for bin in zamin-panel zamind zamin zaminagent; do
     [ ! -f "$PREFIX/bin/$bin" ] || fail "$bin survived uninstall"
 done
 [ ! -f "$DESKTOP" ] || fail "desktop entry survived uninstall"
@@ -123,6 +138,8 @@ done
     fail "icons survived uninstall"
 [ ! -f "$XDG_CONFIG_HOME/systemd/user/mc.zamin.daemon.service" ] ||
     fail "systemd user unit survived uninstall"
+[ ! -f "$XDG_CONFIG_HOME/systemd/user/mc.zamin.agent.service" ] ||
+    fail "agent systemd user unit survived uninstall"
 ok "uninstall removes exactly what install added"
 
 echo "test-install-linux: ALL PASS"
