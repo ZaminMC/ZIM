@@ -523,6 +523,23 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => dispatch_error(id, e),
             }
         }
+        methods::JAVA_LIST => json_ok(id, engine.java_list().await),
+        methods::JAVA_INSTALL => {
+            let params: zamin_protocol::java::JavaInstallParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.java_install(params.major_version).await {
+                Ok(job) => json_ok(
+                    id,
+                    zamin_protocol::java::JavaInstallResult {
+                        kind: JobKind::JavaInstall,
+                        job,
+                    },
+                ),
+                Err(e) => dispatch_error(id, e),
+            }
+        }
         methods::LOGS_RANGE => {
             let params: zamin_protocol::logs::LogRangeParams = match request.parse_params() {
                 Ok(params) => params,

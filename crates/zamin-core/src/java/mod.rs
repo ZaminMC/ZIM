@@ -4,6 +4,8 @@
 //! Discovery enumerates candidates; inspection asks the JVM itself via
 //! `java -XshowSettings:properties -version` — never directory names.
 
+pub mod fetch;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -57,6 +59,30 @@ pub fn candidate_paths() -> Vec<PathBuf> {
 
 fn normalize(p: &Path) -> String {
     p.to_string_lossy().to_ascii_lowercase().replace('/', "\\")
+}
+
+/// `java` executables inside a managed install root (`<data>/java`):
+/// one level of runtime directories, each with a `bin` folder — the
+/// layout the JDK fetch produces. Candidates are still inspected before
+/// use, exactly like PATH discoveries (never trust directory names).
+pub fn managed_candidates(root: &Path) -> Vec<PathBuf> {
+    let exe = crate::platform::java_exe_name();
+    let mut out = Vec::new();
+    let Ok(read) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for runtime in read.flatten() {
+        let bin = runtime.path().join("bin").join(exe);
+        if bin.is_file() {
+            out.push(bin);
+        }
+    }
+    let direct = root.join("bin").join(exe);
+    if direct.is_file() {
+        out.push(direct);
+    }
+    out.sort();
+    out
 }
 
 /// Ask the JVM for the truth. Parses stderr of

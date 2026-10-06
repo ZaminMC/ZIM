@@ -29,6 +29,10 @@ pub const CATALOG_LIST: &str = "catalog.list";
 pub const CATALOG_VERSIONS: &str = "catalog.versions";
 pub const CATALOG_BUILDS: &str = "catalog.builds";
 
+// Java runtimes (protocol spec §7c).
+pub const JAVA_LIST: &str = "java.list";
+pub const JAVA_INSTALL: &str = "java.install";
+
 pub const STREAMS_SUBSCRIBE: &str = "streams.subscribe";
 pub const STREAMS_UNSUBSCRIBE: &str = "streams.unsubscribe";
 pub const STREAMS_NOTIFICATION: &str = "streams.notification";

@@ -29,6 +29,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 bytes = { workspace = true }
 sha2 = "0.10"
+tar = "0.4"
+flate2 = "1"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

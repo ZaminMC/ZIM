@@ -32,6 +32,12 @@ struct Inner {
     /// The software catalog's base URL (Fill API v3); overridable so
     /// tests and air-gapped installs can point at a mirror.
     catalog_url: String,
+    /// The Adoptium API base URL (JDK fetch); same override story.
+    adoptium_url: String,
+    /// Java inspection cache keyed by path: (mtime_s, size, info). The
+    /// JVM is asked once per unchanged file, never on UI refresh
+    /// (ARCH-REVIEW §18.6).
+    java_cache: Mutex<HashMap<PathBuf, (u64, u64, zamin_core::java::JavaInfo)>>,
 }
 
 /// After `save-all`, a server needs a moment to actually finish writing
@@ -55,7 +61,7 @@ fn server_dir(data_dir: &Path, id: &str) -> PathBuf {
 }
 
 impl Engine {
-    pub async fn with_catalog_url(data_dir: PathBuf, catalog_url: String) -> Engine {
+    pub async fn with_urls(data_dir: PathBuf, catalog_url: String, adoptium_url: String) -> Engine {
         let _ = std::fs::create_dir_all(data_dir.join("servers"));
         let registry = Registry::load(data_dir.join("registry.json")).unwrap_or_else(|e| {
             tracing::error!("registry is unreadable: {e}; refusing to start over it");
@@ -71,6 +77,8 @@ impl Engine {
                 actors: tokio::sync::Mutex::new(HashMap::new()),
                 jobs,
                 catalog_url,
+                adoptium_url,
+                java_cache: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -1206,6 +1214,198 @@ impl Engine {
                     .await
                     .map_err(job_failure)?;
                 Ok(())
+            },
+        ))
+    }
+
+    // --- java runtimes (protocol spec §7c) -----------------------------
+
+    /// The daemon's managed JDK directory: everything it fetched itself
+    /// lives under `<data>/java/<release>/bin/java`.
+    fn managed_java_dir(&self) -> PathBuf {
+        self.inner.data_dir.join("java")
+    }
+
+    /// Inspect one `java` candidate, honoring the path-keyed cache. The
+    /// JVM answers once per unchanged file (mtime + size), never per UI
+    /// refresh.
+    fn inspect_cached(
+        &self,
+        path: &Path,
+    ) -> Result<zamin_core::java::JavaInfo, zamin_core::error::CoreError> {
+        let (mtime, size) = match std::fs::metadata(path) {
+            Ok(meta) => (
+                meta.modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                meta.len(),
+            ),
+            Err(source) => {
+                return Err(zamin_core::error::CoreError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
+        };
+        {
+            let cache = self
+                .inner
+                .java_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((m, s, info)) = cache.get(path) {
+                if *m == mtime && *s == size {
+                    return Ok(info.clone());
+                }
+            }
+        }
+        let info = zamin_core::java::inspect(path)?;
+        let mut cache = self
+            .inner
+            .java_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.insert(path.to_path_buf(), (mtime, size, info.clone()));
+        Ok(info)
+    }
+
+    /// `java.list`: PATH/JAVA_HOME/install-root candidates plus the
+    /// daemon's managed runtimes, all inspected (never trusted by name),
+    /// failures skipped honestly.
+    pub async fn java_list(&self) -> zamin_protocol::java::JavaListResult {
+        let managed_root = self.managed_java_dir();
+        let engine = self.clone();
+        let runtimes = tokio::task::spawn_blocking(move || {
+            let mut paths: Vec<(PathBuf, bool)> = zamin_core::java::candidate_paths()
+                .into_iter()
+                .map(|p| (p, false))
+                .collect();
+            for p in zamin_core::java::managed_candidates(&managed_root) {
+                paths.push((p, true));
+            }
+            let mut out = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for (path, managed) in paths {
+                let key = path.to_string_lossy().to_ascii_lowercase();
+                if !seen.insert(key) {
+                    continue;
+                }
+                if let Ok(info) = engine.inspect_cached(&path) {
+                    out.push(zamin_protocol::java::JavaRuntime {
+                        path: info.path.to_string_lossy().into_owned(),
+                        major: info.major,
+                        version_string: info.version_string,
+                        vendor: info.vendor,
+                        managed,
+                    });
+                }
+            }
+            out
+        })
+        .await
+        .unwrap_or_default();
+        zamin_protocol::java::JavaListResult { runtimes }
+    }
+
+    /// `java.install`: a job — resolve the newest Temurin GA JDK for this
+    /// machine from the Adoptium API, download + verify + extract into
+    /// the managed directory, then inspect what landed. Idempotent per
+    /// release.
+    pub async fn java_install(
+        &self,
+        major_version: u32,
+    ) -> Result<zamin_protocol::jobs::Job, EngineError> {
+        let adoptium = zamin_core::java::fetch::AdoptiumClient::new(&self.inner.adoptium_url);
+        let managed_root = self.managed_java_dir();
+
+        // Resolve the asset up front: an unreachable Adoptium API or an
+        // absent platform build is a typed rejection now.
+        let asset = tokio::task::spawn_blocking(move || adoptium.latest_jdk(major_version))
+            .await
+            .map_err(|e| internal(&format!("adoptium task failed: {e}")))?
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+
+        Ok(self.inner.jobs.spawn(
+            zamin_protocol::jobs::JobKind::JavaInstall,
+            None,
+            move |ctl| async move {
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+                ctl.progress(
+                    0,
+                    asset.size,
+                    Some("bytes"),
+                    Some(&format!(
+                        "fetching {} ({} {})",
+                        asset.package_name,
+                        std::env::consts::OS,
+                        std::env::consts::ARCH
+                    )),
+                );
+
+                let progress_ctl = ctl.clone();
+                let install_ctl = ctl.clone();
+                let outcome = tokio::task::spawn_blocking(move || {
+                    zamin_core::java::fetch::install_jdk(
+                        &managed_root,
+                        &asset,
+                        install_ctl.cancel_flag(),
+                        Arc::new(move |p: zamin_core::java::fetch::InstallProgress| match p {
+                            zamin_core::java::fetch::InstallProgress::Download {
+                                bytes_done,
+                                total,
+                            } => {
+                                progress_ctl.progress(bytes_done, total, Some("bytes"), None);
+                            }
+                            zamin_core::java::fetch::InstallProgress::Extracted {
+                                entries_done,
+                            } => {
+                                progress_ctl.progress(
+                                    entries_done,
+                                    None,
+                                    Some("entries"),
+                                    Some("extracting"),
+                                );
+                            }
+                            zamin_core::java::fetch::InstallProgress::Inspecting => {
+                                progress_ctl.progress(
+                                    0,
+                                    None,
+                                    None,
+                                    Some("inspecting the runtime"),
+                                );
+                            }
+                        }),
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    JobFailure::Error(ProtocolError::new(
+                        ErrorCode::InternalError,
+                        format!("jdk install task failed: {e}"),
+                    ))
+                })?;
+
+                match outcome {
+                    Ok(outcome) => {
+                        let message = if outcome.already_installed {
+                            format!("already installed at {}", outcome.runtime_dir.display())
+                        } else {
+                            format!(
+                                "installed {} at {}",
+                                outcome.version_string,
+                                outcome.runtime_dir.display()
+                            )
+                        };
+                        ctl.progress(1, Some(1), Some("steps"), Some(&message));
+                        Ok(())
+                    }
+                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                    Err(e) => Err(JobFailure::Error(to_protocol(&e))),
+                }
             },
         ))
     }

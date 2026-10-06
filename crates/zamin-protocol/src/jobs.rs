@@ -18,6 +18,8 @@ pub enum JobKind {
     BackupRestore,
     #[serde(rename = "archive.extract")]
     ArchiveExtract,
+    #[serde(rename = "java.install")]
+    JavaInstall,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

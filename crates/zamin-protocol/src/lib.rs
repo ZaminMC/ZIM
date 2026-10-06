@@ -17,6 +17,7 @@ pub mod error;
 pub mod files;
 pub mod framing;
 pub mod handshake;
+pub mod java;
 pub mod jobs;
 pub mod logs;
 pub mod methods;

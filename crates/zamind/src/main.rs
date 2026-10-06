@@ -24,17 +24,22 @@ struct DaemonConfig {
     /// Software catalog base URL (PaperMC Fill API v3). Overridable for
     /// mirrors and tests; the New Server flow is the consumer.
     catalog_url: String,
+    /// The Adoptium API base URL (JDK fetch); same override story.
+    adoptium_url: String,
 }
 
 /// The live PaperMC Fill API. (The legacy api.papermc.io/v2 is retired
 /// upstream; v3 is the supported shape.)
 const DEFAULT_CATALOG_URL: &str = "https://fill.papermc.io/v3";
+/// The live Adoptium API (Temurin JDK builds).
+const DEFAULT_ADOPTIUM_URL: &str = "https://api.adoptium.net";
 
 fn parse_args() -> DaemonConfig {
     let mut config = DaemonConfig {
         endpoint: zamin_ipc::Endpoint::default_endpoint(),
         data_dir: zamin_core::platform::paths::data_dir(),
         catalog_url: DEFAULT_CATALOG_URL.to_owned(),
+        adoptium_url: DEFAULT_ADOPTIUM_URL.to_owned(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -56,6 +61,12 @@ fn parse_args() -> DaemonConfig {
                     .next()
                     .unwrap_or_else(|| panic!("--catalog-url needs a value"));
                 config.catalog_url = value.trim_end_matches('/').to_owned();
+            }
+            "--adoptium-url" => {
+                let value = args
+                    .next()
+                    .unwrap_or_else(|| panic!("--adoptium-url needs a value"));
+                config.adoptium_url = value.trim_end_matches('/').to_owned();
             }
             "--version" => {
                 println!("{DAEMON_NAME} {DAEMON_VERSION}");
@@ -95,8 +106,12 @@ fn main() {
 }
 
 async fn run(config: DaemonConfig) {
-    let engine =
-        crate::engine::Engine::with_catalog_url(config.data_dir.clone(), config.catalog_url).await;
+    let engine = crate::engine::Engine::with_urls(
+        config.data_dir.clone(),
+        config.catalog_url,
+        config.adoptium_url,
+    )
+    .await;
 
     let mut server = match IpcServer::bind(config.endpoint.clone()).await {
         Ok(server) => server,
