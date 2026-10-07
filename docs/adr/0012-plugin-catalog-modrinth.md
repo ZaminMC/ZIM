@@ -35,8 +35,18 @@ Modrinth publishes sha1 and sha512; the downloader verifies sha512 — the downl
 
 `plugins.install` returns a job (`JobKind::PluginInstall`) with byte progress and cancellation, exactly like `server.create` and `java.install`. The daemon's rule stands: every long file operation is a job, visible in `jobs.list`, audited like any mutating command.
 
+### The overwrite rule (amended 2026-10-07): identical bytes short-circuit, different bytes ask
+
+The original decision deferred the overwrite discipline "until real demand". The demand is real — updating a plugin by delete-then-install by hand is the exact manual jar handling this catalog exists to remove — so the rule is now decided, and it keeps three properties the deferred note promised: no shadow state (the disk's checksum decides), no new client obligation, and the shared downloader's atomic discipline untouched.
+
+- A target file whose sha512 matches the published digest means the identical file is already installed: the install short-circuits to success without a download. Re-installing is idempotent, and the proof is the disk's own digest.
+- A target file with different content is the operator's decision, not the daemon's: `plugins.install` answers the typed `PLUGIN_EXISTS` (file in context) at resolve time, before any job exists. `replace: true` — the CLI's `--replace`, the panel's explicit Replace button — lands the verified download over the old file atomically; a failed download leaves the old bytes intact because the rename is the last step.
+- The rule lives in the shared installer (`install_file`) and rides `DownloadOptions.replace`; the server-jar download keeps its never-overwrite discipline (a jar download races a running server's jar in a way a plugin install never does), and the JDK fetch stays fresh-directory only.
+
+The genuinely different-file update (a version bump that publishes a new jar name) is two ordinary installs plus a delete — the daemon cannot and should not map jar names to projects (the directory is the inventory), so composing those verbs stays client-side, where the version list already carries the file names.
+
 ## Consequences
 
 - The panel gains a Plugins tab per workspace: search, install (with live progress), installed list, delete. No plugin state lives in the daemon beyond the files themselves — the file system is the inventory.
-- Update flows are installs with the target already present; the overwrite rule (fresh target or typed refusal) is decided by the downloader's existing discipline and revisited with real demand.
+- Update flows are installs with the target already present; the overwrite rule is landed — see "The overwrite rule" above: identical bytes short-circuit, different bytes answer `PLUGIN_EXISTS` and land only behind the explicit `replace`.
 - A second catalog (CurseForge, Hangar) earns its place as another client behind the same engine methods; the protocol's `plugins.*` surface does not change.

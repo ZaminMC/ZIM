@@ -56,7 +56,10 @@ by the server's own layout — a `mods/` directory means the
 Fabric/Quilt/NeoForge/Forge family, everything else is Bukkit-family
 `plugins/`. Installs resolve at request time, stream byte progress as a
 job, verify the published sha512, and land atomically in the target
-directory; the directory is the inventory. The catalog base URL is a
+directory; the directory is the inventory. Re-installing the identical
+file short-circuits on the sha512; an update that carries different
+content answers the typed `PLUGIN_EXISTS` and lands only behind
+`--replace` (the panel asks the same way). The catalog base URL is a
 daemon flag (`--modrinth-url`), so mirrors and air-gapped installs work
 exactly like the software catalog's `--catalog-url`. The CLI reaches the
 same surface over SSH — `zamin plugins search/versions/install/installed/
