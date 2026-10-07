@@ -43,6 +43,8 @@ pub enum ErrorCode {
     CatalogNotFound,
     PluginExists,
     ChecksumMismatch,
+    ScheduleNotFound,
+    ScheduleInvalid,
     InternalError,
 }
 
@@ -81,6 +83,8 @@ impl ErrorCode {
             ErrorCode::CatalogNotFound => "CATALOG_NOT_FOUND",
             ErrorCode::PluginExists => "PLUGIN_EXISTS",
             ErrorCode::ChecksumMismatch => "CHECKSUM_MISMATCH",
+            ErrorCode::ScheduleNotFound => "SCHEDULE_NOT_FOUND",
+            ErrorCode::ScheduleInvalid => "SCHEDULE_INVALID",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
     }

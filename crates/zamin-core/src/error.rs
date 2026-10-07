@@ -114,6 +114,12 @@ pub enum CoreError {
     #[error("the plugin file {file:?} is already installed with different content; replace it explicitly to update")]
     PluginExists { file: String },
 
+    #[error("the schedule is invalid: {reason}")]
+    InvalidSchedule { reason: String },
+
+    #[error("the schedule store is corrupt at {path:?}: {reason}")]
+    SchedulesCorrupt { path: PathBuf, reason: String },
+
     #[error("restore failed mid-commit ({reason}); the previous server files were rolled back — nothing was lost")]
     RestoreRolledBack { reason: String },
 

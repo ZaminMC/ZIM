@@ -59,3 +59,10 @@ pub const FILES_COMMIT: &str = "files.commit";
 pub const FILES_MKDIR: &str = "files.mkdir";
 pub const FILES_RENAME: &str = "files.rename";
 pub const FILES_DELETE: &str = "files.delete";
+
+// Specified in v0, implemented with the scheduler (protocol spec §7e,
+// ADR-0014): the daemon runs the clock, clients author the rules.
+pub const SCHEDULES_LIST: &str = "schedules.list";
+pub const SCHEDULES_CREATE: &str = "schedules.create";
+pub const SCHEDULES_UPDATE: &str = "schedules.update";
+pub const SCHEDULES_DELETE: &str = "schedules.delete";

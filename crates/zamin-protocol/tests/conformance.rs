@@ -365,3 +365,90 @@ fn plugins_updates_report_carries_the_three_honest_statuses() {
     assert_eq!(result.entries[2].project_id, None);
     assert_eq!(result.entries[2].latest_version_id, None);
 }
+
+#[test]
+fn schedules_list_response_carries_all_three_kinds() {
+    // §7e, ADR-0014: specs are internally tagged (`kind`), lastFiredMs and
+    // nextRunMs are optional — absent until the schedule has a story — and
+    // an unknown field inside a schedule stays tolerated (v0 evolution).
+    let original = fixture("schedules-list-response");
+    let msg = parse("schedules-list-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::schedules::SchedulesListResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.server_id, "demo");
+    assert_eq!(result.schedules.len(), 3);
+
+    let daily = &result.schedules[0];
+    assert_eq!(daily.schedule.name, "nightly restart");
+    assert_eq!(
+        daily.schedule.spec,
+        zamin_protocol::schedules::ScheduleSpec::Daily { at: "04:30".into() }
+    );
+    assert_eq!(
+        daily.schedule.action,
+        zamin_protocol::schedules::ScheduleAction::Restart
+    );
+    assert!(daily.schedule.enabled);
+    assert_eq!(daily.schedule.last_fired_ms, Some(1_730_086_200_123));
+    assert_eq!(daily.next_run_ms, Some(1_730_171_400_000));
+
+    let interval = &result.schedules[1];
+    assert_eq!(
+        interval.schedule.spec,
+        zamin_protocol::schedules::ScheduleSpec::Interval { every_secs: 21_600 }
+    );
+    assert_eq!(
+        interval.schedule.action,
+        zamin_protocol::schedules::ScheduleAction::Backup
+    );
+    assert_eq!(interval.schedule.last_fired_ms, None, "never fired: absent");
+    assert_eq!(interval.next_run_ms, None);
+
+    let weekly = &result.schedules[2];
+    assert_eq!(
+        weekly.schedule.spec,
+        zamin_protocol::schedules::ScheduleSpec::Weekly {
+            weekdays: vec!["sat".into(), "sun".into()],
+            at: "09:00".into()
+        }
+    );
+    assert_eq!(
+        weekly.schedule.action,
+        zamin_protocol::schedules::ScheduleAction::Command {
+            line: "say Restarting in 10 minutes".into()
+        }
+    );
+    assert!(!weekly.schedule.enabled);
+}
+
+#[test]
+fn schedules_round_trip_preserves_unknown_fields_inside_schedules() {
+    // Tolerance is the additive-evolution contract (protocol spec §10):
+    // a future daemon may add fields to a schedule without breaking this
+    // client.
+    let value = serde_json::json!({
+        "jsonrpc": "2.0", "id": 7,
+        "result": {
+            "serverId": "demo",
+            "schedules": [{
+                "id": "s1", "name": "n", "enabled": true, "createdMs": 1,
+                "spec": { "kind": "daily", "at": "04:30", "futureField": true },
+                "action": { "kind": "restart" },
+                "someFutureTopField": "ignored"
+            }]
+        }
+    });
+    let msg = IncomingMessage::parse(&value).expect("parses");
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::schedules::SchedulesListResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.schedules.len(), 1);
+    assert_eq!(result.schedules[0].schedule.id, "s1");
+}

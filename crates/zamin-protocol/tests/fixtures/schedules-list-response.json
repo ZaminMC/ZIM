@@ -1,0 +1,39 @@
+{
+  "jsonrpc": "2.0",
+  "id": 43,
+  "result": {
+    "serverId": "demo",
+    "schedules": [
+      {
+        "id": "018f6d2e-aaaa-7bbc-b3aa-c1e2d3f4a5b6",
+        "name": "nightly restart",
+        "spec": { "kind": "daily", "at": "04:30" },
+        "action": { "kind": "restart" },
+        "enabled": true,
+        "createdMs": 1730000000000,
+        "lastFiredMs": 1730086200123,
+        "nextRunMs": 1730171400000
+      },
+      {
+        "id": "018f6d2e-bbbb-7bbc-b3aa-c1e2d3f4a5b6",
+        "name": "world backups",
+        "spec": { "kind": "interval", "everySecs": 21600 },
+        "action": { "kind": "backup" },
+        "enabled": true,
+        "createdMs": 1730000000000
+      },
+      {
+        "id": "018f6d2e-cccc-7bbc-b3aa-c1e2d3f4a5b6",
+        "name": "weekend warning",
+        "spec": {
+          "kind": "weekly",
+          "weekdays": ["sat", "sun"],
+          "at": "09:00"
+        },
+        "action": { "kind": "command", "line": "say Restarting in 10 minutes" },
+        "enabled": false,
+        "createdMs": 1730000000000
+      }
+    ]
+  }
+}

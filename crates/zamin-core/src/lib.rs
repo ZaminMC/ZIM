@@ -18,6 +18,7 @@ pub mod net;
 pub mod ping;
 pub mod platform;
 pub mod plugins;
+pub mod schedules;
 pub mod server;
 pub mod software;
 pub mod supervisor;
