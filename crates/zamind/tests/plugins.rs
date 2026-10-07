@@ -396,3 +396,125 @@ async fn plugins_updates_reports_verdicts_and_the_install_recipe_applies() {
         .expect_err("ghost server");
     assert_eq!(error["code"], "SERVER_NOT_FOUND");
 }
+
+#[tokio::test]
+async fn an_update_that_retires_leaves_exactly_one_jar() {
+    // The live smoke's finding (real ViaVersion jars, real Modrinth):
+    // the overwrite rule is name-keyed and a version bump changes the
+    // published name, so an update that only installs leaves BOTH jars
+    // on disk — two versions of one plugin, which a real server refuses
+    // to load. The recipe's apply therefore carries `retireFile`: the
+    // row the update verdict came from, removed after the new bytes
+    // land and verify.
+    let latest_jar: Vec<u8> = (0..64 * 1024u32).map(|i| (i % 241) as u8).collect();
+    let latest_sha = sha512_hex(&latest_jar);
+    let stale_jar: Vec<u8> = (0..48 * 1024u32).map(|i| (i % 229) as u8).collect();
+    let stale_sha = sha512_hex(&stale_jar);
+
+    let modrinth = spawn_updates_modrinth(latest_jar.clone(), latest_sha, stale_sha);
+
+    let data_dir = scoped_dir("plugins-retire");
+    let endpoint = unique_endpoint();
+    let _daemon = spawn_daemon_with(&data_dir, &endpoint, &["--modrinth-url", &modrinth.url]);
+    let mut client = connect_daemon(&endpoint).await;
+
+    let root = make_server_root("retire-target");
+    register_server(&mut client, "plug", &root).await;
+    let plugins_dir = root.join("plugins");
+    std::fs::create_dir_all(&plugins_dir).unwrap();
+    std::fs::write(plugins_dir.join("EssentialsX-2.19.0.jar"), &stale_jar).unwrap();
+
+    // Apply the recipe the panel sends: pin + replace + retire. One job,
+    // one jar: the new version lands, the old file goes.
+    let result = client
+        .request(
+            methods::PLUGINS_INSTALL,
+            json!({
+                "serverId": "plug", "projectId": "AABBCC",
+                "versionId": "ver9", "replace": true,
+                "retireFile": "EssentialsX-2.19.0.jar"
+            }),
+        )
+        .await
+        .expect("apply the update with the retire");
+    let job_id = result["job"]["jobId"].as_str().expect("jobId").to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "error: {error:?}");
+    assert_eq!(
+        std::fs::read(plugins_dir.join("EssentialsX-2.20.0.jar")).unwrap(),
+        latest_jar
+    );
+    assert!(!plugins_dir.join("EssentialsX-2.19.0.jar").exists());
+
+    // Retiring the name the install LANDED collapses to a no-op before
+    // any job exists — the guard, not a delete of the new bytes.
+    let result = client
+        .request(
+            methods::PLUGINS_INSTALL,
+            json!({
+                "serverId": "plug", "projectId": "AABBCC",
+                "versionId": "ver9", "replace": true,
+                "retireFile": "EssentialsX-2.20.0.jar"
+            }),
+        )
+        .await
+        .expect("same-name retire is a no-op");
+    let job_id = result["job"]["jobId"].as_str().expect("jobId").to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "error: {error:?}");
+    assert!(plugins_dir.join("EssentialsX-2.20.0.jar").exists());
+
+    // An already-absent file is a successful no-op: the operator may
+    // have removed the old jar while the job ran.
+    let result = client
+        .request(
+            methods::PLUGINS_INSTALL,
+            json!({
+                "serverId": "plug", "projectId": "AABBCC",
+                "versionId": "ver9", "replace": true,
+                "retireFile": "Already-Removed.jar"
+            }),
+        )
+        .await
+        .expect("absent retire is fine");
+    let job_id = result["job"]["jobId"].as_str().expect("jobId").to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "error: {error:?}");
+    assert!(plugins_dir.join("EssentialsX-2.20.0.jar").exists());
+
+    // An unsafe retire name is a typed refusal at request time — before
+    // any job exists, the java.install convention.
+    let error = client
+        .request(
+            methods::PLUGINS_INSTALL,
+            json!({
+                "serverId": "plug", "projectId": "AABBCC",
+                "versionId": "ver9", "replace": true,
+                "retireFile": "../escape.jar"
+            }),
+        )
+        .await
+        .expect_err("unsafe retire name");
+    assert_eq!(error["code"], "ARCHIVE_UNSAFE_ENTRY");
+
+    // A symlink that leaves the server root is refused the same way,
+    // also before any job exists (the rooted fs is the choke point).
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/etc", plugins_dir.join("escape-link.jar")).unwrap();
+        let error = client
+            .request(
+                methods::PLUGINS_INSTALL,
+                json!({
+                    "serverId": "plug", "projectId": "AABBCC",
+                    "versionId": "ver9", "replace": true,
+                    "retireFile": "escape-link.jar"
+                }),
+            )
+            .await
+            .expect_err("escaping symlink retire");
+        assert_eq!(error["code"], "FS_PATH_ESCAPES_ROOT");
+        std::fs::remove_file(plugins_dir.join("escape-link.jar")).unwrap();
+        assert!(plugins_dir.join("EssentialsX-2.20.0.jar").exists());
+    }
+}

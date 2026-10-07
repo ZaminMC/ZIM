@@ -118,6 +118,16 @@ pub struct PluginsInstallParams {
     /// always allowed and short-circuits without a download.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub replace: bool,
+    /// The update rule's retire step: the installed file this request
+    /// UPGRADES (the row the update verdict came from). After the new
+    /// bytes land and verify, that file is removed — the overwrite rule
+    /// is name-keyed and a version bump usually changes the name, so
+    /// without the retire an update leaves both jars (two versions of
+    /// one plugin). The new file lands FIRST: a refused retire never
+    /// loses the plugin, it fails the job saying exactly what landed.
+    /// An already-absent file is a successful no-op.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retire_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

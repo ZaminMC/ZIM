@@ -1745,11 +1745,35 @@ impl Engine {
         project_id: &str,
         version_id: Option<String>,
         replace: bool,
+        retire_file: Option<String>,
     ) -> Result<zamin_protocol::plugins::PluginsInstallResult, EngineError> {
         let (target, target_dir) = self.plugin_target(server_id)?;
         let client = self.modrinth_client();
         let loaders = zamin_core::plugins::loaders_for_target(target).to_vec();
         let project = project_id.to_owned();
+
+        // The retire step resolves up front (the java.install convention):
+        // an unsafe name or a symlink that leaves the server root is a
+        // typed refusal now, before any job exists. The file's ABSENCE is
+        // deliberately fine — the retire is idempotent by design.
+        let retire = match retire_file {
+            Some(raw) => {
+                let sanitized = zamin_core::plugins::safe_file_name(&raw)
+                    .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+                let dir = target_dir.clone();
+                let check_name = sanitized.clone();
+                tokio::task::spawn_blocking(move || -> Result<(), zamin_core::error::CoreError> {
+                    use zamin_core::fsops::RootedFs;
+                    let fs = RootedFs::open(&dir)?;
+                    fs.resolve(&check_name).map(|_| ())
+                })
+                .await
+                .map_err(|e| internal(&format!("plugin retire check task failed: {e}")))?
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+                Some(sanitized)
+            }
+            None => None,
+        };
 
         // Resolve the version up front — before any job exists (the
         // java.install convention): an unreachable catalog or a project
@@ -1792,6 +1816,11 @@ impl Engine {
         // A same-content re-install passes through (the core short-circuits).
         let name =
             zamin_core::plugins::safe_file_name(&file.filename).map_err(|e| to_protocol(&e))?;
+        // Retiring the file the install just landed would delete the NEW
+        // bytes; with `replace` the same name is already overwritten, so
+        // the retire collapses to a no-op. Filter it here, before any
+        // job exists — not inside the job where it could race the rename.
+        let retire = retire.filter(|old| *old != name);
         let dest = target_dir.join(&name);
         if dest.exists() && !replace {
             let dest_for_task = dest.clone();
@@ -1828,6 +1857,9 @@ impl Engine {
                 ctl.progress(0, total, Some("bytes"), Some(&format!("installing {name}")));
 
                 let install_ctl = ctl.clone();
+                // The retire step needs its own handle: the install's
+                // blocking closure takes the target dir by move.
+                let retire_dir = target_dir.clone();
                 let outcome = tokio::task::spawn_blocking(move || {
                     zamin_core::plugins::install_file(
                         &target_dir,
@@ -1858,14 +1890,51 @@ impl Engine {
 
                 match outcome {
                     Ok(installed) => {
+                        // The update rule's retire step (ADR-0012): the
+                        // new bytes are on disk and verified — now the
+                        // OLD jar goes. Land-first order: a refused
+                        // retire never loses the plugin, it fails the
+                        // job saying exactly what landed.
+                        let retire_note = match &retire {
+                            Some(old) => {
+                                let old_for_task = old.clone();
+                                let dir = retire_dir.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    zamin_core::plugins::retire_installed_file(&dir, &old_for_task)
+                                })
+                                .await
+                                .map_err(|e| {
+                                    JobFailure::Error(ProtocolError::new(
+                                        ErrorCode::InternalError,
+                                        format!("plugin retire task failed: {e}"),
+                                    ))
+                                })?
+                                .map_err(|e| {
+                                    JobFailure::Error(ProtocolError::new(
+                                        ErrorCode::InternalError,
+                                        format!(
+                                            "the update landed but retiring {:?} refused: {e}",
+                                            old
+                                        ),
+                                    ))
+                                })?
+                            }
+                            None => false,
+                        };
+                        let retired_note = match (&retire, retire_note) {
+                            (Some(old), true) => format!("; retired {old}"),
+                            (Some(old), false) => format!("; {old} was already gone"),
+                            (None, _) => String::new(),
+                        };
                         let message = format!(
-                            "installed {} into {target} ({} bytes)",
+                            "installed {} into {target} ({} bytes){}",
                             installed
                                 .path
                                 .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or(&name),
                             installed.size,
+                            retired_note,
                         );
                         ctl.progress(1, Some(1), Some("steps"), Some(&message));
                         Ok(())

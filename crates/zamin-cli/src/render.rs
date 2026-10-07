@@ -313,7 +313,9 @@ pub fn plugin_updates(result: &PluginsUpdatesResult) {
     if applicable > 0 {
         println!(
             "\nApply one with `zamin plugins install <server> <project-id> \
-             --version <latest-id> --replace --wait`."
+             --version <latest-id> --replace --retire <file> --wait`\n\
+             (the FILE column names the jar; --retire removes it once the \
+             new bytes land, so the update does not leave both versions)."
         );
     }
     if result

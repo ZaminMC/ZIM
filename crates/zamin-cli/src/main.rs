@@ -176,6 +176,12 @@ enum PluginsCommands {
         /// re-install of the identical file never needs this
         #[arg(long)]
         replace: bool,
+        /// The update rule's retire step (ADR-0012): the installed file
+        /// this install UPGRADES — removed after the new bytes land and
+        /// verify. A version bump usually changes the file name, so an
+        /// update without --retire leaves both jars on disk.
+        #[arg(long, value_name = "FILE")]
+        retire: Option<String>,
     },
     /// Delete a plugin jar from the server's target directory
     Delete {
@@ -451,15 +457,19 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 version,
                 wait,
                 replace,
+                retire,
             } => {
                 plugins_install(
                     &cli,
                     &client,
                     server_id,
                     project_id,
-                    version.as_deref(),
-                    *wait,
-                    *replace,
+                    InstallOpts {
+                        version: version.as_deref(),
+                        wait: *wait,
+                        replace: *replace,
+                        retire: retire.as_deref(),
+                    },
                 )
                 .await
             }
@@ -844,20 +854,34 @@ async fn plugins_updates(cli: &Cli, client: &Client, server_id: &str) -> CmdResu
     Ok(())
 }
 
+/// The install command's knobs, bundled so the handler stays under
+/// clippy's argument cap and the call site reads like the recipe.
+struct InstallOpts<'a> {
+    version: Option<&'a str>,
+    wait: bool,
+    replace: bool,
+    retire: Option<&'a str>,
+}
+
 async fn plugins_install(
     cli: &Cli,
     client: &Client,
     server_id: &str,
     project_id: &str,
-    version: Option<&str>,
-    wait: bool,
-    replace: bool,
+    opts: InstallOpts<'_>,
 ) -> CmdResult {
+    let InstallOpts {
+        version,
+        wait,
+        replace,
+        retire,
+    } = opts;
     let params = PluginsInstallParams {
         server_id: server_id.to_owned(),
         project_id: project_id.to_owned(),
         version_id: version.map(str::to_owned),
         replace,
+        retire_file: retire.map(str::to_owned),
     };
     let result: PluginsInstallResult = client
         .request_typed(methods::PLUGINS_INSTALL, params)

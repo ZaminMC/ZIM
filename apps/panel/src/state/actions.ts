@@ -362,6 +362,7 @@ export async function pluginsInstall(
   projectId: string,
   versionId?: string,
   replace?: boolean,
+  retireFile?: string,
 ): Promise<PluginsInstallResult> {
   return client.request<PluginsInstallResult>("plugins.install", {
     serverId,
@@ -370,6 +371,10 @@ export async function pluginsInstall(
     // The update rule (ADR-0012): the daemon refuses a differing file with
     // PLUGIN_EXISTS; `replace` is the operator's explicit overwrite.
     ...(replace ? { replace: true } : {}),
+    // The update rule's retire step: the installed file this request
+    // UPGRADES, removed after the new bytes land and verify (the overwrite
+    // rule is name-keyed; a version bump usually changes the name).
+    ...(retireFile === undefined ? {} : { retireFile }),
   });
 }
 

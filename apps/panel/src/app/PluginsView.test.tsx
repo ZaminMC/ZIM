@@ -109,7 +109,13 @@ describe("PluginsView", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Install" }));
 
     await waitFor(() =>
-      expect(mocks.pluginsInstall).toHaveBeenCalledWith("alpha", "AABBCC", undefined, false),
+      expect(mocks.pluginsInstall).toHaveBeenCalledWith(
+        "alpha",
+        "AABBCC",
+        undefined,
+        false,
+        undefined,
+      ),
     );
     expect(mocks.pluginsInstall).toHaveBeenCalledTimes(1);
 
@@ -232,7 +238,13 @@ describe("PluginsView", () => {
     // Replace retries the install with the explicit overwrite.
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     await waitFor(() =>
-      expect(mocks.pluginsInstall).toHaveBeenCalledWith("alpha", "AABBCC", undefined, true),
+      expect(mocks.pluginsInstall).toHaveBeenCalledWith(
+        "alpha",
+        "AABBCC",
+        undefined,
+        true,
+        undefined,
+      ),
     );
 
     // The retried install hands its job to the store like any other.
@@ -317,7 +329,9 @@ describe("PluginsView", () => {
     expect(screen.getByText("unmanaged")).toBeTruthy();
 
     // The update button is the recipe applied: same server, the pin,
-    // and the explicit replace the rule requires.
+    // the explicit replace the rule requires — and the retire step,
+    // naming the row's own jar so the update does not leave both
+    // versions on disk (the overwrite rule is name-keyed).
     fireEvent.click(screen.getByRole("button", { name: "update" }));
     await waitFor(() =>
       expect(mocks.pluginsInstall).toHaveBeenCalledWith(
@@ -325,6 +339,7 @@ describe("PluginsView", () => {
         "AABBCC",
         "ver9",
         true,
+        "EssentialsX-2.19.0.jar",
       ),
     );
   });

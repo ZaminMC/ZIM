@@ -650,6 +650,7 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                         &params.project_id,
                         params.version_id,
                         params.replace,
+                        params.retire_file,
                     )
                     .await
                 {

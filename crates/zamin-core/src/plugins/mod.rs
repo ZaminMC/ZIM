@@ -139,6 +139,30 @@ pub fn install_file(
     )
 }
 
+/// The update rule's retire step (ADR-0012): after the new version's
+/// bytes have landed and verified, remove the OLD jar — the row the
+/// update verdict came from. The overwrite rule is name-keyed, and a
+/// version bump usually changes the published name, so an update that
+/// only installs leaves both jars on disk — two versions of one plugin,
+/// which a real server refuses to load.
+///
+/// Idempotent: a file that is already gone is a successful no-op
+/// (`Ok(false)`) — the operator may have removed it while the job ran.
+/// The name sanitizes like every wire name, and the deletion goes
+/// through the rooted filesystem, so a symlink that leaves the server
+/// root is refused exactly like `plugins.delete` refuses it.
+pub fn retire_installed_file(target_dir: &Path, file_name: &str) -> Result<bool, CoreError> {
+    use crate::fsops::RootedFs;
+    let name = safe_file_name(file_name)?;
+    let fs = RootedFs::open(target_dir)?;
+    let path = fs.resolve(&name)?;
+    if !path.exists() {
+        return Ok(false);
+    }
+    fs.delete(&name)?;
+    Ok(true)
+}
+
 /// Whether the file at `path` carries exactly the published digest —
 /// the update rule's idempotence check (a re-install of identical bytes
 /// is always allowed). A read failure is the honest error, never `false`.

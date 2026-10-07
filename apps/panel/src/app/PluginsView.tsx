@@ -113,11 +113,11 @@ export function PluginsView({ serverId }: { serverId: string }) {
   );
 
   const install = useCallback(
-    (projectId: string, replace = false, versionId?: string) => {
+    (projectId: string, replace = false, versionId?: string, retireFile?: string) => {
       setInstallingProject(projectId);
       setError(null);
       setPendingReplace(null);
-      void pluginsInstall(serverId, projectId, versionId, replace)
+      void pluginsInstall(serverId, projectId, versionId, replace, retireFile)
         .then(() => {
           // The job store owns the rest; the progress chip shows itself.
         })
@@ -306,7 +306,17 @@ export function PluginsView({ serverId }: { serverId: string }) {
                       className={styles.remove}
                       disabled={busy}
                       onClick={() =>
-                        install(verdict.projectId ?? "", true, verdict.latestVersionId)
+                        install(
+                          verdict.projectId ?? "",
+                          true,
+                          verdict.latestVersionId,
+                          // The update retires the row it came from: the
+                          // overwrite rule is name-keyed and a version
+                          // bump usually changes the name, so without
+                          // the retire the old jar would stay on disk —
+                          // two versions of one plugin.
+                          entry.fileName,
+                        )
                       }
                     >
                       update

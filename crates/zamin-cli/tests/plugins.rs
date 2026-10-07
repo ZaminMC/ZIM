@@ -454,7 +454,15 @@ fn cli_plugins_updates_reports_verdicts_and_the_recipe_applies() {
     assert_eq!(entries[1]["status"], "unmanaged");
     assert!(entries[1].get("projectId").is_none());
 
-    // The printed recipe applies verbatim: install the pin with --replace.
+    // The printed recipe applies verbatim — install the pin with
+    // --replace and the retire step naming the FILE column's jar. (This
+    // mock publishes the same file name for both versions, so the retire
+    // collapses to its no-op guard; the different-name delete is the
+    // daemon e2e's `an_update_that_retires_leaves_exactly_one_jar`.)
+    assert!(
+        stdout.contains("--retire"),
+        "recipe names the retire: {stdout}"
+    );
     let applied = harness.zamin(&[
         "plugins",
         "install",
@@ -464,6 +472,8 @@ fn cli_plugins_updates_reports_verdicts_and_the_recipe_applies() {
         "ver10",
         "--wait",
         "--replace",
+        "--retire",
+        "EssentialsX-2.20.0.jar",
     ]);
     assert!(applied.status.success(), "apply: {}", applied.status);
 
