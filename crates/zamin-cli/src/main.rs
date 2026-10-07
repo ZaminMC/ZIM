@@ -161,7 +161,8 @@ enum PluginsCommands {
     /// List the plugin jars in the server's target directory
     Installed { server_id: String },
     /// Install a plugin: latest for the loader, or a pinned version.
-    /// A cancellable job; --wait polls it to the end.
+    /// A cancellable job; --wait polls it to the end. Updating a file
+    /// that is already installed with different content needs --replace.
     Install {
         server_id: String,
         project_id: String,
@@ -171,6 +172,10 @@ enum PluginsCommands {
         /// Poll the job until it finishes, printing byte progress
         #[arg(long)]
         wait: bool,
+        /// Overwrite the installed file when its content differs; a
+        /// re-install of the identical file never needs this
+        #[arg(long)]
+        replace: bool,
     },
     /// Delete a plugin jar from the server's target directory
     Delete {
@@ -442,6 +447,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 project_id,
                 version,
                 wait,
+                replace,
             } => {
                 plugins_install(
                     &cli,
@@ -450,6 +456,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                     project_id,
                     version.as_deref(),
                     *wait,
+                    *replace,
                 )
                 .await
             }
@@ -823,11 +830,13 @@ async fn plugins_install(
     project_id: &str,
     version: Option<&str>,
     wait: bool,
+    replace: bool,
 ) -> CmdResult {
     let params = PluginsInstallParams {
         server_id: server_id.to_owned(),
         project_id: project_id.to_owned(),
         version_id: version.map(str::to_owned),
+        replace,
     };
     let result: PluginsInstallResult = client
         .request_typed(methods::PLUGINS_INSTALL, params)
