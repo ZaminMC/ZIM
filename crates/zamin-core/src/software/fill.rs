@@ -191,7 +191,8 @@ fn malformed(project: &str) -> CoreError {
 /// Non-2xx answers are typed `Http` (the daemon maps 404 to
 /// CATALOG_NOT_FOUND and everything else to CATALOG_UNAVAILABLE);
 /// transport-level failures (DNS, refused, TLS) are `HttpTransport`.
-fn http_error(url: &str, error: ureq::Error) -> CoreError {
+/// Shared with the Fabric meta client, which maps the same way.
+pub(super) fn http_error(url: &str, error: ureq::Error) -> CoreError {
     match error {
         ureq::Error::Status(status, response) => CoreError::Http {
             url: url.to_owned(),

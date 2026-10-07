@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::fabric::{FabricMetaClient, MetaVersion};
 use super::fill::{compare_versions, FillClient};
 use super::templates::{stamp_template, template, templates, DEFAULT_TEMPLATE_ID};
 use super::{download_to_dir, entry, DownloadOptions, CATALOG};
@@ -219,8 +220,19 @@ fn catalog_rows_are_well_formed() {
         assert!(!row.name.is_empty() && !row.project.is_empty());
         assert!(entry(row.id).is_some(), "entry() finds every row");
     }
+    // The families and their sources stay in sync: the Fill API family is
+    // Paper/Purpur/Folia, the Fabric meta family is Fabric.
+    for row in CATALOG {
+        match row.id {
+            "paper" | "purpur" | "folia" => {
+                assert_eq!(row.source, super::SoftwareSource::Fill)
+            }
+            "fabric" => assert_eq!(row.source, super::SoftwareSource::FabricMeta),
+            other => panic!("catalog row {other:?} is unclassified"),
+        }
+    }
     assert!(
-        entry("fabric").is_none(),
+        entry("forge").is_none(),
         "a family we do not speak is not in the table"
     );
 }
@@ -485,5 +497,189 @@ fn stamping_refuses_to_clobber_and_unknown_ids_are_typed() {
     match stamp_template(&dir, "nope") {
         Err(CoreError::NotFound { .. }) => {}
         other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+// --- Fabric meta client (the second family) ----------------------------------
+
+/// The observed meta v2 shapes, newest-first like upstream sends them.
+const FABRIC_GAME_JSON: &str = r#"[
+  {"version": "1.21.11", "stable": true},
+  {"version": "1.21.11-rc3", "stable": false},
+  {"version": "26.3-snapshot-3", "stable": false},
+  {"version": "1.20.1", "stable": true}
+]"#;
+
+const FABRIC_LOADER_JSON: &str = r#"[
+  {"url": "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.16.14/fabric-loader-0.16.14.jar",
+   "maven": "net.fabricmc:fabric-loader:0.16.14", "version": "0.16.14", "stable": true},
+  {"url": "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.16.13/fabric-loader-0.16.13.jar",
+   "maven": "net.fabricmc:fabric-loader:0.16.13", "version": "0.16.13", "stable": true},
+  {"url": "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.17.0-beta.1/fabric-loader-0.17.0-beta.1.jar",
+   "maven": "net.fabricmc:fabric-loader:0.17.0-beta.1", "version": "0.17.0-beta.1", "stable": false},
+  {"url": "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.15.11/fabric-loader-0.15.11.jar",
+   "maven": "net.fabricmc:fabric-loader:0.15.11", "version": "0.15.11", "stable": true}
+]"#;
+
+const FABRIC_INSTALLER_JSON: &str = r#"[
+  {"url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.0.1/fabric-installer-1.0.1.jar",
+   "maven": "net.fabricmc:fabric-installer:1.0.1", "version": "1.0.1", "stable": true},
+  {"url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.0.0/fabric-installer-1.0.0.jar",
+   "maven": "net.fabricmc:fabric-installer:1.0.0", "version": "1.0.0", "stable": true}
+]"#;
+
+const FABRIC_JAR_BYTES: &[u8] = b"PK\x03\x04 fabric launcher jar bytes";
+
+fn mock_fabric() -> MockServer {
+    let jar = FABRIC_JAR_BYTES.to_vec();
+    MockServer::spawn(move |path| match path {
+        "/v2/versions/game" => MockResponse::json(FABRIC_GAME_JSON),
+        "/v2/versions/loader" => MockResponse::json(FABRIC_LOADER_JSON),
+        "/v2/versions/installer" => MockResponse::json(FABRIC_INSTALLER_JSON),
+        "/v2/versions/loader/1.21.11/0.16.14/1.0.1/server/jar" => MockResponse::bytes(jar.clone()),
+        _ => MockResponse::not_found(),
+    })
+}
+
+fn versions(list: &[MetaVersion]) -> Vec<(&str, bool)> {
+    list.iter()
+        .map(|v| (v.version.as_str(), v.stable))
+        .collect()
+}
+
+#[test]
+fn fabric_version_lists_pass_through_upstream_order() {
+    let server = mock_fabric();
+    let client = FabricMetaClient::new(&server.url);
+
+    let games = client.game_versions().expect("games");
+    assert_eq!(
+        versions(&games),
+        vec![
+            ("1.21.11", true),
+            ("1.21.11-rc3", false),
+            ("26.3-snapshot-3", false),
+            ("1.20.1", true)
+        ],
+        "the API's newest-first order is kept, stable flags intact"
+    );
+
+    let loaders = client.loader_versions().expect("loaders");
+    assert_eq!(versions(&loaders)[0], ("0.16.14", true));
+    let installers = client.installer_versions().expect("installers");
+    assert_eq!(versions(&installers)[0], ("1.0.1", true));
+}
+
+#[test]
+fn fabric_resolve_defaults_to_the_newest_stable() {
+    let server = mock_fabric();
+    let client = FabricMetaClient::new(&server.url);
+
+    let jar = client
+        .resolve_server_jar("1.21.11", None, None)
+        .expect("resolve");
+    // The unstable 0.17.0-beta.1 loader exists upstream but stable wins.
+    assert_eq!(jar.loader, "0.16.14");
+    assert_eq!(jar.installer, "1.0.1");
+    assert_eq!(
+        jar.name,
+        "fabric-server-mc.1.21.11-loader.0.16.14-launcher.1.0.1.jar"
+    );
+    assert_eq!(
+        jar.url,
+        format!("{}/v2/versions/loader/1.21.11/0.16.14/1.0.1/server/jar", server.url)
+    );
+}
+
+#[test]
+fn fabric_resolve_pins_explicit_versions() {
+    let server = mock_fabric();
+    let client = FabricMetaClient::new(&server.url);
+
+    let jar = client
+        .resolve_server_jar("1.20.1", Some("0.15.11"), Some("1.0.0"))
+        .expect("pinned resolve");
+    assert_eq!(jar.loader, "0.15.11");
+    assert_eq!(jar.installer, "1.0.0");
+    assert_eq!(
+        jar.name,
+        "fabric-server-mc.1.20.1-loader.0.15.11-launcher.1.0.0.jar"
+    );
+}
+
+#[test]
+fn fabric_resolve_rejects_unknown_pins_and_unstable_defaults_typed() {
+    let server = mock_fabric();
+    let client = FabricMetaClient::new(&server.url);
+
+    // An unknown game version is a typed 404 before any download.
+    match client.resolve_server_jar("9.9.9", None, None) {
+        Err(CoreError::Http { status: 404, .. }) => {}
+        other => panic!("expected Http 404 for the game, got {other:?}"),
+    }
+    // An unknown explicit loader likewise.
+    match client.resolve_server_jar("1.21.11", Some("0.99.99"), None) {
+        Err(CoreError::Http { status: 404, .. }) => {}
+        other => panic!("expected Http 404 for the loader, got {other:?}"),
+    }
+    // An unknown explicit installer likewise.
+    match client.resolve_server_jar("1.21.11", None, Some("9.9.9")) {
+        Err(CoreError::Http { status: 404, .. }) => {}
+        other => panic!("expected Http 404 for the installer, got {other:?}"),
+    }
+
+    // A family with no stable loader behind it: the default pick refuses
+    // rather than silently pinning a beta.
+    let all_unstable = MockServer::spawn(|path| match path {
+        "/v2/versions/game" => MockResponse::json(FABRIC_GAME_JSON),
+        "/v2/versions/loader" => {
+            MockResponse::json(r#"[{"version":"0.17.0-beta.1","stable":false}]"#)
+        }
+        "/v2/versions/installer" => MockResponse::json(FABRIC_INSTALLER_JSON),
+        _ => MockResponse::not_found(),
+    });
+    let unstable = FabricMetaClient::new(&all_unstable.url);
+    match unstable.resolve_server_jar("1.21.11", None, None) {
+        Err(CoreError::Http { status: 404, .. }) => {}
+        other => panic!("expected Http 404 without a stable loader, got {other:?}"),
+    }
+}
+
+#[test]
+fn fabric_launcher_jar_downloads_through_the_shared_discipline() {
+    let server = mock_fabric();
+    let client = FabricMetaClient::new(&server.url);
+    let resolved = client
+        .resolve_server_jar("1.21.11", None, None)
+        .expect("resolve");
+
+    let _guard = tempdir::scoped("fabric-jar");
+    let dir = _guard.path.clone();
+    let options = DownloadOptions::new();
+    // No published checksum upstream: `None` expected — the downloader
+    // still hashes the stream and reports the digest.
+    let outcome = super::download_to_dir(&resolved.url, &dir, "server.jar", None, &options)
+        .expect("download");
+    assert_eq!(outcome.size, FABRIC_JAR_BYTES.len() as u64);
+    assert_eq!(outcome.digest.len(), 64, "a computed sha256 rides along");
+    assert_eq!(
+        std::fs::read(dir.join("server.jar")).unwrap(),
+        FABRIC_JAR_BYTES
+    );
+}
+
+#[test]
+fn fabric_meta_shape_errors_are_typed_transport_errors() {
+    // A wrong-shaped response is transport-classified, never a panic.
+    let broken = MockServer::spawn(|path| match path {
+        "/v2/versions/game" => MockResponse::json(r#"{"unexpected": true}"#),
+        _ => MockResponse::not_found(),
+    });
+    let bad = FabricMetaClient::new(&broken.url);
+    match bad.game_versions() {
+        Err(CoreError::HttpTransport { message, .. }) => {
+            assert!(message.contains("not the expected shape"));
+        }
+        other => panic!("expected shape error, got {other:?}"),
     }
 }
