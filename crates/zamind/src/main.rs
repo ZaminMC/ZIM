@@ -30,6 +30,9 @@ struct DaemonConfig {
     /// The Modrinth API base URL (plugin catalog, ADR-0012); same
     /// override story.
     modrinth_url: String,
+    /// The FabricMC meta API base URL (software catalog, second
+    /// family); same override story.
+    fabric_url: String,
 }
 
 /// The live PaperMC Fill API. (The legacy api.papermc.io/v2 is retired
@@ -39,6 +42,8 @@ const DEFAULT_CATALOG_URL: &str = "https://fill.papermc.io/v3";
 const DEFAULT_ADOPTIUM_URL: &str = "https://api.adoptium.net";
 /// The live Modrinth API (plugin catalog).
 const DEFAULT_MODRINTH_URL: &str = "https://api.modrinth.com/v2";
+/// The live FabricMC meta API (the software catalog's Fabric family).
+const DEFAULT_FABRIC_URL: &str = "https://meta.fabricmc.net";
 
 fn parse_args() -> DaemonConfig {
     let mut config = DaemonConfig {
@@ -47,6 +52,7 @@ fn parse_args() -> DaemonConfig {
         catalog_url: DEFAULT_CATALOG_URL.to_owned(),
         adoptium_url: DEFAULT_ADOPTIUM_URL.to_owned(),
         modrinth_url: DEFAULT_MODRINTH_URL.to_owned(),
+        fabric_url: DEFAULT_FABRIC_URL.to_owned(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -80,6 +86,12 @@ fn parse_args() -> DaemonConfig {
                     .next()
                     .unwrap_or_else(|| panic!("--modrinth-url needs a value"));
                 config.modrinth_url = value.trim_end_matches('/').to_owned();
+            }
+            "--fabric-url" => {
+                let value = args
+                    .next()
+                    .unwrap_or_else(|| panic!("--fabric-url needs a value"));
+                config.fabric_url = value.trim_end_matches('/').to_owned();
             }
             "--version" => {
                 println!("{DAEMON_NAME} {DAEMON_VERSION}");
@@ -124,6 +136,7 @@ async fn run(config: DaemonConfig) {
         config.catalog_url,
         config.adoptium_url,
         config.modrinth_url,
+        config.fabric_url,
     )
     .await;
     let audit = audit::Audit::new(&config.data_dir);

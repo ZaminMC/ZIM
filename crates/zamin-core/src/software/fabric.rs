@@ -98,10 +98,12 @@ impl FabricMetaClient {
 
     fn list(&self, kind: &str) -> Result<Vec<MetaVersion>, CoreError> {
         let url_path = format!("/v2/versions/{kind}");
-        let raw: Vec<RawMetaVersion> = serde_json::from_value(self.get_json(&url_path)?)
-            .map_err(|e| CoreError::HttpTransport {
-                url: format!("{}{url_path}", self.base),
-                message: format!("`{kind}` is not the expected shape: {e}"),
+        let raw: Vec<RawMetaVersion> =
+            serde_json::from_value(self.get_json(&url_path)?).map_err(|e| {
+                CoreError::HttpTransport {
+                    url: format!("{}{url_path}", self.base),
+                    message: format!("`{kind}` is not the expected shape: {e}"),
+                }
             })?;
         Ok(raw
             .into_iter()

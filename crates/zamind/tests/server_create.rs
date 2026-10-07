@@ -481,3 +481,183 @@ async fn port_choice_lands_in_properties_and_settings() {
     let config = std::fs::read_to_string(data_dir.join("servers/ported/config.toml")).unwrap();
     assert!(config.contains("port = 25600"), "{config}");
 }
+
+// --- the second family: fabric (ARCH-REVIEW §17.8) --------------------------
+
+/// The Fabric meta mock: version lists plus the launcher-jar endpoint.
+/// No checksums are published for the jar — that difference is the point
+/// of the fabric branch (the downloader computes and reports a digest).
+fn spawn_fabric_meta(jar: Vec<u8>) -> MockHttp {
+    let base: Arc<std::sync::OnceLock<String>> = Arc::new(std::sync::OnceLock::new());
+    let base_for_handler = Arc::clone(&base);
+    let mock = MockHttp::spawn(move |path| match path {
+        "/v2/versions/game" => MockHttpResponse::json(
+            r#"[{"version":"1.21.11","stable":true},
+                {"version":"1.21.11-rc3","stable":false},
+                {"version":"1.20.1","stable":true}]"#,
+        ),
+        "/v2/versions/loader" => MockHttpResponse::json(
+            r#"[{"version":"0.16.14","stable":true},
+                {"version":"0.16.13","stable":true},
+                {"version":"0.17.0-beta.1","stable":false}]"#,
+        ),
+        "/v2/versions/installer" => MockHttpResponse::json(
+            r#"[{"version":"1.0.1","stable":true},{"version":"1.0.0","stable":true}]"#,
+        ),
+        "/v2/versions/loader/1.21.11/0.16.14/1.0.1/server/jar" => {
+            let _ = base_for_handler.get();
+            MockHttpResponse::bytes(jar.clone())
+        }
+        "/v2/versions/loader/1.21.11/0.16.13/1.0.1/server/jar" => {
+            MockHttpResponse::bytes(jar.clone())
+        }
+        _ => MockHttpResponse::not_found(),
+    });
+    let _ = base.set(mock.url.clone());
+    mock
+}
+
+#[tokio::test]
+async fn fabric_family_browses_and_creates() {
+    let jar: Vec<u8> = (0..256 * 1024u32).map(|i| (i % 11) as u8).collect();
+    let meta = spawn_fabric_meta(jar.clone());
+    let data_dir = scoped_dir("fabric-create");
+    let endpoint = unique_endpoint();
+    let _daemon = spawn_daemon_with(
+        &data_dir,
+        &endpoint,
+        &[
+            "--fabric-url",
+            &meta.url,
+            "--catalog-url",
+            "http://127.0.0.1:9",
+        ],
+    );
+    let mut client = connect_daemon(&endpoint).await;
+
+    // The catalog lists fabric with its family on its sleeve.
+    let list = client
+        .request(methods::CATALOG_LIST, json!({}))
+        .await
+        .expect("catalog.list");
+    let fabric = list["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "fabric")
+        .expect("fabric entry")
+        .clone();
+    assert_eq!(fabric["source"], "fabric-meta");
+
+    // Versions: the game list, newest first, java from the local table.
+    let versions = client
+        .request(methods::CATALOG_VERSIONS, json!({"project": "fabric"}))
+        .await
+        .expect("catalog.versions");
+    let ids: Vec<&str> = versions["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["1.21.11", "1.21.11-rc3", "1.20.1"]);
+    let newest = &versions["versions"][0];
+    assert_eq!(newest["javaMajor"], 21, "the local table decides");
+
+    // Builds: the stable loader list stands in; no fabricated ids.
+    let builds = client
+        .request(
+            methods::CATALOG_BUILDS,
+            json!({"project": "fabric", "version": "1.21.11"}),
+        )
+        .await
+        .expect("catalog.builds");
+    assert_eq!(builds["builds"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        builds["loaders"],
+        json!(["0.16.14", "0.16.13"]),
+        "stable loaders only, newest first"
+    );
+
+    // Create with the default loader: resolves 0.16.14 + installer
+    // 1.0.1, downloads the launcher jar, registers.
+    let mut params = create_params("fabric-default", json!(null));
+    params["project"] = json!("fabric");
+    let result = client
+        .request(methods::SERVER_CREATE, params)
+        .await
+        .expect("fabric server.create");
+    let job_id = result["job"]["jobId"].as_str().unwrap().to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "{error:?}");
+    assert_eq!(
+        std::fs::read(data_dir.join("instances/fabric-default/server.jar")).unwrap(),
+        jar
+    );
+    let config =
+        std::fs::read_to_string(data_dir.join("servers/fabric-default/config.toml")).unwrap();
+    assert!(config.contains("mcVersion = \"1.21.11\""), "{config}");
+    assert!(config.contains("javaMajorRequired = 21"), "{config}");
+
+    // An explicit pin is honored (the 0.16.13 endpoint exists upstream).
+    let mut pinned = create_params("fabric-pinned", json!(null));
+    pinned["project"] = json!("fabric");
+    pinned["loader"] = json!("0.16.13");
+    let result = client
+        .request(methods::SERVER_CREATE, pinned)
+        .await
+        .expect("pinned fabric create");
+    let job_id = result["job"]["jobId"].as_str().unwrap().to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "{error:?}");
+    assert!(data_dir
+        .join("instances/fabric-pinned/server.jar")
+        .is_file());
+}
+
+#[tokio::test]
+async fn fabric_rejects_the_wrong_family_dialect_typed() {
+    let jar: Vec<u8> = vec![3u8; 64 * 1024];
+    let meta = spawn_fabric_meta(jar);
+    let data_dir = scoped_dir("fabric-typed");
+    let endpoint = unique_endpoint();
+    let _daemon = spawn_daemon_with(&data_dir, &endpoint, &["--fabric-url", &meta.url]);
+    let mut client = connect_daemon(&endpoint).await;
+
+    // A numeric build speaks the Fill dialect, not the Fabric one.
+    let mut params = create_params("fabric-build", json!(null));
+    params["project"] = json!("fabric");
+    params["build"] = json!(34);
+    let error = client
+        .request(methods::SERVER_CREATE, params)
+        .await
+        .expect_err("build is not a fabric parameter");
+    assert_eq!(error["code"], "PROTOCOL_INVALID_REQUEST", "{error}");
+
+    // An unknown loader pin is a typed 404 before any job exists.
+    let mut params = create_params("fabric-ghost-loader", json!(null));
+    params["project"] = json!("fabric");
+    params["loader"] = json!("0.99.99");
+    let error = client
+        .request(methods::SERVER_CREATE, params)
+        .await
+        .expect_err("unknown loader");
+    assert_eq!(error["code"], "CATALOG_NOT_FOUND", "{error}");
+
+    // An unknown game version likewise (the resolver validates first).
+    let mut params = create_params("fabric-ghost-game", json!(null));
+    params["project"] = json!("fabric");
+    params["version"] = json!("9.9.9");
+    let error = client
+        .request(methods::SERVER_CREATE, params)
+        .await
+        .expect_err("unknown game version");
+    assert_eq!(error["code"], "CATALOG_NOT_FOUND", "{error}");
+
+    // Nothing was created.
+    let list = client
+        .request(methods::SERVER_LIST, json!({}))
+        .await
+        .unwrap();
+    assert!(list["servers"].as_array().unwrap().is_empty(), "{list}");
+}

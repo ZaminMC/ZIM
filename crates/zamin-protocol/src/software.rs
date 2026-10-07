@@ -19,6 +19,13 @@ pub struct CatalogEntry {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Which upstream API family this entry speaks: `"fill"` (the
+    /// PaperMC Fill family — builds with published sha256 digests) or
+    /// `"fabric-meta"` (the FabricMC meta family — version lists plus a
+    /// launcher-jar endpoint that publishes no checksums). Additive in
+    /// protocol v0; the family decides what `catalog.builds` returns and
+    /// which `server.create` parameters apply.
+    pub source: String,
 }
 
 /// `catalog.versions {project}` — newest first.
@@ -63,6 +70,12 @@ pub struct CatalogBuildsResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub java_major: Option<u32>,
     pub builds: Vec<CatalogBuild>,
+    /// Fabric-family rows carry their equivalent of builds here: the
+    /// stable loader versions, newest first, one of which
+    /// `server.create`'s `loader` parameter pins (omit = newest). `None`
+    /// for the Fill family; `builds` is empty when `loaders` is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loaders: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,9 +117,16 @@ pub struct ServerCreateParams {
     /// A `catalog.list` entry id.
     pub project: String,
     pub version: String,
-    /// Omit for the newest build.
+    /// Omit for the newest build. The Fabric family has no numeric
+    /// builds: send `loader` instead (a `catalog.builds` `loaders` id),
+    /// or omit for the newest stable one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<u64>,
+    /// The Fabric loader version to pin, from `catalog.builds`'
+    /// `loaders` list. Omit for the newest stable loader; ignored (and
+    /// never required) by the Fill family.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader: Option<String>,
     /// Omit for the default creation template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template_id: Option<String>,

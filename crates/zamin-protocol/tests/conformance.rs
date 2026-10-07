@@ -265,3 +265,63 @@ fn new_protocol_error_codes_serialize_to_registered_strings() {
     let wire = serde_json::to_value(&stale_cursor).unwrap();
     assert_eq!(wire["code"], "LOG_CURSOR_INVALID");
 }
+
+#[test]
+fn catalog_list_carries_the_family_source() {
+    // §7b, second family: every entry names the upstream it speaks, so
+    // clients can decide which creation parameters apply (build vs
+    // loader) without hard-coding catalog ids.
+    let original = fixture("catalog-list-response");
+    let msg = parse("catalog-list-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::software::CatalogListResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.entries.len(), 2);
+    assert_eq!(result.entries[0].id, "paper");
+    assert_eq!(result.entries[0].source, "fill");
+    assert_eq!(result.entries[1].id, "fabric");
+    assert_eq!(result.entries[1].source, "fabric-meta");
+}
+
+#[test]
+fn catalog_builds_fabric_answers_loaders_instead_of_builds() {
+    // The Fabric family's `catalog.builds`: no numeric builds (the wire
+    // stays honest — no fabricated ids), the stable loader versions ride
+    // in the additive `loaders` field, newest first.
+    let original = fixture("catalog-builds-fabric-response");
+    let msg = parse("catalog-builds-fabric-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::software::CatalogBuildsResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.project, "fabric");
+    assert_eq!(result.version, "1.21.11");
+    assert_eq!(result.java_major, Some(21));
+    assert!(result.builds.is_empty());
+    assert_eq!(
+        result.loaders,
+        Some(vec![
+            "0.16.14".to_owned(),
+            "0.16.13".to_owned(),
+            "0.15.11".to_owned()
+        ])
+    );
+
+    // The Fill family's shape still parses: `loaders` absent is `None`.
+    let fill: zamin_protocol::software::CatalogBuildsResult = serde_json::from_value(json!({
+        "project": "paper", "version": "1.21.11", "javaMajor": 21,
+        "builds": [{"id": 34, "channel": "DEFAULT",
+                    "download": {"name": "paper-1.21.11-34.jar", "sha256":
+                    "ab".repeat(32), "url": "https://x/paper.jar"}}]
+    }))
+    .unwrap();
+    assert_eq!(fill.builds.len(), 1);
+    assert_eq!(fill.loaders, None);
+}

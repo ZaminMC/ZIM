@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 31,
+  "result": {
+    "project": "fabric",
+    "version": "1.21.11",
+    "javaMajor": 21,
+    "builds": [],
+    "loaders": ["0.16.14", "0.16.13", "0.15.11"]
+  }
+}

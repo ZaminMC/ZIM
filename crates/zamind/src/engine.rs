@@ -35,6 +35,9 @@ struct Inner {
     /// The Modrinth API base URL (plugin catalog, ADR-0012); same
     /// override story.
     modrinth_url: String,
+    /// The FabricMC meta API base URL (software catalog's second
+    /// family); same override story.
+    fabric_url: String,
     /// The Adoptium API base URL (JDK fetch); same override story.
     adoptium_url: String,
     /// Java inspection cache keyed by path: (mtime_s, size, info). The
@@ -69,6 +72,7 @@ impl Engine {
         catalog_url: String,
         adoptium_url: String,
         modrinth_url: String,
+        fabric_url: String,
     ) -> Engine {
         let _ = std::fs::create_dir_all(data_dir.join("servers"));
         let registry = Registry::load(data_dir.join("registry.json")).unwrap_or_else(|e| {
@@ -87,6 +91,7 @@ impl Engine {
                 catalog_url,
                 adoptium_url,
                 modrinth_url,
+                fabric_url,
                 java_cache: Mutex::new(HashMap::new()),
             }),
         }
@@ -939,6 +944,11 @@ impl Engine {
         zamin_core::software::FillClient::new(&self.inner.catalog_url)
     }
 
+    /// The Fabric meta client — the software catalog's second family.
+    fn fabric_client(&self) -> zamin_core::software::FabricMetaClient {
+        zamin_core::software::FabricMetaClient::new(&self.inner.fabric_url)
+    }
+
     pub async fn catalog_list(&self) -> zamin_protocol::software::CatalogListResult {
         use zamin_protocol::software::{CatalogEntry, CatalogListResult};
         CatalogListResult {
@@ -948,6 +958,7 @@ impl Engine {
                     id: e.id.to_owned(),
                     name: e.name.to_owned(),
                     description: e.description.to_owned(),
+                    source: e.source.as_str().to_owned(),
                 })
                 .collect(),
         }
@@ -964,20 +975,41 @@ impl Engine {
                 format!("The software catalog has no entry {project:?}."),
             )
         })?;
-        let client = self.fill_client();
-        let versions = tokio::task::spawn_blocking(move || client.versions(entry.project))
-            .await
-            .map_err(|e| internal(&format!("catalog task failed: {e}")))?
-            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let versions = match entry.source {
+            zamin_core::software::SoftwareSource::Fill => {
+                let client = self.fill_client();
+                let project_static = entry.project;
+                tokio::task::spawn_blocking(move || client.versions(project_static))
+                    .await
+                    .map_err(|e| internal(&format!("catalog task failed: {e}")))?
+                    .map_err(|e| EngineError::Protocol(to_protocol(&e)))?
+                    .into_iter()
+                    .map(|v| CatalogVersion {
+                        id: v.id,
+                        java_major: v.java_major,
+                    })
+                    .collect()
+            }
+            zamin_core::software::SoftwareSource::FabricMeta => {
+                let client = self.fabric_client();
+                tokio::task::spawn_blocking(move || client.game_versions())
+                    .await
+                    .map_err(|e| internal(&format!("catalog task failed: {e}")))?
+                    .map_err(|e| EngineError::Protocol(to_protocol(&e)))?
+                    .into_iter()
+                    .map(|g| CatalogVersion {
+                        // Fabric meta publishes no Java requirements; the
+                        // local table decides (same fallback the Fill
+                        // family ends on).
+                        java_major: zamin_core::java::required_major(&g.version),
+                        id: g.version,
+                    })
+                    .collect()
+            }
+        };
         Ok(CatalogVersionsResult {
             project: project.to_owned(),
-            versions: versions
-                .into_iter()
-                .map(|v| CatalogVersion {
-                    id: v.id,
-                    java_major: v.java_major,
-                })
-                .collect(),
+            versions,
         })
     }
 
@@ -993,43 +1025,76 @@ impl Engine {
                 format!("The software catalog has no entry {project:?}."),
             )
         })?;
-        let client = self.fill_client();
-        let project_static = entry.project;
-        let version_owned = version.to_owned();
-        let (builds, java_major) = tokio::task::spawn_blocking(move || {
-            let builds = client.builds(project_static, &version_owned)?;
-            // The version's Java requirement rides along (one extra
-            // metadata call); if it cannot be fetched, the local table
-            // decides and the daemon still derives it at creation.
-            let java_major = client
-                .version_java_major(project_static, &version_owned)
-                .ok()
-                .flatten()
-                .or_else(|| zamin_core::java::required_major(&version_owned));
-            Ok::<_, zamin_core::error::CoreError>((builds, java_major))
-        })
-        .await
-        .map_err(|e| internal(&format!("catalog task failed: {e}")))?
-        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
-        Ok(CatalogBuildsResult {
-            project: project.to_owned(),
-            version: version.to_owned(),
-            java_major,
-            builds: builds
-                .into_iter()
-                .map(|b| CatalogBuild {
-                    id: b.id,
-                    channel: b.channel,
-                    time: b.time,
-                    download: zamin_protocol::software::CatalogDownload {
-                        name: b.download.name,
-                        sha256: b.download.sha256,
-                        size: b.download.size,
-                        url: b.download.url,
-                    },
+        match entry.source {
+            zamin_core::software::SoftwareSource::Fill => {
+                let client = self.fill_client();
+                let project_static = entry.project;
+                let version_owned = version.to_owned();
+                let (builds, java_major) = tokio::task::spawn_blocking(move || {
+                    let builds = client.builds(project_static, &version_owned)?;
+                    // The version's Java requirement rides along (one extra
+                    // metadata call); if it cannot be fetched, the local table
+                    // decides and the daemon still derives it at creation.
+                    let java_major = client
+                        .version_java_major(project_static, &version_owned)
+                        .ok()
+                        .flatten()
+                        .or_else(|| zamin_core::java::required_major(&version_owned));
+                    Ok::<_, zamin_core::error::CoreError>((builds, java_major))
                 })
-                .collect(),
-        })
+                .await
+                .map_err(|e| internal(&format!("catalog task failed: {e}")))?
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+                Ok(CatalogBuildsResult {
+                    project: project.to_owned(),
+                    version: version.to_owned(),
+                    java_major,
+                    builds: builds
+                        .into_iter()
+                        .map(|b| CatalogBuild {
+                            id: b.id,
+                            channel: b.channel,
+                            time: b.time,
+                            download: zamin_protocol::software::CatalogDownload {
+                                name: b.download.name,
+                                sha256: b.download.sha256,
+                                size: b.download.size,
+                                url: b.download.url,
+                            },
+                        })
+                        .collect(),
+                    loaders: None,
+                })
+            }
+            zamin_core::software::SoftwareSource::FabricMeta => {
+                // The Fabric family's equivalent of builds: the stable
+                // loader versions, newest first. The game version drives
+                // the Java requirement (the local table — the same source
+                // the Fill family falls back to).
+                let client = self.fabric_client();
+                let version_owned = version.to_owned();
+                let (loaders, java_major) = tokio::task::spawn_blocking(move || {
+                    let loaders = client.loader_versions()?;
+                    let stable: Vec<String> = loaders
+                        .into_iter()
+                        .filter(|v| v.stable)
+                        .map(|v| v.version)
+                        .collect();
+                    let java_major = zamin_core::java::required_major(&version_owned);
+                    Ok::<_, zamin_core::error::CoreError>((stable, java_major))
+                })
+                .await
+                .map_err(|e| internal(&format!("catalog task failed: {e}")))?
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+                Ok(CatalogBuildsResult {
+                    project: project.to_owned(),
+                    version: version.to_owned(),
+                    java_major,
+                    builds: Vec::new(),
+                    loaders: Some(loaders),
+                })
+            }
+        }
     }
 
     /// `server.create`: resolve the requested build, then run the creation
@@ -1092,42 +1157,94 @@ impl Engine {
             .into());
         }
 
-        // Resolve the build (and the version's Java requirement) up
-        // front: an unknown version/build or an unreachable catalog is a
-        // typed rejection now, not a job that fails 200 ms in.
-        let client = self.fill_client();
-        let project = entry.project;
-        let version = params.version.clone();
-        let wanted_build = params.build;
-        let (build, java_major) = tokio::task::spawn_blocking(move || {
-            let builds = client.builds(project, &version)?;
-            let build =
-                match wanted_build {
-                    Some(id) => builds.into_iter().find(|b| b.id == id).ok_or_else(|| {
-                        zamin_core::error::CoreError::Http {
-                            url: format!("catalog: {project} {version} build {id}"),
-                            status: 404,
-                            reason: "build not found".to_owned(),
-                        }
-                    })?,
-                    None => builds.into_iter().next().ok_or_else(|| {
-                        zamin_core::error::CoreError::Http {
-                            url: format!("catalog: {project} {version}"),
-                            status: 404,
-                            reason: "no builds published".to_owned(),
-                        }
-                    })?,
-                };
-            let java_major = client
-                .version_java_major(project, &version)
-                .ok()
-                .flatten()
-                .or_else(|| zamin_core::java::required_major(&version));
-            Ok::<_, zamin_core::error::CoreError>((build, java_major))
-        })
-        .await
-        .map_err(|e| internal(&format!("build resolution task failed: {e}")))?
-        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        // Resolve the download (and the version's Java requirement) up
+        // front — per family: an unknown version/build/loader or an
+        // unreachable catalog is a typed rejection now, not a job that
+        // fails 200 ms in.
+        /// Everything the creation job needs to fetch the jar. The Fill
+        /// family verifies a published sha256; Fabric publishes none, so
+        /// the downloader computes and reports the digest instead —
+        /// provenance, stated as such.
+        struct ResolvedJar {
+            name: String,
+            url: String,
+            sha256: Option<String>,
+            size: Option<u64>,
+        }
+        let (resolved, java_major) = match entry.source {
+            zamin_core::software::SoftwareSource::Fill => {
+                let client = self.fill_client();
+                let project = entry.project;
+                let version = params.version.clone();
+                let wanted_build = params.build;
+                tokio::task::spawn_blocking(move || {
+                    let builds = client.builds(project, &version)?;
+                    let build = match wanted_build {
+                        Some(id) => builds.into_iter().find(|b| b.id == id).ok_or_else(|| {
+                            zamin_core::error::CoreError::Http {
+                                url: format!("catalog: {project} {version} build {id}"),
+                                status: 404,
+                                reason: "build not found".to_owned(),
+                            }
+                        })?,
+                        None => builds.into_iter().next().ok_or_else(|| {
+                            zamin_core::error::CoreError::Http {
+                                url: format!("catalog: {project} {version}"),
+                                status: 404,
+                                reason: "no builds published".to_owned(),
+                            }
+                        })?,
+                    };
+                    let java_major = client
+                        .version_java_major(project, &version)
+                        .ok()
+                        .flatten()
+                        .or_else(|| zamin_core::java::required_major(&version));
+                    Ok::<_, zamin_core::error::CoreError>((
+                        ResolvedJar {
+                            name: build.download.name,
+                            url: build.download.url,
+                            sha256: Some(build.download.sha256),
+                            size: build.download.size,
+                        },
+                        java_major,
+                    ))
+                })
+                .await
+                .map_err(|e| internal(&format!("build resolution task failed: {e}")))?
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?
+            }
+            zamin_core::software::SoftwareSource::FabricMeta => {
+                // The Fabric family has no numeric builds; a caller that
+                // sends one is speaking the wrong family's dialect.
+                if params.build.is_some() {
+                    return Err(ProtocolError::new(
+                        ErrorCode::ProtocolInvalidRequest,
+                        "The fabric family has no numeric builds; pass `loader` (a catalog.builds `loaders` id) or omit it for the newest stable.",
+                    )
+                    .into());
+                }
+                let client = self.fabric_client();
+                let version = params.version.clone();
+                let loader = params.loader.clone();
+                tokio::task::spawn_blocking(move || {
+                    let jar = client.resolve_server_jar(&version, loader.as_deref(), None)?;
+                    let java_major = zamin_core::java::required_major(&version);
+                    Ok::<_, zamin_core::error::CoreError>((
+                        ResolvedJar {
+                            name: jar.name,
+                            url: jar.url,
+                            sha256: None,
+                            size: None,
+                        },
+                        java_major,
+                    ))
+                })
+                .await
+                .map_err(|e| internal(&format!("loader resolution task failed: {e}")))?
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?
+            }
+        };
 
         let engine = self.clone();
         let sid = server_id.clone();
@@ -1166,13 +1283,15 @@ impl Engine {
                 // Download + verify. Cancelled downloads and checksum
                 // mismatches leave nothing behind (the downloader owns
                 // that guarantee); the instance dir goes too — creation
-                // is all-or-nothing.
+                // is all-or-nothing. Fabric downloads carry no published
+                // checksum (None expected): the downloader still hashes
+                // the stream, so the outcome reports what arrived.
                 let progress_ctl = ctl.clone();
                 let cancel_flag = ctl.cancel_flag();
-                let name = build.download.name.clone();
-                let sha = build.download.sha256.clone();
-                let url = build.download.url.clone();
-                let size = build.download.size;
+                let name = resolved.name.clone();
+                let sha = resolved.sha256.clone();
+                let url = resolved.url.clone();
+                let size = resolved.size;
                 let download_root = root.clone();
                 ctl.progress(0, size, Some("bytes"), Some(&format!("downloading {name}")));
                 let options = zamin_core::software::DownloadOptions {
@@ -1190,7 +1309,7 @@ impl Engine {
                         &url,
                         &download_root,
                         "server.jar",
-                        Some(&sha),
+                        sha.as_deref(),
                         &options,
                     )
                 })

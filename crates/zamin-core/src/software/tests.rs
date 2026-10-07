@@ -587,7 +587,10 @@ fn fabric_resolve_defaults_to_the_newest_stable() {
     );
     assert_eq!(
         jar.url,
-        format!("{}/v2/versions/loader/1.21.11/0.16.14/1.0.1/server/jar", server.url)
+        format!(
+            "{}/v2/versions/loader/1.21.11/0.16.14/1.0.1/server/jar",
+            server.url
+        )
     );
 }
 
