@@ -1,0 +1,124 @@
+/* Shared rows for the three configuration surfaces (§37–39, ADR-0019):
+ * a labeled field with its provenance word, and the honest reserved-room
+ * row (§82: unavailable is stated, never faked). Dark, compact, same
+ * visual language as the schedules form. */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--space-2) var(--space-3);
+}
+
+.rowReserved {
+  grid-template-columns: minmax(120px, 200px) auto 1fr;
+  opacity: 0.75;
+}
+
+.label {
+  font-size: var(--text-s);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.control input,
+.control textarea {
+  width: 100%;
+  max-width: 340px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: var(--text-s);
+  font-family: inherit;
+}
+
+.control textarea {
+  min-height: 64px;
+  resize: vertical;
+  font-family: var(--font-mono, monospace);
+}
+
+.control input:focus-visible,
+.control textarea:focus-visible {
+  outline: 1px solid var(--accent, var(--text));
+  outline-offset: 1px;
+}
+
+.prov {
+  font-size: var(--text-xs, var(--text-s));
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  justify-self: end;
+}
+
+.provCustom {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.clear {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.clear:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.hint {
+  grid-column: 2 / 4;
+  color: var(--text-faint);
+  font-size: var(--text-xs, var(--text-s));
+}
+
+.staticValue {
+  font-size: var(--text-s);
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.reservedTag {
+  font-size: var(--text-xs, var(--text-s));
+  color: var(--text-faint);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}

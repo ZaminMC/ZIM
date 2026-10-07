@@ -17,8 +17,13 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const BUDGETS = {
   entryJsGzip: 90 * 1024, // index-*.js — was 147 KB before the split
   anySingleJsGzip: 90 * 1024, // no chunk may quietly become the new monster
-  totalJsGzip: 170 * 1024, // everything the app could ever download
-  totalCssGzip: 12 * 1024,
+  // 170 → 184 KB at ADR-0019: the three configuration surfaces (Startup,
+  // Network, Settings) lazy-load into their own chunks (~6.5 KB gzip
+  // combined), so the entry and the cold start are untouched; the total
+  // grows because the surfaces are real features, not regressions.
+  totalJsGzip: 184 * 1024,
+  // 12 → 14 KB at ADR-0019: one shared stylesheet for the config rows.
+  totalCssGzip: 14 * 1024,
 };
 
 function assets() {

@@ -26,9 +26,12 @@ import {
   IconBolt,
   IconClock,
   IconFolder,
+  IconGear,
   IconLogs,
+  IconNetwork,
   IconPlayers,
   IconPuzzle,
+  IconRocket,
   IconTerminal,
 } from "../ui/icons";
 import { CrashCard } from "./CrashCard";
@@ -46,6 +49,18 @@ import styles from "./ServerView.module.css";
 // tab needs it: it loads when the tab first renders, so the cold start
 // ships without it (PERFORMANCE-BUDGETS: cold start → interactive).
 const Console = lazy(() => import("./Console").then((m) => ({ default: m.Console })));
+
+// The three configuration surfaces (§37–39, ADR-0019) lazy-load the same
+// way: the workspace chrome must not pay for forms a tab may never open.
+const NetworkView = lazy(() =>
+  import("./NetworkView").then((m) => ({ default: m.NetworkView })),
+);
+const StartupView = lazy(() =>
+  import("./StartupView").then((m) => ({ default: m.StartupView })),
+);
+const SettingsView = lazy(() =>
+  import("./SettingsView").then((m) => ({ default: m.SettingsView })),
+);
 
 /** Which verbs make sense from a given state (ADR-0005 ladder). */
 export function availableVerbs(state: ServerState): LifecycleVerb[] {
@@ -80,6 +95,9 @@ const LOWER_VIEWS = [
   { id: "players", label: "Players", icon: IconPlayers },
   { id: "plugins", label: "Plugins", icon: IconPuzzle },
   { id: "schedules", label: "Schedules", icon: IconClock },
+  { id: "network", label: "Network", icon: IconNetwork },
+  { id: "startup", label: "Startup", icon: IconRocket },
+  { id: "settings", label: "Settings", icon: IconGear },
   { id: "backups", label: "Backups", icon: IconBackups },
 ] as const;
 
@@ -303,6 +321,12 @@ export function ServerView({ serverId }: { serverId: string }) {
             <PluginsView serverId={serverId} />
           ) : lowerView === "schedules" ? (
             <SchedulesView serverId={serverId} />
+          ) : lowerView === "network" ? (
+            <NetworkView serverId={serverId} />
+          ) : lowerView === "startup" ? (
+            <StartupView serverId={serverId} />
+          ) : lowerView === "settings" ? (
+            <SettingsView serverId={serverId} />
           ) : (
             <BackupsView serverId={serverId} running={server.state === "running"} />
           )}

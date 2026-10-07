@@ -1,0 +1,57 @@
+/* Startup (§38): launch configuration — memory, JVM arguments, the java
+ * executable, the jar, the timing windows. Values layer over the global
+ * defaults (ADR-0007); provenance words say where each value came from.
+ * The composed command preview keeps the founder's promise that advanced
+ * users can always see the actual startup configuration. */
+
+.startup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.alert {
+  background: var(--surface-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--text-s);
+}
+
+.notice {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.command {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-s);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.commandLabel {
+  color: var(--text-faint);
+  font-size: var(--text-xs, var(--text-s));
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}

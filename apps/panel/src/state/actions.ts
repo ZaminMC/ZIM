@@ -49,6 +49,10 @@ import type {
   PublishPreviewResult,
   PublishStateResult,
   ProvidersListResult,
+  ConfigGetResult,
+  ConfigSetPayload,
+  ConfigSetResult,
+  NetworkStatusResult,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -489,4 +493,22 @@ export async function setPublishReview(
     kind,
     reviewed,
   });
+}
+
+// --- server configuration surfaces (§7g, ADR-0019) --------------------------
+
+export async function getServerConfig(serverId: string): Promise<ConfigGetResult> {
+  return client.request<ConfigGetResult>("config.get", { serverId });
+}
+
+/** Tri-state over the wire: omitted keys keep, null clears, values set. */
+export async function setServerConfig(
+  serverId: string,
+  payload: ConfigSetPayload,
+): Promise<ConfigGetResult> {
+  return client.request<ConfigSetResult>("config.set", { serverId, ...payload });
+}
+
+export async function getNetworkStatus(serverId: string): Promise<NetworkStatusResult> {
+  return client.request<NetworkStatusResult>("network.status", { serverId });
 }

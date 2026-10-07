@@ -213,3 +213,22 @@ export function IconDots(p: IconProps) {
     </svg>
   );
 }
+
+export function IconNetwork(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5c2.6 2.3 3.9 5.1 3.9 8.5s-1.3 6.2-3.9 8.5c-2.6-2.3-3.9-5.1-3.9-8.5s1.3-6.2 3.9-8.5Z" />
+    </svg>
+  );
+}
+
+export function IconRocket(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M12 15.5c5-3.2 7.2-7 7.2-11.7-4.7 0-8.5 2.2-11.7 7.2L5 13.6l5.4 5.4 1.6-3.5Z" />
+      <path d="M8.6 15.4c-1.6.3-2.7 1.4-3.3 3.6 2.2-.6 3.3-1.7 3.6-3.3" />
+      <circle cx="14.2" cy="9.8" r="1.3" />
+    </svg>
+  );
+}

@@ -46,11 +46,16 @@ sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
 
 Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
 perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
-entry ≤ 90 KB, any single chunk ≤ 90 KB, total JS ≤ 170 KB, total CSS
-≤ 12 KB. The cold-start payload was cut with code splitting: the entry
+entry ≤ 90 KB, any single chunk ≤ 90 KB, total JS ≤ 184 KB, total CSS
+≤ 14 KB. The cold-start payload was cut with code splitting: the entry
 chunk went from 147 KB to 68 KB gzip by moving xterm into a console-tab
 chunk (74 KB) and the three operator modals into their own chunks; the
-console loads when the tab first renders, not at boot. Boot progress is
+console loads when the tab first renders, not at boot. The ADR-0019
+raise (170 → 184 KB JS, 12 → 14 KB CSS) bought the three configuration
+surfaces — Startup, Network, Settings — as new lazy chunks (~6.5 KB JS
+gzip combined, ~1 KB CSS); the entry chunk was untouched by that slice
+(cold start → interactive stays the real budget), so the growth is
+features arriving, not the boot path regrowing. Boot progress is
 measurable in the running app through the `panel:boot-start` →
 `panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
 recorded from browser smoke runs rather than guessed.

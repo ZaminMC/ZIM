@@ -701,3 +701,85 @@ export interface PublishStateResult {
   receipt?: UploadReceipt;
   packagePresent: boolean;
 }
+
+// --- server configuration surfaces (§7g, ADR-0019) --------------------------
+// The layered config model (ADR-0007) on the wire: the effective view plus
+// per-field provenance, a tri-state patch (absent keeps the override, null
+// clears it back to the global default, a value sets it), and the §37
+// network probe (desired port vs the server.properties authority, a live
+// bind-test, cross-server conflicts).
+
+export type FieldProvenance = "global" | "custom";
+
+export interface EffectiveSettingsView {
+  stopTimeoutSecs: number;
+  startupTimeoutSecs: number;
+  port?: number;
+  minMemoryMb?: number;
+  maxMemoryMb?: number;
+  extraJvmArgs: string[];
+  javaPath?: string;
+  mcVersion?: string;
+  javaMajorRequired?: number;
+  backupKeep: number;
+}
+
+export interface ProvenanceView {
+  stopTimeoutSecs: FieldProvenance;
+  startupTimeoutSecs: FieldProvenance;
+  port: FieldProvenance;
+  minMemoryMb: FieldProvenance;
+  maxMemoryMb: FieldProvenance;
+  extraJvmArgs: FieldProvenance;
+  javaPath: FieldProvenance;
+  mcVersion: FieldProvenance;
+  javaMajorRequired: FieldProvenance;
+  backupKeep: FieldProvenance;
+}
+
+export interface ConfigGetResult {
+  serverId: string;
+  displayName: string;
+  /** Server-root relative; absent means the built-in server.jar applies. */
+  jar?: string;
+  effective: EffectiveSettingsView;
+  provenance: ProvenanceView;
+}
+
+/**
+ * The tri-state patch: `undefined` keeps the current override, `null`
+ * clears it (the global default applies again), a value sets it.
+ */
+export interface ServerSettingsPatch {
+  stopTimeoutSecs?: number | null;
+  startupTimeoutSecs?: number | null;
+  port?: number | null;
+  minMemoryMb?: number | null;
+  maxMemoryMb?: number | null;
+  extraJvmArgs?: string[] | null;
+  javaPath?: string | null;
+  mcVersion?: string | null;
+  javaMajorRequired?: number | null;
+  backupKeep?: number | null;
+}
+
+export interface ConfigSetPayload {
+  displayName?: string;
+  jar?: string | null;
+  settings: ServerSettingsPatch;
+}
+
+export type ConfigSetResult = ConfigGetResult;
+
+export interface NetworkStatusResult {
+  serverId: string;
+  desiredPort?: number;
+  /** The port server.properties names — the boot authority. */
+  propertiesPort?: number;
+  /** server.properties' server-ip; "" means all interfaces. */
+  bindAddress?: string;
+  /** Bind-test of the effective port at answer time; null = no port. */
+  portAvailable?: boolean;
+  /** Other managed servers claiming the same desired port. */
+  conflicts: string[];
+}

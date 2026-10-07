@@ -1,0 +1,48 @@
+/* Settings (§39): server-specific identity and behavior, separate from
+ * the global ZaminPanel settings. What the model has today (name,
+ * backup retention) is editable; what it does not have yet (icon,
+ * restart/crash policy, log retention) is stated as reserved — §82's
+ * honesty rule, the same pattern as the tab strip's reserved rooms. */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.alert {
+  background: var(--surface-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--text-s);
+}
+
+.notice {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.sectionLabel {
+  color: var(--text-faint);
+  font-size: var(--text-xs, var(--text-s));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
