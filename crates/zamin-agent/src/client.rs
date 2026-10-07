@@ -31,13 +31,25 @@ pub enum Trust {
     InsecureSkipVerify,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RemoteConnect {
     /// `host:port` of the agent.
     pub addr: String,
     /// The agent's token, sent in `daemon.hello` auth.
     pub token: String,
     pub trust: Trust,
+}
+
+// The Debug shape must never carry the token: config structs get printed
+// into logs and error reports, and the token is the credential (ADR-0011).
+impl std::fmt::Debug for RemoteConnect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteConnect")
+            .field("addr", &self.addr)
+            .field("token", &"<redacted>")
+            .field("trust", &self.trust)
+            .finish()
+    }
 }
 
 /// A TLS connection to the agent, framed and ready for `handshake`.

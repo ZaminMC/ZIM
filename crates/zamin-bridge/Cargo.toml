@@ -10,6 +10,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
 
+zamin-agent = { path = "../zamin-agent" }
 zamin-ipc = { path = "../zamin-ipc" }
 
 [dev-dependencies]

@@ -1414,6 +1414,7 @@ dependencies = [
  "bytes",
  "tokio",
  "tracing",
+ "zamin-agent",
  "zamin-ipc",
  "zamin-protocol",
 ]

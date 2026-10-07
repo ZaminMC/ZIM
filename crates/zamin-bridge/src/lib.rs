@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use zamin_ipc::{ConnectionReadHalf, ConnectionWriteHalf};
 
+pub mod remote;
+
 /// Coalescing window for daemon → webview frames.
 pub const BATCH_WINDOW: Duration = Duration::from_millis(50);
 /// Hard cap on frames per channel message, so a flood still chunks.
