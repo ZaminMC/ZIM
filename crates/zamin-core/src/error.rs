@@ -120,6 +120,25 @@ pub enum CoreError {
     #[error("the schedule store is corrupt at {path:?}: {reason}")]
     SchedulesCorrupt { path: PathBuf, reason: String },
 
+    #[error("the publish configuration is invalid: {reason}")]
+    InvalidPublishConfig { reason: String },
+
+    #[error("the publish state is corrupt at {path:?}: {reason}")]
+    PublishStateCorrupt { path: PathBuf, reason: String },
+
+    #[error(
+        "the publish selection exceeds safety limits: {found} across {entries} entries, max {max_bytes} bytes / {max_entries} entries"
+    )]
+    PublishTooLarge {
+        found: u64,
+        entries: u64,
+        max_bytes: u64,
+        max_entries: u64,
+    },
+
+    #[error("the {provider} upload failed: {reason}")]
+    PublishUpload { provider: String, reason: String },
+
     #[error("restore failed mid-commit ({reason}); the previous server files were rolled back — nothing was lost")]
     RestoreRolledBack { reason: String },
 
