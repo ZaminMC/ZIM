@@ -67,6 +67,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `catalog` (Phase 6) | `catalog.list`, `catalog.versions`, `catalog.builds` (§7b) |
 | `java` (Phase 6) | `java.list`, `java.install` (§7c) |
 | `plugins` (§7d) | `plugins.search`, `plugins.versions`, `plugins.installed`, `plugins.install` (a job), `plugins.delete`, `plugins.updates` |
+| `schedules` (§7e) | `schedules.list`, `schedules.create`, `schedules.update`, `schedules.delete` |
 | `jobs` | `jobs.list`, `jobs.get`, `jobs.cancel` |
 | `backups` (Phase 5) | `backup.create`, `backup.restore`, `backups.list` |
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
@@ -176,6 +177,15 @@ The catalog is **data**, not an abstraction (ARCH-REVIEW §17.4/§17.8): the dae
 - `plugins.delete {serverId, fileName}` — the wire's filename is a suggestion: it passes the sanitizer (no separators, no control bytes, no Windows reserved names, 255-byte cap) and the rooted filesystem's checks before the disk sees it. A unit result (`EmptyResult`).
 
 - `plugins.updates {serverId}` → `{target, entries: [{fileName, status, projectId?, installedVersion?, latestVersion?, latestVersionId?}]}` — the update check (ADR-0012's update rule, read side). Each jar in the target directory is identified by its own sha512 — the disk's bytes answer "what is this jar?" with no shadow state — and the catalog is asked, fresh, which version carries those bytes and what it now publishes for that project. `status` is one of `up-to-date` (the digest matches the newest installable version's published digest), `update-available` (a newer or different-loader installable version exists; the entry carries the full recipe — `projectId`, both version numbers, and the `latestVersionId` pin that applies the update through `plugins.install` with `replace` and the row's own `fileName` as `retireFile`), or `unmanaged` (the catalog has no file with these bytes, or knows them but publishes nothing installable for this server's loader family — the honest "no update button", with whatever story the catalog did supply). Entries sort by file name. A direct request, the same trade as `plugins.search`: jars are few, round trips are two per recognized file. A missing directory answers an empty report.
+
+### 7e. Schedules (ADR-0014)
+
+- The daemon runs the clock: a named schedule is a **when** (`{"kind": "interval", "everySecs": N}` — a fixed interval while the daemon runs, re-anchored at daemon start so downtime never stacks firings; `{"kind": "daily", "at": "HH:MM"}`; `{"kind": "weekly", "weekdays": ["mon".."sun"], "at": "HH:MM"}` — times are the daemon's local clock, re-read every tick), a **then** (`{"kind": "restart"}`, `{"kind": "backup"}`, `{"kind": "command", "line": "..."}`), and `enabled`. The records live in the server's own daemon metadata (`schedules.json`, versioned, atomic); the disk record is the only state.
+- `schedules.list {serverId}` → `{serverId, schedules: [{id, name, spec, action, enabled, createdMs, lastFiredMs?, nextRunMs?}]}` — the stored record plus the daemon's computed next-run hint (display only; firing decisions re-evaluate the spec every tick). A paused schedule carries no `nextRunMs`: a fire that cannot happen is not promised.
+- `schedules.create {serverId, name, spec, action, enabled?}` → `{serverId, schedule}` — validation happens at the edge: trimmed non-empty names (≤ 80 chars), strict 24-hour `HH:MM`, non-empty valid weekdays, non-empty console lines (≤ 256 chars), `everySecs ≥ 1` on the wire (clients nudge 300+). A violation is typed `SCHEDULE_INVALID`; the store never learns garbage.
+- `schedules.update {serverId, scheduleId, name?, spec?, action?, enabled?}` → `{serverId, schedule}` — absent fields keep their stored values; unknown ids are typed `SCHEDULE_NOT_FOUND` (a typo must not look like success). No restart and no cached timers: the clock re-reads the store every tick, so an update lands on the next tick.
+- `schedules.delete {serverId, scheduleId}` — unit result; the same typed refusal for unknown ids.
+- Firing is the daemon's business and rides the ordinary paths — the same restart verb, the same backup job, the same stdin — so events and audit look exactly like an operator's action. Policy: restart and command fire only while the server is Running (a schedule never switches a machine on); backup fires either way; a skipped fire does not advance `lastFiredMs`, so a calendar schedule retries within its minute and then waits for the next one. Missed firings are skipped, never replayed.
 
 ## 8. Files
 

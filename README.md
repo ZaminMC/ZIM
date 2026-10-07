@@ -39,6 +39,13 @@ zamin plugins install <id> <pid> [--version ID] [--wait]   # a job; --wait follo
 zamin plugins installed <id>        # the target directory is the inventory
 zamin plugins updates <id>          # the update check: the disk's bytes vs the catalog
 zamin plugins delete <id> <file> [--yes]
+
+zamin schedules list <id>           # the daemon's clock, per server (ADR-0014)
+zamin schedules add <id> --name "nightly" --at 04:30          # daily restart
+zamin schedules add <id> --name "backup" --every 3600 --backup # interval backup
+zamin schedules add <id> --name "weekend" --weekdays sat,sun --at 09:00 \
+      --command "say Restarting soon"
+zamin schedules pause|resume|remove <id> <schedule-id>
 zamin jobs list                     # installs, backups, downloads — running and finished
 zamin jobs get|cancel <job-id>
 ```
@@ -87,6 +94,20 @@ applied update leaves one jar, not two), or
 same surface over SSH — `zamin plugins search/versions/install/installed/
 updates/delete` plus `zamin jobs` for the long-running operations.
 
+## Schedules
+
+The daemon runs the clock ([ADR-0014](docs/adr/0014-schedules-daemon-runs-the-clock.md)).
+A schedule is a named rule per server — a **when** (a fixed interval, a daily
+time, or weekdays plus a time, all on the daemon's own clock) and a **then**
+(a restart, a backup, or one console line). The daemon re-reads every store
+every 15 seconds and fires what is due through its ordinary paths, so a
+scheduled restart looks exactly like an operator's in the event stream,
+jobs, and audit. Two rules keep it honest: a schedule never switches a
+stopped server on, and missed firings are skipped, never replayed — a week
+of downtime is not a firing storm at boot. `lastFiredMs` on the record is
+the clock's only memory; the panel's Schedules tab and
+`zamin schedules list/add/pause/resume/remove` are the two ways to author it.
+
 ## Development loop
 
 ```
@@ -108,7 +129,7 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0013
+- [ADRs](docs/adr/) — accepted decisions 0001–0014
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
 
 ## Install (Phase 7)
@@ -166,7 +187,9 @@ inside TLS). Everything works as if the server were local: fleet,
 lifecycle, console, files, backups. The shipped app dials the agent
 from Rust — the Tauri host opens the pinned TLS relay itself, so the
 chip behaves identically in the installed panel and in the browser dev
-loop (the Node bridge relays the same way). See
+loop (the Node bridge relays the same way). Schedules live on the box:
+the daemon fires them from its own clock, so a nightly restart happens
+whether or not any panel is watching. See
 [ADR-0011](docs/adr/0011-remote-transport-agent-tls-auth.md) for the
 threat model — no CA, no trust store; a pinned fingerprint or an explicit,
 discouraged skip-verify.
