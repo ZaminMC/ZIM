@@ -1698,6 +1698,47 @@ impl Engine {
         })
     }
 
+    /// `plugins.updates`: the update check (ADR-0012's update rule, read
+    /// side). Each jar's sha512 identifies it — the same no-shadow-state
+    /// rule the install path enforces — and the catalog is asked fresh
+    /// what it now publishes. A direct request, the same trade
+    /// `plugins.search` already makes: jars are few, round trips are two
+    /// per recognized file.
+    pub async fn plugins_updates(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::plugins::PluginsUpdatesResult, EngineError> {
+        use zamin_core::plugins::UpdateStatus;
+        use zamin_protocol::plugins::PluginUpdateStatus;
+        let (target, target_dir) = self.plugin_target(server_id)?;
+        let client = self.modrinth_client();
+        let loaders = zamin_core::plugins::loaders_for_target(target).to_vec();
+        let entries = tokio::task::spawn_blocking(move || {
+            zamin_core::plugins::check_updates(&target_dir, &client, &loaders)
+        })
+        .await
+        .map_err(|e| internal(&format!("plugin updates task failed: {e}")))?
+        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?
+        .into_iter()
+        .map(|entry| zamin_protocol::plugins::PluginUpdateEntry {
+            file_name: entry.file_name,
+            status: match entry.status {
+                UpdateStatus::UpToDate => PluginUpdateStatus::UpToDate,
+                UpdateStatus::UpdateAvailable => PluginUpdateStatus::UpdateAvailable,
+                UpdateStatus::Unmanaged => PluginUpdateStatus::Unmanaged,
+            },
+            project_id: entry.project_id,
+            installed_version: entry.installed_version,
+            latest_version: entry.latest_version,
+            latest_version_id: entry.latest_version_id,
+        })
+        .collect();
+        Ok(zamin_protocol::plugins::PluginsUpdatesResult {
+            target: target.to_owned(),
+            entries,
+        })
+    }
+
     pub async fn plugins_install(
         &self,
         server_id: &ServerId,

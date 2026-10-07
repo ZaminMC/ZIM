@@ -135,3 +135,58 @@ pub struct PluginsDeleteParams {
     pub server_id: String,
     pub file_name: String,
 }
+
+/// `plugins.updates {serverId}` — the update check (ADR-0012's update
+/// rule, read side). The disk's bytes identify each installed jar; the
+/// catalog is asked, fresh, what it now publishes for that project. No
+/// shadow state, no new client obligation: an explicit request that
+/// costs one catalog round trip per recognized jar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginsUpdatesParams {
+    pub server_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginUpdateStatus {
+    /// The file's digest matches the newest installable version's
+    /// published digest.
+    UpToDate,
+    /// A newer (or different-loader) installable version exists; the
+    /// entry carries the pin that applies it.
+    UpdateAvailable,
+    /// The catalog has no file with these bytes, or knows them but
+    /// publishes nothing installable for this server's loader family —
+    /// the operator action is "none through the panel", said plainly.
+    Unmanaged,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginUpdateEntry {
+    pub file_name: String,
+    pub status: PluginUpdateStatus,
+    /// Present when the catalog recognized the file's bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// The installed version's display number, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// The catalog's newest installable version's display number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// The pin that applies the update: `plugins.install`'s `versionId`
+    /// (with `replace`, per the update rule).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginsUpdatesResult {
+    /// `plugins` or `mods` — the directory that was checked.
+    pub target: String,
+    /// Sorted by file name, so clients render a stable order.
+    pub entries: Vec<PluginUpdateEntry>,
+}

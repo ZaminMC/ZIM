@@ -49,6 +49,7 @@ pub const PLUGINS_VERSIONS: &str = "plugins.versions";
 pub const PLUGINS_INSTALLED: &str = "plugins.installed";
 pub const PLUGINS_INSTALL: &str = "plugins.install";
 pub const PLUGINS_DELETE: &str = "plugins.delete";
+pub const PLUGINS_UPDATES: &str = "plugins.updates";
 
 // Specified in v0, implemented with the file manager (protocol spec §8).
 pub const FILES_LIST: &str = "files.list";

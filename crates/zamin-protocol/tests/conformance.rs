@@ -13,6 +13,7 @@ use zamin_protocol::error::ErrorCode;
 use zamin_protocol::handshake::HelloResult;
 use zamin_protocol::jobs::JobOutcome;
 use zamin_protocol::methods;
+use zamin_protocol::plugins::PluginUpdateStatus;
 use zamin_protocol::server::{LifecycleResult, ServerState};
 use zamin_protocol::streams::{
     CoreEvent, StreamCursor, StreamKind, StreamNotification, StreamPayload,
@@ -324,4 +325,43 @@ fn catalog_builds_fabric_answers_loaders_instead_of_builds() {
     .unwrap();
     assert_eq!(fill.builds.len(), 1);
     assert_eq!(fill.loaders, None);
+}
+
+#[test]
+fn plugins_updates_report_carries_the_three_honest_statuses() {
+    // §7d, the update check: statuses are kebab-case strings on the wire,
+    // the update-available entry carries the full install recipe
+    // (projectId + versionId pin), and an unmanaged entry may carry
+    // nothing at all — the catalog had no story for those bytes.
+    let original = fixture("plugins-updates-response");
+    let msg = parse("plugins-updates-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::plugins::PluginsUpdatesResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.target, "plugins");
+    assert_eq!(result.entries.len(), 3);
+
+    assert_eq!(result.entries[0].file_name, "EssentialsX-2.19.0.jar");
+    assert_eq!(
+        result.entries[0].status,
+        PluginUpdateStatus::UpdateAvailable
+    );
+    assert_eq!(result.entries[0].project_id.as_deref(), Some("AABBCC"));
+    assert_eq!(
+        result.entries[0].installed_version.as_deref(),
+        Some("2.19.0")
+    );
+    assert_eq!(result.entries[0].latest_version.as_deref(), Some("2.20.0"));
+    assert_eq!(result.entries[0].latest_version_id.as_deref(), Some("ver9"));
+
+    assert_eq!(result.entries[1].status, PluginUpdateStatus::UpToDate);
+
+    assert_eq!(result.entries[2].file_name, "hand-dropped.jar");
+    assert_eq!(result.entries[2].status, PluginUpdateStatus::Unmanaged);
+    assert_eq!(result.entries[2].project_id, None);
+    assert_eq!(result.entries[2].latest_version_id, None);
 }

@@ -673,6 +673,20 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
+        methods::PLUGINS_UPDATES => {
+            let params: zamin_protocol::plugins::PluginsUpdatesParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.plugins_updates(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::LOGS_RANGE => {
             let params: zamin_protocol::logs::LogRangeParams = match request.parse_params() {
                 Ok(params) => params,

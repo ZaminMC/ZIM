@@ -1,0 +1,29 @@
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "result": {
+    "target": "plugins",
+    "entries": [
+      {
+        "fileName": "EssentialsX-2.19.0.jar",
+        "status": "update-available",
+        "projectId": "AABBCC",
+        "installedVersion": "2.19.0",
+        "latestVersion": "2.20.0",
+        "latestVersionId": "ver9"
+      },
+      {
+        "fileName": "vault-1.7.3.jar",
+        "status": "up-to-date",
+        "projectId": "DDEEFF",
+        "installedVersion": "1.7.3",
+        "latestVersion": "1.7.3",
+        "latestVersionId": "ver3"
+      },
+      {
+        "fileName": "hand-dropped.jar",
+        "status": "unmanaged"
+      }
+    ]
+  }
+}
