@@ -18,6 +18,12 @@ import styles from "./SchedulesView.module.css";
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
+// The clock's memory (lastFiredMs) and its hint (nextRunMs) change while
+// this tab is open — a schedule due at 04:30 fires at 04:30, not on the
+// next navigation. A poll on the Players tab's cadence keeps the rows
+// honest; the daemon's tick is 15 s, so 10 s never lags a firing long.
+const REFRESH_MS = 10_000;
+
 function formatEvery(secs: number): string {
   if (secs % 3600 === 0) return `${secs / 3600} h`;
   if (secs % 60 === 0) return `${secs / 60} min`;
@@ -77,6 +83,8 @@ export function SchedulesView({ serverId }: { serverId: string }) {
 
   useEffect(() => {
     refresh();
+    const timer = window.setInterval(refresh, REFRESH_MS);
+    return () => window.clearInterval(timer);
   }, [refresh]);
 
   const draft = (): ScheduleDraft | string => {

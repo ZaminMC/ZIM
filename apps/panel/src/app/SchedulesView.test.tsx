@@ -3,7 +3,7 @@
 // first, the add form validates locally and dispatches the draft, and
 // daemon-typed errors surface through describeError.
 
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SchedulesView } from "./SchedulesView";
 import type { ScheduleView } from "../protocol/types";
@@ -188,5 +188,28 @@ describe("SchedulesView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+  });
+
+  it("keeps the clock honest — an open tab re-reads the record", async () => {
+    // lastFiredMs changes while the tab is open; a poll re-reads it so the
+    // row tells the truth without a navigation (Players tab's cadence).
+    vi.useFakeTimers();
+    try {
+      render(<SchedulesView serverId="demo" />);
+      await act(async () => {}); // flush the mount fetch
+      expect(listSchedulesMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(listSchedulesMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(listSchedulesMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
