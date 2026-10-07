@@ -80,7 +80,9 @@ daemon flag (`--modrinth-url`), so mirrors and air-gapped installs work
 exactly like the software catalog's `--catalog-url`. **Check updates** (`plugins.updates`) asks the catalog which of the
 installed jars have newer versions: each jar's own sha512 identifies it
 — no shadow state — and the verdicts read `up to date`, `update
-available` (carrying the pin that applies it through `--replace`), or
+available` (carrying the pin that applies it through `--replace` plus
+`--retire`, which removes the old jar once the new bytes verify — an
+applied update leaves one jar, not two), or
 `unmanaged` (bytes the catalog does not publish). The CLI reaches the
 same surface over SSH — `zamin plugins search/versions/install/installed/
 updates/delete` plus `zamin jobs` for the long-running operations.
