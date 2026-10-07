@@ -147,6 +147,19 @@ enum Commands {
         #[command(subcommand)]
         command: PublishCommands,
     },
+    /// Show or set a server's configuration (ADR-0019, founder §38–39):
+    /// memory, JVM args, timeouts, retention — layered over the global
+    /// defaults, with provenance shown
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+    /// A server's network picture (founder §37): desired port, the
+    /// server.properties authority, a live availability probe, conflicts
+    Network {
+        #[command(subcommand)]
+        command: NetworkCommands,
+    },
     /// Long-running daemon jobs: installs, backups, downloads
     Jobs {
         #[command(subcommand)]
@@ -310,6 +323,92 @@ enum PublishCommands {
     },
     /// Show the last publication: when, provider, receipt, package
     State { server_id: String },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Show the effective settings, where each value comes from, and the
+    /// composed start command
+    Show { server_id: String },
+    /// Set overrides. Flags you omit keep their current value; pass
+    /// --clear-<field> to drop an override so the global default applies
+    /// again. Changes apply the next time the server starts.
+    Set {
+        server_id: String,
+        /// The server's display name (shows in the panel and listings)
+        #[arg(long)]
+        display_name: Option<String>,
+        /// Server-root relative path to the jar the server boots
+        #[arg(long)]
+        jar: Option<String>,
+        /// Drop the jar override (the built-in server.jar applies)
+        #[arg(long)]
+        clear_jar: bool,
+        /// The Minecraft port players join (1024–65534)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Drop the port override (the global default applies)
+        #[arg(long)]
+        clear_port: bool,
+        /// Minimum heap in MiB (-Xms)
+        #[arg(long)]
+        min_memory_mb: Option<u32>,
+        /// Maximum heap in MiB (-Xmx)
+        #[arg(long)]
+        max_memory_mb: Option<u32>,
+        /// Drop the minimum-heap override
+        #[arg(long)]
+        clear_min_memory: bool,
+        /// Drop the maximum-heap override
+        #[arg(long)]
+        clear_max_memory: bool,
+        /// Path to a specific java executable (else the best managed
+        /// runtime is picked)
+        #[arg(long)]
+        java_path: Option<String>,
+        /// Drop the java-path override
+        #[arg(long)]
+        clear_java_path: bool,
+        /// An extra JVM argument; repeat for several (e.g. --jvm-arg
+        /// -XX:+UseG1GC)
+        #[arg(long)]
+        jvm_arg: Vec<String>,
+        /// Drop all extra JVM arguments
+        #[arg(long)]
+        clear_jvm_args: bool,
+        /// Graceful stop timeout in seconds
+        #[arg(long)]
+        stop_timeout_secs: Option<u32>,
+        /// Startup validation window in seconds
+        #[arg(long)]
+        startup_timeout_secs: Option<u32>,
+        /// Backup retention: keep the newest N backups
+        #[arg(long)]
+        backup_keep: Option<u32>,
+        /// Drop the backup-retention override
+        #[arg(long)]
+        clear_backup_keep: bool,
+        /// The Minecraft version this server runs (drives the Java
+        /// requirement when no direct override is set)
+        #[arg(long)]
+        mc_version: Option<String>,
+        /// Drop the Minecraft-version override
+        #[arg(long)]
+        clear_mc_version: bool,
+        /// Direct override of the required Java major
+        #[arg(long)]
+        java_major: Option<u32>,
+        /// Drop the Java-major override
+        #[arg(long)]
+        clear_java_major: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum NetworkCommands {
+    /// Probe the server's ports: desired, actual (server.properties),
+    /// availability right now, and other servers claiming the same port
+    Status { server_id: String },
 }
 
 #[derive(Subcommand)]
@@ -689,6 +788,66 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 unreview,
             } => publish_review(&cli, &client, server_id, file, kind, !*unreview).await,
             PublishCommands::State { server_id } => publish_state(&cli, &client, server_id).await,
+        },
+        Commands::Config { command } => match command {
+            ConfigCommands::Show { server_id } => config_show(&cli, &client, server_id).await,
+            ConfigCommands::Set {
+                server_id,
+                display_name,
+                jar,
+                clear_jar,
+                port,
+                clear_port,
+                min_memory_mb,
+                max_memory_mb,
+                clear_min_memory,
+                clear_max_memory,
+                java_path,
+                clear_java_path,
+                jvm_arg,
+                clear_jvm_args,
+                stop_timeout_secs,
+                startup_timeout_secs,
+                backup_keep,
+                clear_backup_keep,
+                mc_version,
+                clear_mc_version,
+                java_major,
+                clear_java_major,
+            } => {
+                config_set(
+                    &cli,
+                    &client,
+                    server_id,
+                    ConfigSetOpts {
+                        display_name: display_name.as_deref(),
+                        jar: jar.as_deref(),
+                        clear_jar: *clear_jar,
+                        port: *port,
+                        clear_port: *clear_port,
+                        min_memory_mb: *min_memory_mb,
+                        max_memory_mb: *max_memory_mb,
+                        clear_min_memory: *clear_min_memory,
+                        clear_max_memory: *clear_max_memory,
+                        java_path: java_path.as_deref(),
+                        clear_java_path: *clear_java_path,
+                        jvm_args: jvm_arg.clone(),
+                        clear_jvm_args: *clear_jvm_args,
+                        stop_timeout_secs: *stop_timeout_secs,
+                        startup_timeout_secs: *startup_timeout_secs,
+                        backup_keep: *backup_keep,
+                        clear_backup_keep: *clear_backup_keep,
+                        mc_version: mc_version.as_deref(),
+                        clear_mc_version: *clear_mc_version,
+                        java_major: *java_major,
+                        clear_java_major: *clear_java_major,
+                    },
+                )
+                .await
+            }
+        },
+        Commands::Network { command } => match command {
+            NetworkCommands::Status { server_id } => network_status(&cli, &client, server_id).await,
         },
     }
 }
@@ -1682,5 +1841,160 @@ async fn publish_state(cli: &Cli, client: &Client, server_id: &str) -> CmdResult
         return Ok(());
     }
     render::publish_state(&result);
+    Ok(())
+}
+
+// --- config & network (founder §37–39, ADR-0019) ------------------------
+
+/// The `config set` overrides: flags the operator passed become tri-state
+/// patch entries; flags omitted keep their current value; `--clear-<field>`
+/// drops the override so the global default applies again.
+struct ConfigSetOpts<'a> {
+    display_name: Option<&'a str>,
+    jar: Option<&'a str>,
+    clear_jar: bool,
+    port: Option<u16>,
+    clear_port: bool,
+    min_memory_mb: Option<u32>,
+    max_memory_mb: Option<u32>,
+    clear_min_memory: bool,
+    clear_max_memory: bool,
+    java_path: Option<&'a str>,
+    clear_java_path: bool,
+    jvm_args: Vec<String>,
+    clear_jvm_args: bool,
+    stop_timeout_secs: Option<u32>,
+    startup_timeout_secs: Option<u32>,
+    backup_keep: Option<u32>,
+    clear_backup_keep: bool,
+    mc_version: Option<&'a str>,
+    clear_mc_version: bool,
+    java_major: Option<u32>,
+    clear_java_major: bool,
+}
+
+async fn config_show(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let result: zamin_protocol::config::ConfigGetResult = client
+        .request_typed(
+            methods::CONFIG_GET,
+            zamin_protocol::config::ConfigGetParams {
+                server_id: server_id.to_owned(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::config_view(&result);
+    Ok(())
+}
+
+async fn config_set(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    opts: ConfigSetOpts<'_>,
+) -> CmdResult {
+    let mut settings = zamin_protocol::config::ServerSettingsPatch::default();
+    if let Some(port) = opts.port {
+        settings.port = Some(Some(port));
+    }
+    if opts.clear_port {
+        settings.port = Some(None);
+    }
+    if let Some(v) = opts.min_memory_mb {
+        settings.min_memory_mb = Some(Some(v));
+    }
+    if opts.clear_min_memory {
+        settings.min_memory_mb = Some(None);
+    }
+    if let Some(v) = opts.max_memory_mb {
+        settings.max_memory_mb = Some(Some(v));
+    }
+    if opts.clear_max_memory {
+        settings.max_memory_mb = Some(None);
+    }
+    if let Some(v) = opts.java_path {
+        settings.java_path = Some(Some(v.to_owned()));
+    }
+    if opts.clear_java_path {
+        settings.java_path = Some(None);
+    }
+    if !opts.jvm_args.is_empty() {
+        settings.extra_jvm_args = Some(Some(opts.jvm_args.clone()));
+    }
+    if opts.clear_jvm_args {
+        settings.extra_jvm_args = Some(None);
+    }
+    if let Some(v) = opts.stop_timeout_secs {
+        settings.stop_timeout_secs = Some(Some(v));
+    }
+    if let Some(v) = opts.startup_timeout_secs {
+        settings.startup_timeout_secs = Some(Some(v));
+    }
+    if let Some(v) = opts.backup_keep {
+        settings.backup_keep = Some(Some(v));
+    }
+    if opts.clear_backup_keep {
+        settings.backup_keep = Some(None);
+    }
+    if let Some(v) = opts.mc_version {
+        settings.mc_version = Some(Some(v.to_owned()));
+    }
+    if opts.clear_mc_version {
+        settings.mc_version = Some(None);
+    }
+    if let Some(v) = opts.java_major {
+        settings.java_major_required = Some(Some(v));
+    }
+    if opts.clear_java_major {
+        settings.java_major_required = Some(None);
+    }
+
+    let jar = if opts.clear_jar {
+        Some(None)
+    } else {
+        opts.jar.map(|j| Some(j.to_owned()))
+    };
+
+    if settings.is_empty() && jar.is_none() && opts.display_name.is_none() {
+        return Err(Failure::error(
+            "nothing to set: pass at least one flag (--port, --max-memory-mb, --jvm-arg,              --display-name, ...) or a --clear-<field> to drop an override."
+                .to_owned(),
+        ));
+    }
+
+    let params = zamin_protocol::config::ConfigSetParams {
+        server_id: server_id.to_owned(),
+        display_name: opts.display_name.map(str::to_owned),
+        jar,
+        settings,
+    };
+    let result: zamin_protocol::config::ConfigGetResult =
+        client.request_typed(methods::CONFIG_SET, params).await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!("Configuration saved. Overrides apply the next time the server starts.");
+    render::config_view(&result);
+    Ok(())
+}
+
+async fn network_status(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let result: zamin_protocol::config::NetworkStatusResult = client
+        .request_typed(
+            methods::NETWORK_STATUS,
+            zamin_protocol::config::NetworkStatusParams {
+                server_id: server_id.to_owned(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::network_status(&result);
     Ok(())
 }

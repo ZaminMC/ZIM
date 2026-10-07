@@ -785,6 +785,142 @@ pub fn publish_state(result: &PublishStateResult) {
     }
 }
 
+// --- config & network (founder §37–39, ADR-0019) ------------------------
+
+/// "global" or "custom" — the ADR-0007 provenance signal, one word wide.
+fn provenance_word(p: &zamin_protocol::config::FieldProvenance) -> &'static str {
+    match p {
+        zamin_protocol::config::FieldProvenance::Global => "global",
+        zamin_protocol::config::FieldProvenance::Custom => "custom",
+    }
+}
+
+fn settings_row(
+    label: &str,
+    value: Option<String>,
+    provenance: &zamin_protocol::config::FieldProvenance,
+) {
+    let value = value.unwrap_or_else(|| "(unset)".to_owned());
+    println!(
+        "  {label:<24} {value:<28} [{provenance}]",
+        provenance = provenance_word(provenance)
+    );
+}
+
+pub fn config_view(view: &zamin_protocol::config::ConfigGetResult) {
+    println!("Server: {} ({})", view.display_name, view.server_id);
+    println!("Settings (effective over the global defaults):");
+    let e = &view.effective;
+    let p = &view.provenance;
+    settings_row("port", e.port.map(|v| v.to_string()), &p.port);
+    settings_row(
+        "memory (min/max MiB)",
+        Some(format!(
+            "{}/{}",
+            e.min_memory_mb
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".into()),
+            e.max_memory_mb
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".into())
+        )),
+        &p.max_memory_mb,
+    );
+    settings_row("java path", e.java_path.clone(), &p.java_path);
+    settings_row(
+        "extra JVM args",
+        Some(if e.extra_jvm_args.is_empty() {
+            "(none)".to_owned()
+        } else {
+            e.extra_jvm_args.join(" ")
+        }),
+        &p.extra_jvm_args,
+    );
+    // jar is a per-server field, not a layered setting — no provenance.
+    println!(
+        "  {:<24} {:<28} [per-server]",
+        "jar",
+        view.jar
+            .clone()
+            .unwrap_or_else(|| "server.jar (default)".to_owned())
+    );
+    settings_row(
+        "stop timeout (secs)",
+        Some(e.stop_timeout_secs.to_string()),
+        &p.stop_timeout_secs,
+    );
+    settings_row(
+        "startup timeout (secs)",
+        Some(e.startup_timeout_secs.to_string()),
+        &p.startup_timeout_secs,
+    );
+    settings_row(
+        "backup keep",
+        Some(e.backup_keep.to_string()),
+        &p.backup_keep,
+    );
+    settings_row("mc version", e.mc_version.clone(), &p.mc_version);
+    settings_row(
+        "java major required",
+        e.java_major_required.map(|v| v.to_string()),
+        &p.java_major_required,
+    );
+    // The composed command the daemon will actually run at next start —
+    // the founder's rule that advanced users can always see the real
+    // startup configuration (§38), JVM command line included.
+    let java = e
+        .java_path
+        .clone()
+        .unwrap_or_else(|| "<managed runtime>".to_owned());
+    let jar = view.jar.clone().unwrap_or_else(|| "server.jar".to_owned());
+    let mut args: Vec<String> = Vec::new();
+    if let Some(min) = e.min_memory_mb {
+        args.push(format!("-Xms{min}M"));
+    }
+    if let Some(max) = e.max_memory_mb {
+        args.push(format!("-Xmx{max}M"));
+    }
+    args.extend(e.extra_jvm_args.iter().cloned());
+    args.push("-jar".to_owned());
+    args.push(jar);
+    args.push("nogui".to_owned());
+    println!("\nNext start would run:\n  {java} {}", args.join(" "));
+}
+
+pub fn network_status(status: &zamin_protocol::config::NetworkStatusResult) {
+    println!("Server: {}", status.server_id);
+    match status.desired_port {
+        Some(port) => println!("  desired port          {port} (the config model)"),
+        None => println!("  desired port          (unset)"),
+    }
+    match status.properties_port {
+        Some(port) => println!("  server.properties     {port} (the boot authority)"),
+        None => println!("  server.properties     (absent — the server has not booted yet)"),
+    }
+    if let Some(bind) = &status.bind_address {
+        let bind = if bind.is_empty() {
+            "0.0.0.0 (all interfaces)"
+        } else {
+            bind
+        };
+        println!("  bind address          {bind} (owned by server.properties)");
+    }
+    match status.port_available {
+        Some(true) => println!("  availability          ● available right now"),
+        Some(false) => println!("  availability          ● in use right now"),
+        None => println!("  availability          (nothing to probe — no port known)"),
+    }
+    if status.conflicts.is_empty() {
+        println!("  conflicts             none");
+    } else {
+        println!(
+            "  conflicts             {} also desire(s) this port: {}",
+            status.conflicts.len(),
+            status.conflicts.join(", ")
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
