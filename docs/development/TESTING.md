@@ -73,8 +73,20 @@ The remote path is the security boundary of the product (ADR-0011); every rule b
 - The auth gate (before any local daemon connection exists): missing/empty `auth` → `AUTH_REQUIRED` · wrong token → `AUTH_REJECTED`, connection closed · first frame not a readable `daemon.hello` request → Null-id `PROTOCOL_INVALID_REQUEST` (never a guessed id) · first frame not `daemon.hello` at all → `PROTOCOL_VERSION_UNSUPPORTED`, mirroring the daemon's own rule · token comparison digests both sides first (fixed-length, constant-time).
 - The relay: an authenticated hello round-trips and post-handshake frames relay both directions · the agent cannot reach its daemon → typed `DAEMON_UNREACHABLE` · one remote connection maps to one daemon session · either side closing ends the session.
 - The transport rejects what it must: a plaintext peer never receives protocol data (at most a TLS alert) · a wrong pinned fingerprint fails the TLS handshake · `InsecureSkipVerify` works but is an explicit, documented mode.
+- The CLI remote mode (deferred list, landed): the real `zamin` binary drives the real `zaminagent` + `zamind` chain — `--remote <addr> --fingerprint <hex> --token-file <path>` answers `daemon.status`, registers and lists through the relay · a wrong token is the typed `AUTH_REJECTED` · a wrong fingerprint fails the TLS handshake · omitting `--fingerprint` without the explicit insecure flag is a usage error.
+- The audit log (deferred list, landed): `<data>/audit.log` appends one JSONL line per handshake and per mutating command, carrying the protocol client (name + version) and the daemon's outcome code · accepted and rejected hellos both land · `server.register/start/stop` are audited · reads (`server.list`) are not · a missing directory is a warning, never a panic.
 - The panel side: connection profiles persist to localStorage (local default, add/remove/activate remotes, active-id fallback on remove) · `transportSpec` derives the bridge relay URL + hello credential per profile · the client sends `hello.auth` only when a credential is set, and `reconnect()` swaps the live transport and re-handshakes with the new credential without waiting for the retry schedule.
 - Player roster (log-roster refinement): join/leave lines parse only with a legal username charset (a chat line saying the phrase never joins the roster) · joins/leaves over the real daemon end-to-end (fake-mc-server `join`/`leave` over stdin → pumps → hub → `players.list`) · the roster dies with the server process · the ping side stays its own honest shape.
+
+## Metrics (required coverage)
+
+The sampler is the only source of performance numbers; the panel never invents one:
+
+- Platform sampling: a live process reports cumulative CPU time + RSS (`/proc` on Linux, `GetProcessTimes`/`GetProcessMemoryInfo` on Windows) · a missing PID answers `None`, never zeros · one read is cheap (asserted < 10 ms; measured microseconds).
+- The 1 Hz actor sampler publishes while a process is live and stops with it · CPU% appears from the second sample of a process generation (no fake base) · RSS is measured on every platform · players come from the live roster (`null` until the server has logged anything) · `tps` stays `null` unless actually measured — it never is.
+- Hub semantics: the per-server ring is bounded (600) and keeps the newest · a fresh metrics subscription receives the ring's latest sample first · a slow subscriber coalesces latest-wins (pending slot, flushed on the next publish; the stale samples are dropped without `Missed` markers) while an equally-slow `events` subscriber still gets its `Missed { N }` marker (both asserted side by side).
+- `metrics.range` serves the ring chronologically, trims to the newest `maxSamples`, and answers typed `SERVER_NOT_FOUND` for an unknown server — all end-to-end over the wire while a fake server runs.
+- Panel: the metrics store dedupes ring replay vs. live ticks by timestamp, caps the window, seeds range history under live data · header chips subscribe to the metrics store alone (a 1 Hz flood re-renders two chips, never the console — render-count assertion) · stale samples never display once the server leaves a live state.
 
 ## Performance budgets (required coverage)
 
@@ -91,6 +103,7 @@ them with `--ignored`). Each assertion gates a published number:
 - Idle daemon RSS < 50 MiB (reference platform; Linux-only via /proc).
 - Five servers streaming 1k lines/s each with an active subscriber: daemon RSS < 150 MiB.
 - Terminal input echo, round trip via the daemon (stdin request → the server's reply line on the logs stream): p99 < 50 ms over 100 samples — the test that forced the pump's flush tick from 50 ms to 10 ms.
+- Panel bundle budgets (`apps/panel/perf/budgets.mjs`, run after the panel build): entry chunk ≤ 90 KB gzip, any single chunk ≤ 90 KB, total JS ≤ 170 KB, total CSS ≤ 12 KB — the guard that keeps the cold-start payload honest after the xterm/modals code split.
 
 ## Fixtures
 

@@ -37,6 +37,10 @@ pub enum ClientError {
     Disconnected,
     #[error("the daemon's reply was unreadable: {0}")]
     Malformed(String),
+    /// The remote transport (agent) failed before or during the handshake
+    /// — TLS rejection, unreachable agent, framed-protocol mismatch.
+    #[error("remote connection failed: {0}")]
+    Remote(String),
 }
 
 struct Shared {
@@ -54,16 +58,33 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connect and perform the mandatory `daemon.hello` exchange.
+    /// Connect and perform the mandatory `daemon.hello` exchange over the
+    /// local transport.
     pub async fn connect(endpoint: zamin_ipc::Endpoint) -> Result<Client, ClientError> {
         let connection: Connection = zamin_ipc::connect(endpoint).await?;
         let (write_half, read_half) = connection.split();
-        Client::start(write_half, read_half).await
+        Client::start(write_half, read_half, None).await
+    }
+
+    /// Connect through a remote agent (ADR-0011): TLS with a pinned
+    /// certificate fingerprint (or the explicit insecure escape hatch),
+    /// the agent's token in the hello's auth. Every later request rides
+    /// the same relayed connection — the daemon cannot tell the
+    /// difference, by protocol design.
+    pub async fn connect_remote(
+        cfg: zamin_agent::client::RemoteConnect,
+    ) -> Result<Client, ClientError> {
+        let connection = zamin_agent::client::connect(&cfg)
+            .await
+            .map_err(|error| ClientError::Remote(error.to_string()))?;
+        let (write_half, read_half) = connection.split();
+        Client::start(write_half, read_half, Some(cfg.token)).await
     }
 
     async fn start(
         write_half: ConnectionWriteHalf,
         read_half: ConnectionReadHalf,
+        auth: Option<String>,
     ) -> Result<Client, ClientError> {
         let (writer, mut writer_rx) = mpsc::channel::<Bytes>(64);
         tokio::spawn(async move {
@@ -92,16 +113,17 @@ impl Client {
             writer,
             next_id: AtomicU64::new(0),
         };
-        client.hello().await?;
+        client.hello(auth).await?;
         Ok(client)
     }
 
     /// The mandatory first exchange (protocol spec §2). The daemon rejects
     /// version mismatches with a typed error, which surfaces unchanged.
-    async fn hello(&mut self) -> Result<(), ClientError> {
+    /// Remote legs carry the agent's token in `auth` (ADR-0011).
+    async fn hello(&mut self, auth: Option<String>) -> Result<(), ClientError> {
         let params = HelloParams {
             protocol: zamin_protocol::PROTOCOL_VERSION,
-            auth: None,
+            auth,
             client: ClientInfo {
                 name: CLIENT_NAME.to_owned(),
                 version: CLIENT_VERSION.to_owned(),

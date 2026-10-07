@@ -24,6 +24,17 @@ use std::time::Duration;
 
 use crate::error::PlatformError;
 
+/// One raw process sample from the OS. `cpu_time` is the cumulative
+/// user+kernel CPU time; CPU *percent* is computed by the caller from two
+/// samples — the OS exposes counters, not rates. `rss_bytes` is the
+/// resident set where the OS exposes it unprivileged; `None` means "not
+/// measured" (honest absence, never a fake number — the metrics rule).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessSample {
+    pub cpu_time: Duration,
+    pub rss_bytes: Option<u64>,
+}
+
 /// Everything needed to spawn a server process. stdin/stdout/stderr are
 /// always piped; the log pipeline owns them.
 #[derive(Debug, Clone)]
@@ -113,6 +124,12 @@ pub trait ProcessOps: Send + Sync {
     /// view). Used by the disk-headroom preflight check (ADR-0005).
     fn fs_free_bytes(&self, path: &Path) -> Result<u64, PlatformError>;
 
+    /// Raw resource counters for a live process, or `None` if it does not
+    /// exist (or the OS refuses the unprivileged read). One cheap read per
+    /// call — the metrics sampler runs this at 1 Hz per running server and
+    /// the sampler budget is < 1% of a core (PERFORMANCE-BUDGETS).
+    fn sample_process(&self, pid: u32) -> Option<ProcessSample>;
+
     /// Run a short-lived process to completion and capture its output.
     /// Blocking by design; async callers go through `spawn_blocking`.
     /// Used by, e.g., Java runtime inspection.
@@ -196,4 +213,49 @@ pub(crate) const CREATE_NO_WINDOW_SPAWN: u32 = 0x0800_0000;
 
 pub fn process() -> &'static dyn ProcessOps {
     imp::process()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampling_self_reports_counters() {
+        // Clock ticks are 10 ms granular; burn CPU so the counter is
+        // guaranteed nonzero at that granularity.
+        let start = std::time::Instant::now();
+        let mut sink = 0u64;
+        while start.elapsed() < Duration::from_millis(60) {
+            sink = sink.wrapping_add(sink | 0x9e37_79b9_7f4a_7c15);
+        }
+        std::hint::black_box(sink);
+        // This test process exists and has consumed some CPU by running.
+        let sample = process().sample_process(std::process::id());
+        let sample = sample.expect("own process is sampleable");
+        assert!(sample.cpu_time > Duration::ZERO, "test already burned CPU");
+        // RSS is measured on every platform we ship; None would mean the
+        // platform read broke silently.
+        let rss = sample.rss_bytes.expect("rss is measurable");
+        assert!(rss > 1_000_000, "a rust test binary uses > 1 MB, got {rss}");
+    }
+
+    #[test]
+    fn sampling_missing_pid_is_none() {
+        assert!(process().sample_process(u32::MAX / 2).is_none());
+    }
+
+    #[test]
+    fn sampling_is_cheap() {
+        // The 1 Hz budget needs each read far below 10 ms; a few file reads
+        // or one syscall pair land in the microseconds.
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let _ = process().sample_process(std::process::id());
+        }
+        let per_call = start.elapsed() / 100;
+        assert!(
+            per_call < Duration::from_millis(10),
+            "one sample must be cheap, measured {per_call:?}"
+        );
+    }
 }

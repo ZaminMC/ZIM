@@ -4,6 +4,7 @@
 //! side effect of exiting.
 
 mod actor;
+mod audit;
 mod engine;
 mod files;
 mod hub;
@@ -112,6 +113,7 @@ async fn run(config: DaemonConfig) {
         config.adoptium_url,
     )
     .await;
+    let audit = audit::Audit::new(&config.data_dir);
 
     let mut server = match IpcServer::bind(config.endpoint.clone()).await {
         Ok(server) => server,
@@ -143,8 +145,9 @@ async fn run(config: DaemonConfig) {
         match server.accept().await {
             Ok(connection) => {
                 let engine = engine.clone();
+                let audit = audit.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = session::serve(connection, engine).await {
+                    if let Err(e) = session::serve(connection, engine, audit).await {
                         tracing::warn!("session ended: {e}");
                     }
                 });

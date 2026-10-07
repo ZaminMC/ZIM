@@ -21,6 +21,8 @@ import type {
   LifecycleResult,
   LogRangeParams,
   LogRangeResult,
+  MetricsRangeParams,
+  MetricsRangeResult,
   RegisterServerParams,
   RegisterServerResult,
   RemoveServerParams,
@@ -271,6 +273,20 @@ export async function subscribeLogs(
     initialCursor,
   );
   return { dispose: () => handle.dispose(), result };
+}
+
+export async function metricsRange(
+  params: MetricsRangeParams,
+): Promise<MetricsRangeResult> {
+  return client.request<MetricsRangeResult>("metrics.range", params);
+}
+
+export async function subscribeMetrics(
+  serverId: string,
+  handler: Parameters<typeof client.subscribe>[2],
+): Promise<{ dispose(): void }> {
+  const handle = await client.subscribe("metrics", serverId, handler);
+  return { dispose: () => handle.dispose() };
 }
 
 // --- software catalog & creation (§7b) ---

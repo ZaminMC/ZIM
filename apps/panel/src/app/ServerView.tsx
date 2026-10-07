@@ -4,29 +4,43 @@
 // (ADR-0005); buttons only dispatch and wait, they never guess the
 // resulting state.
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { getServer, killServer, restartServer, startServer, stopServer, writeWholeFile } from "../state/actions";
 import { describeError, LIFECYCLE_VERBS } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
 import type { ServerState } from "../protocol/types";
 import { useServers } from "../state/servers";
 import { useUi } from "../state/ui";
+import {
+  ensureMetrics,
+  releaseMetrics,
+  useServerMetrics,
+  formatBytes,
+  formatCpu,
+} from "../state/metrics";
 import { Button } from "../ui/Button";
 import { StatusChip } from "../ui/StatusChip";
 import {
+  IconActivity,
   IconBackups,
+  IconBolt,
   IconFolder,
   IconLogs,
   IconPlayers,
   IconTerminal,
 } from "../ui/icons";
-import { Console } from "./Console";
 import { CrashCard } from "./CrashCard";
 import { FilesView } from "./FilesView";
 import { LogViewer } from "./LogViewer";
+import { MetricsView } from "./MetricsView";
 import { PlayersView } from "./PlayersView";
 import { BackupsView } from "./BackupsView";
 import styles from "./ServerView.module.css";
+
+// xterm (+ addons) is the panel's heaviest dependency and only the console
+// tab needs it: it loads when the tab first renders, so the cold start
+// ships without it (PERFORMANCE-BUDGETS: cold start → interactive).
+const Console = lazy(() => import("./Console").then((m) => ({ default: m.Console })));
 
 /** Which verbs make sense from a given state (ADR-0005 ladder). */
 export function availableVerbs(state: ServerState): LifecycleVerb[] {
@@ -46,8 +60,16 @@ export function availableVerbs(state: ServerState): LifecycleVerb[] {
   }
 }
 
+/** States where a server process may be alive and the sampler publishing. */
+function isLiveState(state: ServerState): boolean {
+  return (
+    state === "running" || state === "starting" || state === "stopping" || state === "adopting"
+  );
+}
+
 const LOWER_VIEWS = [
   { id: "console", label: "Console", icon: IconTerminal },
+  { id: "metrics", label: "Metrics", icon: IconActivity },
   { id: "logs", label: "Logs", icon: IconLogs },
   { id: "files", label: "Files", icon: IconFolder },
   { id: "players", label: "Players", icon: IconPlayers },
@@ -55,6 +77,27 @@ const LOWER_VIEWS = [
 ] as const;
 
 type LowerView = (typeof LOWER_VIEWS)[number]["id"];
+
+/** Live sampler values in the header. Owns its store subscription so a
+ *  1 Hz sample re-renders two chips, not the whole workspace (the panel
+ *  budgets: interaction → next paint stays untouched by background data). */
+function MetricsChips({ serverId, live }: { serverId: string; live: boolean }) {
+  const samples = useServerMetrics(serverId);
+  const latest = samples.at(-1);
+  if (!live || !latest) return null;
+  return (
+    <div className={styles.metricChips}>
+      <span className={styles.metricChip} title="CPU, from the daemon sampler">
+        <IconBolt size={12} />
+        {formatCpu(latest.cpuPercent)}
+      </span>
+      <span className={styles.metricChip} title="Resident memory">
+        <IconActivity size={12} />
+        {formatBytes(latest.rssBytes)}
+      </span>
+    </div>
+  );
+}
 
 export function ServerView({ serverId }: { serverId: string }) {
   const server = useServers((s) => s.servers[serverId]);
@@ -75,6 +118,13 @@ export function ServerView({ serverId }: { serverId: string }) {
       .then((details) => upsert(details))
       .catch(() => {}); // the sidebar summary stays; errors surface on actions
   }, [serverId, state, upsert]);
+
+  // The metrics stream lives for the whole workspace visit (header chips +
+  // Metrics tab share it), reference-counted in state/metrics.ts.
+  useEffect(() => {
+    ensureMetrics(serverId);
+    return () => releaseMetrics(serverId);
+  }, [serverId]);
 
   if (!server) {
     return (
@@ -122,6 +172,7 @@ export function ServerView({ serverId }: { serverId: string }) {
             {server.software ? <span className={styles.metaChip}>{server.software}</span> : null}
             {server.version ? <span className={styles.metaChip}>v{server.version}</span> : null}
             {server.port ? <span className={styles.metaChip}>:{server.port}</span> : null}
+            <MetricsChips serverId={serverId} live={isLiveState(server.state)} />
           </div>
         </div>
 
@@ -216,17 +267,21 @@ export function ServerView({ serverId }: { serverId: string }) {
       </div>
 
       <div className={styles.panel}>
-        {lowerView === "console" ? (
-          <Console serverId={serverId} running={server.state === "running"} />
-        ) : lowerView === "logs" ? (
-          <LogViewer serverId={serverId} />
-        ) : lowerView === "files" ? (
-          <FilesView serverId={serverId} />
-        ) : lowerView === "players" ? (
-          <PlayersView serverId={serverId} />
-        ) : (
-          <BackupsView serverId={serverId} running={server.state === "running"} />
-        )}
+        <Suspense fallback={<div className={styles.lazyLoad} aria-busy="true" />}>
+          {lowerView === "console" ? (
+            <Console serverId={serverId} running={server.state === "running"} />
+          ) : lowerView === "metrics" ? (
+            <MetricsView serverId={serverId} />
+          ) : lowerView === "logs" ? (
+            <LogViewer serverId={serverId} />
+          ) : lowerView === "files" ? (
+            <FilesView serverId={serverId} />
+          ) : lowerView === "players" ? (
+            <PlayersView serverId={serverId} />
+          ) : (
+            <BackupsView serverId={serverId} running={server.state === "running"} />
+          )}
+        </Suspense>
       </div>
     </div>
   );

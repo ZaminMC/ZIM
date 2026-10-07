@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerView, availableVerbs } from "./ServerView";
 import { ProtocolRequestError } from "../protocol/client";
 import { useServers } from "../state/servers";
+import { useMetrics } from "../state/metrics";
 import { useUi } from "../state/ui";
 
 const mocks = vi.hoisted(() => ({
@@ -15,10 +16,16 @@ const mocks = vi.hoisted(() => ({
   restartServer: vi.fn(),
   killServer: vi.fn(),
   writeWholeFile: vi.fn(),
+  consoleRenders: 0,
 }));
 
 vi.mock("../state/wire", () => ({ client: {}, startWire: vi.fn() }));
-vi.mock("./Console", () => ({ Console: () => <div data-testid="console-stub" /> }));
+vi.mock("./Console", () => ({
+  Console: () => {
+    mocks.consoleRenders += 1;
+    return <div data-testid="console-stub" />;
+  },
+}));
 vi.mock("../state/actions", () => ({
   getServer: mocks.getServer,
   startServer: mocks.startServer,
@@ -26,6 +33,10 @@ vi.mock("../state/actions", () => ({
   restartServer: mocks.restartServer,
   killServer: mocks.killServer,
   writeWholeFile: mocks.writeWholeFile,
+  // The metrics workspace stream is fire-and-forget background wiring;
+  // tests never exercise it here.
+  metricsRange: vi.fn(() => Promise.resolve({ samples: [] })),
+  subscribeMetrics: vi.fn(() => Promise.resolve({ dispose: () => {} })),
 }));
 
 describe("availableVerbs", () => {
@@ -47,6 +58,8 @@ describe("ServerView", () => {
       crashes: {},
     });
     useUi.setState({ pending: {}, openTabs: ["alpha"], activeTab: "alpha" });
+    useMetrics.setState({ samples: {} });
+    mocks.consoleRenders = 0;
 
     mocks.getServer.mockResolvedValue({
       serverId: "alpha",
@@ -133,6 +146,45 @@ describe("ServerView", () => {
     render(<ServerView serverId="alpha" />);
     fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() => expect(useServers.getState().crashes["alpha"]?.resolved).toBe(true));
+  });
+
+  it("a metrics flood re-renders the header chips, never the workspace", async () => {
+    render(<ServerView serverId="alpha" />);
+    await screen.findByTestId("console-stub"); // the lazy console resolved
+    const rendersBefore = mocks.consoleRenders;
+    expect(rendersBefore).toBeGreaterThan(0);
+
+    // Three 1 Hz samples land on the metrics store (the stream wiring is
+    // mocked; the store and the chips are real).
+    useMetrics.getState().append("alpha", { tsMs: 1, cpuPercent: 3, rssBytes: 100 });
+    useMetrics.getState().append("alpha", { tsMs: 2, cpuPercent: 4, rssBytes: 101 });
+    useMetrics.getState().append("alpha", { tsMs: 3, cpuPercent: 5, rssBytes: 102 });
+
+    expect(await screen.findByText("5.0%")).toBeTruthy();
+    expect(screen.getByText("102 B")).toBeTruthy();
+    // The workspace surface did not re-render for background data — the
+    // panel's "interaction → next paint < 100 ms under load" budget rests
+    // on this isolation.
+    expect(mocks.consoleRenders).toBe(rendersBefore);
+  });
+
+  it("hides the live chips once the server is no longer live", async () => {
+    useServers.setState({
+      servers: {
+        alpha: { serverId: "alpha", displayName: "Alpha", state: "stopped" },
+      },
+    });
+    // server.get must agree, or its upsert would flip the state back.
+    mocks.getServer.mockResolvedValue({
+      serverId: "alpha",
+      displayName: "Alpha",
+      state: "stopped",
+    });
+    render(<ServerView serverId="alpha" />);
+    useMetrics.getState().append("alpha", { tsMs: 1, cpuPercent: 3, rssBytes: 100 });
+    await screen.findByTestId("console-stub");
+    // Stale samples never masquerade as live numbers.
+    expect(screen.queryByText("3.0%")).toBeNull();
   });
 });
 

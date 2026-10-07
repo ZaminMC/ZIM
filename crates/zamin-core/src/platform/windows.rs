@@ -13,13 +13,16 @@ use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_E
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
 };
+use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_TERMINATE,
 };
 
 use crate::error::PlatformError;
-use crate::platform::{ProcessIdentity, ProcessOps, SpawnHandle, SpawnSpec, Spawned};
+use crate::platform::{
+    ProcessIdentity, ProcessOps, ProcessSample, SpawnHandle, SpawnSpec, Spawned,
+};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0200;
@@ -238,5 +241,53 @@ impl ProcessOps for WindowsProcessOps {
             return Err(std::io::Error::last_os_error().into());
         }
         Ok(free)
+    }
+
+    fn sample_process(&self, pid: u32) -> Option<ProcessSample> {
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let mut creation = FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            };
+            let mut exit = FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            };
+            let mut kernel = FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            };
+            let mut user = FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            };
+            let ok = GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user);
+
+            let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            let memory_ok = GetProcessMemoryInfo(process, &mut counters, counters.cb);
+            CloseHandle(process);
+            if ok == 0 {
+                return None;
+            }
+
+            // FILETIME durations are 100 ns units; Duration holds 100 ns
+            // exactly, so the conversion never rounds.
+            let ticks_100ns = filetime_u64(&kernel).saturating_add(filetime_u64(&user));
+            let cpu_time = Duration::from_nanos(ticks_100ns.saturating_mul(100));
+            let rss_bytes = if memory_ok != 0 {
+                Some(counters.WorkingSetSize as u64)
+            } else {
+                None
+            };
+            Some(ProcessSample {
+                cpu_time,
+                rss_bytes,
+            })
+        }
     }
 }

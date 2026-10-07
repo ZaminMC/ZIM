@@ -430,6 +430,28 @@ impl Engine {
         result.map_err(EngineError::Protocol)
     }
 
+    /// The server's metrics ring (ADR-0006): chronological, oldest first,
+    /// at most `max_samples` newest samples. The ring is the entire stored
+    /// history — bounded by design, no paging.
+    pub fn metrics_range(
+        &self,
+        server_id: &ServerId,
+        max_samples: u32,
+    ) -> Result<zamin_protocol::metrics::MetricsRangeResult, EngineError> {
+        {
+            let registry = self.registry_lock();
+            registry
+                .get(server_id)
+                .ok_or_else(|| not_found(server_id))?;
+        } // registry guard dropped before the hub's own lock (never nested).
+        let mut samples = self.inner.hub.metrics_ring(server_id.as_str());
+        // Keep the NEWEST max samples, preserve chronological order.
+        if samples.len() > max_samples as usize {
+            samples.drain(..samples.len() - max_samples as usize);
+        }
+        Ok(zamin_protocol::metrics::MetricsRangeResult { samples })
+    }
+
     pub async fn daemon_status(&self) -> serde_json::Value {
         let servers = self.list_servers().await;
         serde_json::json!({

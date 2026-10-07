@@ -43,6 +43,28 @@ development sandbox (2 cores, shared): IPC p50 ≈ 0.1 ms, cold start ≈ 100 ms
 sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
 ≈ 64k), echo p50 ≈ 10 ms, idle RSS 9 MiB, stalled-subscriber RSS 61 MiB.
 
+Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
+perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
+entry ≤ 90 KB, any single chunk ≤ 90 KB, total JS ≤ 170 KB, total CSS
+≤ 12 KB. The cold-start payload was cut with code splitting: the entry
+chunk went from 147 KB to 68 KB gzip by moving xterm into a console-tab
+chunk (74 KB) and the three operator modals into their own chunks; the
+console loads when the tab first renders, not at boot. Boot progress is
+measurable in the running app through the `panel:boot-start` →
+`panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
+recorded from browser smoke runs rather than guessed.
+
+Metrics sampler cost is enforced where it is cheap to enforce:
+`zamin-core`'s platform test asserts one `sample_process` call stays under
+10 ms (measured in the low microseconds on Linux — two `/proc` reads — and
+one syscall pair on Windows), which at 1 Hz puts the sampler far under the
+1% of a core budget; the e2e suite asserts real samples flow (RSS measured,
+CPU% from the second sample on) and that cadence, ring, and range stay
+honest. Server-switch and interaction budgets are covered structurally:
+the workspace's live header chips subscribe to the metrics store alone, so
+a 1 Hz flood re-renders two chips and never the console — asserted by a
+render-count test in `ServerView.test.tsx`.
+
 Negotiations and hardware notes, in writing per the rules:
 
 - **Terminal echo ↔ flush tick.** Echo latency is quantized by the pump's

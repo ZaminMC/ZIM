@@ -4,9 +4,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use crate::error::PlatformError;
-use crate::platform::{ProcessIdentity, ProcessOps, SpawnHandle, SpawnSpec, Spawned};
+use crate::platform::{
+    ProcessIdentity, ProcessOps, ProcessSample, SpawnHandle, SpawnSpec, Spawned,
+};
 
 struct UnixHandle {
     pid: u32,
@@ -151,6 +154,40 @@ impl ProcessOps for UnixProcessOps {
         // f_bavail: free blocks for unprivileged users — the honest number
         // for a daemon that must not count reserved space it cannot use.
         Ok(vfs.f_bavail as u64 * vfs.f_frsize as u64)
+    }
+
+    fn sample_process(&self, pid: u32) -> Option<ProcessSample> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).ok()?;
+
+        // comm can contain spaces and parentheses; fields resume after the
+        // final ')'. proc(5) numbers fields from 1 (pid); the remainder
+        // after comm starts at the state field (3), so utime (14) and
+        // stime (15) sit at indices 11 and 12.
+        let after_comm = stat.rsplit_once(')').map(|(_, rest)| rest)?;
+        let mut fields = after_comm.split_whitespace();
+        let utime: u64 = fields.nth(11)?.parse().ok()?;
+        let stime: u64 = fields.next()?.parse().ok()?;
+
+        // Clock ticks per second is a runtime property (_SC_CLK_TCK; 100 on
+        // every Linux that ships), page size likewise (_SC_PAGESIZE).
+        let ticks_per_sec = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as u64;
+        let page_bytes = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(1) as u64;
+
+        let ticks = utime + stime;
+        let cpu_time = Duration::from_nanos(ticks * 1_000_000_000 / ticks_per_sec);
+
+        // statm field 2: resident pages.
+        let rss_bytes = statm
+            .split_whitespace()
+            .nth(1)
+            .and_then(|pages| pages.parse::<u64>().ok())
+            .map(|pages| pages * page_bytes);
+
+        Some(ProcessSample {
+            cpu_time,
+            rss_bytes,
+        })
     }
 }
 

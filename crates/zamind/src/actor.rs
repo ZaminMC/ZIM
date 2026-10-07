@@ -16,12 +16,16 @@ use zamin_core::supervisor::state::StateMachine;
 use zamin_core::supervisor::LifecycleCommand;
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::server::{CrashClassification, ServerState};
-use zamin_protocol::streams::{LogLevel, LogLine};
+use zamin_protocol::streams::{LogLevel, LogLine, MetricsSample};
 
 use crate::hub::HubHandle;
 
 const TICK: Duration = Duration::from_millis(250);
 const GRACEFUL_GRACE: Duration = Duration::from_secs(10);
+/// Metrics sampling interval (ADR-0006: 1 Hz per running server). The
+/// sampler's own cost is two small /proc reads (or one syscall pair on
+/// Windows) per second — far under the < 1% core budget.
+const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Log lines attached to a crash classification as evidence (§53 crash card).
 const CRASH_EVIDENCE_LINES: usize = 3;
@@ -90,6 +94,13 @@ pub struct Actor {
     /// exceeded, so the "still starting" progress notice fires exactly
     /// once (ADR-0005: remain STARTING, surface progress, never guess).
     startup_timeout_surfaced: bool,
+
+    /// Metrics sampling state (ADR-0006): the previous cumulative CPU
+    /// counter + wall instant, so a percent can be computed from deltas;
+    /// and the last sample instant for the 1 Hz throttle. Reset whenever
+    /// no process is live — a percent must never span process generations.
+    metrics_cpu: Option<(Duration, Instant)>,
+    metrics_last_sample: Instant,
 }
 
 impl Actor {
@@ -119,6 +130,8 @@ impl Actor {
             pending_restart: false,
             adopted_identity: None,
             startup_timeout_surfaced: false,
+            metrics_cpu: None,
+            metrics_last_sample: Instant::now(),
         }
     }
 
@@ -705,6 +718,52 @@ impl Actor {
                 }
             }
         }
+        self.sample_metrics();
+    }
+
+    /// The 1 Hz metrics sampler (ADR-0006): CPU% from counter deltas, RSS,
+    /// live player count, and uptime — published on the hub while a server
+    /// process is live, never faked. Runs inline in the tick loop: the read
+    /// is a couple of file reads (microseconds), not a blocking syscall.
+    fn sample_metrics(&mut self) {
+        let live_pid = self
+            .spawned
+            .as_ref()
+            .map(|s| s.pid())
+            .or_else(|| self.adopted_identity.as_ref().map(|i| i.pid));
+        let Some(pid) = live_pid else {
+            // Nothing live: drop the CPU base so the next start computes its
+            // first percent from its own generation, never a stale one.
+            self.metrics_cpu = None;
+            return;
+        };
+        if self.metrics_last_sample.elapsed() < METRICS_INTERVAL {
+            return;
+        }
+        self.metrics_last_sample = Instant::now();
+        let Some(raw) = platform::process().sample_process(pid) else {
+            // The process died between the exit poll and this read; the
+            // next tick's exit handling owns the announcement.
+            return;
+        };
+        let now = Instant::now();
+        let cpu_percent = self.metrics_cpu.and_then(|(prev_cpu, prev_at)| {
+            let wall = now.duration_since(prev_at).as_secs_f64();
+            let used = raw.cpu_time.checked_sub(prev_cpu)?.as_secs_f64();
+            (wall > 0.0).then_some((used / wall) * 100.0)
+        });
+        self.metrics_cpu = Some((raw.cpu_time, now));
+        let sample = MetricsSample {
+            ts_ms: now_ms(),
+            cpu_percent,
+            rss_bytes: raw.rss_bytes,
+            players: self.hub.roster_len(&self.server_id).map(|n| n as u32),
+            // TPS is only ever set when actually measured (ADR-0006); the
+            // daemon does not guess.
+            tps: None,
+            uptime_ms: self.started_at_ms.map(|start| now_ms() - start),
+        };
+        self.hub.publish_metrics(&self.server_id, sample);
     }
 
     async fn check_startup_validation(&mut self) {

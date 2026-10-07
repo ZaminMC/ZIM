@@ -253,6 +253,20 @@ export interface LogRangeResult {
   startOffset: number;
 }
 
+// --- metrics (§6, ADR-0006 ring-backed history) ---
+
+export interface MetricsRangeParams {
+  serverId: string;
+  /** Samples to return, newest kept. Defaults to 120; capped at 600. */
+  maxSamples?: number;
+}
+
+export interface MetricsRangeResult {
+  /** Chronological (oldest first). The ring is the entire stored
+   *  history — bounded by design, no paging. */
+  samples: MetricsSample[];
+}
+
 // --- files (§8, ADR-0009 rooted filesystem) ---
 
 export type EntryKind = "file" | "directory";

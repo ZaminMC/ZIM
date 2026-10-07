@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
+    "perf:budgets": "node perf/budgets.mjs",
     "bridge": "node dev-bridge.mjs"
   },
   "dependencies": {

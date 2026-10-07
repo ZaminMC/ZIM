@@ -45,8 +45,9 @@ The agent binds `127.0.0.1:7443` unless told otherwise. Exposing a daemon to the
 
 ## Consequences
 
-- The phase proof is now mechanical: run the agent on the "headless" machine, point a remote-mode client (bridge/panel host, later CLI) at host:port with the token and the pinned fingerprint.
-- Per-operation ACLs, audit logging, and a pairing flow stay deferred (the review's §14 list). The token gates the whole session, which is the honest scope for a single-operator product.
+- The phase proof is now mechanical: run the agent on the "headless" machine, point a remote-mode client (bridge/panel host, CLI) at host:port with the token and the pinned fingerprint.
+- The CLI ships the remote mode: `zamin --remote <addr> --fingerprint <hex> --token-file <path>` (or an explicit, loudly-warned `--insecure-skip-verify`). Every subcommand works unchanged over the relay; a wrong token is the typed `AUTH_REJECTED`, a wrong fingerprint fails the TLS handshake.
+- Audit logging is no longer deferred: the daemon appends every handshake and every mutating command (with the protocol's outcome) to `<data>/audit.log` as JSONL. The actor recorded is the protocol client (name + version) — the daemon cannot distinguish a relayed client from a local one and does not pretend to. Reads are not audited. Per-operation ACLs and a pairing flow stay deferred; the token gates the whole session, which is the honest scope for a single-operator product.
 - Client transports that speak this (dev-bridge remote mode, Tauri host, CLI) reuse `zamin-agent`'s client seam; Node's TLS stack can pin the same fingerprint.
 - The agent is one more binary to package; the installer and portable layout grow it alongside `zamind` and `zamin`.
 

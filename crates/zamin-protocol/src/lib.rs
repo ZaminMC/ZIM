@@ -21,6 +21,7 @@ pub mod java;
 pub mod jobs;
 pub mod logs;
 pub mod methods;
+pub mod metrics;
 pub mod players;
 pub mod server;
 pub mod software;

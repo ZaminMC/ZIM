@@ -506,3 +506,153 @@ async fn connect_with_retry(endpoint: zamin_ipc::Endpoint) -> zamin_cli::Client 
         }
     }
 }
+
+// --- remote: the CLI through the agent (ADR-0011's CLI --remote) ---
+
+/// Owns the agent process; killed on drop.
+struct TestAgent {
+    child: Child,
+}
+
+impl Drop for TestAgent {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// The fingerprint the agent pins its TLS with, computed from the cert it
+/// wrote — the same SHA-256-over-DER the agent prints at startup.
+fn cert_fingerprint_hex(pem_path: &Path) -> String {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let pem = std::fs::read_to_string(pem_path).expect("agent cert written");
+    let der_b64: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(der_b64.trim())
+        .expect("cert pem is valid base64");
+    sha2::Sha256::digest(&der)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[test]
+fn cli_operates_a_remote_box_through_the_agent() {
+    let harness = Harness::spawn("remote");
+    let agent_dir = scoped_dir("remote-agent");
+
+    // A port that was free a moment ago; the agent's own bind is the truth.
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe binds");
+    let port = probe.local_addr().expect("local addr").port();
+    drop(probe);
+
+    let agent = Command::new(workspace_bin("zaminagent"))
+        .args([
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--endpoint",
+            &harness.endpoint,
+            "--data-dir",
+            agent_dir.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("zaminagent spawns");
+    let _agent = TestAgent { child: agent };
+
+    // Bootstrap artifacts land before the listener binds.
+    let token_path = agent_dir.join("token");
+    let cert_path = agent_dir.join("tls").join("agent-cert.pem");
+    assert!(
+        wait_until(Duration::from_secs(10), || token_path.exists()
+            && cert_path.exists()),
+        "agent never wrote its token and cert"
+    );
+    let fingerprint = cert_fingerprint_hex(&cert_path);
+    let token_display = token_path.to_str().unwrap().to_owned();
+    let remote = format!("127.0.0.1:{port}");
+
+    let remote_json = |args: &[&str]| {
+        let mut all: Vec<String> = vec![
+            "--json".into(),
+            "--remote".into(),
+            remote.clone(),
+            "--fingerprint".into(),
+            fingerprint.clone(),
+            "--token-file".into(),
+            token_display.clone(),
+        ];
+        all.extend(args.iter().map(|s| (*s).to_owned()));
+        let output = Command::new(&harness.zamin)
+            .args(&all)
+            .output()
+            .expect("zamin runs");
+        assert!(
+            output.status.success(),
+            "zamin --remote {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("json output")
+    };
+
+    // The daemon status, seen through TLS + token + relay: the same answer
+    // the local leg gives. The agent adds nothing to the conversation.
+    let status = remote_json(&["daemon"]);
+    assert_eq!(status["daemon"]["name"], "zamind");
+
+    // Register and list through the remote leg.
+    remote_json(&["register", "demo", harness.root.to_str().unwrap()]);
+    let list = remote_json(&["list"]);
+    let servers = list["servers"].as_array().expect("servers array");
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0]["serverId"], "demo");
+
+    // A wrong token is a typed rejection, not a hang.
+    let bad_token_dir = scoped_dir("remote-bad-token");
+    let bad_token_path = bad_token_dir.join("token");
+    std::fs::write(&bad_token_path, "not-the-token").expect("bad token");
+    let output = Command::new(&harness.zamin)
+        .args([
+            "--remote",
+            &remote,
+            "--fingerprint",
+            &fingerprint,
+            "--token-file",
+            bad_token_path.to_str().unwrap(),
+            "--json",
+            "list",
+        ])
+        .output()
+        .expect("zamin runs");
+    assert!(!output.status.success(), "a wrong token must be rejected");
+    let stderr = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stderr.contains("AUTH_REJECTED"),
+        "typed auth rejection, got: {stderr}"
+    );
+
+    // A wrong fingerprint fails the TLS handshake — the pin is the trust.
+    let zeros = "0".repeat(64);
+    let output = Command::new(&harness.zamin)
+        .args([
+            "--remote",
+            &remote,
+            "--fingerprint",
+            &zeros,
+            "--token-file",
+            &token_display,
+            "--json",
+            "list",
+        ])
+        .output()
+        .expect("zamin runs");
+    assert!(
+        !output.status.success(),
+        "a wrong fingerprint must not connect"
+    );
+}

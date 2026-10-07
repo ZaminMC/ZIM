@@ -113,8 +113,20 @@ Implemented for the daemon's first release; the file set is specified now, imple
 - Registry changes ride the `events` stream like any lifecycle event: `server.register` publishes `state_changed` (`unknown → not-running`, `reason:"registered"`) and `server.remove` publishes (`not-running → unknown`, `reason:"removed"`). Clients with an open subscription learn about new and gone servers without polling.
 - `seq` is a u64, monotonic per server per stream, assigned once at ingest.
 - Cursor models: `events` — `seq`-based against a bounded replay ring, older → `{cursorInvalid:true}` and the client re-snapshots. `logs` — `{file, offset}`; the daemon validates file identity (rotation changes identity) and answers `cursorInvalid` rather than serving garbage.
-- `metrics` delivers latest-wins samples; history comes from an explicit range query.
-- All streams are bounded per subscriber; slow consumers receive `{stream, missed:N}` markers.
+- `metrics` delivers latest-wins samples; history comes from the explicit `metrics.range` query:
+
+```json
+→ {"jsonrpc":"2.0","id":12,"method":"metrics.range",
+   "params":{"serverId":"production","maxSamples":120}}
+← {"jsonrpc":"2.0","id":12,"result":{"samples":[
+     {"tsMs":1730803271000,"cpuPercent":12.4,"rssBytes":812000000,"players":3,"uptimeMs":45012},
+     {"tsMs":1730803272000,"cpuPercent":11.9,"rssBytes":812300000,"players":3,"uptimeMs":46012}]}}
+```
+
+  - The daemon samples each live server process at 1 Hz: CPU% (from OS counter deltas — the first sample of a process carries no percent rather than a fake one), RSS, live player count, uptime. `tps` is only ever set when actually measured; the daemon never guesses.
+  - `latest-wins`: a slow metrics subscriber keeps only the newest undelivered sample (no `missed` markers on this stream — a stale sample has no value to catch up to).
+  - `metrics.range` returns the per-server ring, chronological (oldest first), bounded by design (600 samples ≈ 10 minutes at 1 Hz); the ring is the entire stored history — no paging. Unknown server → typed `SERVER_NOT_FOUND`.
+- All streams are bounded per subscriber; slow consumers receive `{stream, missed:N}` markers (except `metrics`, which coalesces as above).
 
 ## 7. Jobs
 

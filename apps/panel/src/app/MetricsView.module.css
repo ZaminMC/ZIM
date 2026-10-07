@@ -1,0 +1,101 @@
+/* Metrics tab: stat row + two chart cards. Surfaces from tokens. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--space-3);
+}
+
+.stat {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.statLabel {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.statValue {
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.chartCard {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  min-width: 0;
+}
+
+.chartHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+}
+
+.chartNow {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+.cpuLine {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.cpuArea {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+  stroke: none;
+}
+
+.rssLine {
+  fill: none;
+  stroke: var(--success);
+  stroke-width: 1.5;
+}
+
+.rssArea {
+  fill: color-mix(in srgb, var(--success) 12%, transparent);
+  stroke: none;
+}
+
+.waiting {
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  padding: var(--space-3) 0;
+}
+
+.note {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}

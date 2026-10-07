@@ -16,6 +16,7 @@ import type { JobOutcomeName } from "../integration/notifications";
 import { logWarn } from "../logger";
 import { useConnection } from "./connection";
 import { transportSpec, useConnections } from "./connections";
+import { forgetMetrics } from "./metrics";
 import { useServers } from "./servers";
 import { useJobs } from "./jobs";
 import { getServer } from "./actions";
@@ -114,6 +115,7 @@ async function wireEvents(): Promise<void> {
       const state = useServers.getState();
       if (event.reason === "removed") {
         state.forget(event.serverId);
+        forgetMetrics(event.serverId);
         return;
       }
       state.applyState(event.serverId, event.to);

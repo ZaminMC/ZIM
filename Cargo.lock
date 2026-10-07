@@ -1422,14 +1422,17 @@ dependencies = [
 name = "zamin-cli"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "clap",
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "uuid",
+ "zamin-agent",
  "zamin-ipc",
  "zamin-protocol",
 ]

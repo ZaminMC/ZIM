@@ -29,6 +29,7 @@ use zamin_protocol::server::{
 };
 use zamin_protocol::streams::{SubscribeParams, UnsubscribeParams};
 
+use crate::audit::{Audit, AUDITED_METHODS};
 use crate::engine::{Engine, EngineError, LifecycleKind};
 
 /// Request-ID dedupe window (protocol spec §3): bounded, TTL'd, a retry
@@ -57,7 +58,7 @@ impl Outbound {
     }
 }
 
-pub async fn serve(connection: Connection, engine: Engine) -> Result<(), String> {
+pub async fn serve(connection: Connection, engine: Engine, audit: Audit) -> Result<(), String> {
     let (mut write_half, mut read_half) = connection.split();
     let (outbound_tx, mut outbound_rx) = mpsc::channel(OUTBOUND_QUEUE);
     let outbound = Outbound { tx: outbound_tx };
@@ -71,7 +72,7 @@ pub async fn serve(connection: Connection, engine: Engine) -> Result<(), String>
         }
     });
 
-    let result = session_loop(&mut read_half, &outbound, &engine).await;
+    let result = session_loop(&mut read_half, &outbound, &engine, &audit).await;
 
     // Closing the outbound queue ends the writer task.
     drop(outbound);
@@ -84,8 +85,12 @@ async fn session_loop(
     read_half: &mut zamin_ipc::ConnectionReadHalf,
     outbound: &Outbound,
     engine: &Engine,
+    audit: &Audit,
 ) -> Result<(), String> {
     let mut hello_done = false;
+    // The hello's ClientInfo: the audit's honest actor field (ADR-0011 —
+    // the agent gates remote identities before the daemon sees them).
+    let mut client_info: Option<(String, String)> = None;
     let cache = RequestCache::default();
     let mut live_subscriptions: Vec<String> = Vec::new();
 
@@ -139,8 +144,20 @@ async fn session_loop(
 
         if !hello_done {
             hello_done = match handle_hello(&request, outbound).await {
-                Ok(()) => true,
+                Ok(info) => {
+                    client_info = Some(info);
+                    audit.record(
+                        &request.method,
+                        None,
+                        "ok",
+                        client_info
+                            .as_ref()
+                            .map(|(name, version)| (name.as_str(), version.as_str())),
+                    );
+                    true
+                }
                 Err(response) => {
+                    audit.record(&request.method, None, "rejected", None);
                     outbound.reply(response).await;
                     break Err("handshake failed".to_owned());
                 }
@@ -176,6 +193,29 @@ async fn session_loop(
         }
 
         let response = dispatch(&request, engine).await;
+        if AUDITED_METHODS.contains(&request.method.as_str()) {
+            let outcome = match &response.error {
+                Some(error) => error.code.as_str(),
+                None => "ok",
+            };
+            let params = request.parse_params::<serde_json::Value>().ok();
+            let server_id = params
+                .as_ref()
+                .and_then(|v| v["serverId"].as_str())
+                .map(str::to_owned);
+            let detail = params
+                .as_ref()
+                .and_then(|v| v["jobId"].as_str())
+                .map(str::to_owned);
+            audit.record(
+                &request.method,
+                server_id.as_deref().or(detail.as_deref()),
+                outcome,
+                client_info
+                    .as_ref()
+                    .map(|(name, version)| (name.as_str(), version.as_str())),
+            );
+        }
         if let (Some(key), Some(result)) = (request_key, response.result.clone()) {
             cache.remember(key, result);
         }
@@ -189,9 +229,12 @@ async fn session_loop(
 }
 
 /// Mandatory first exchange (protocol spec §2). Anything else before it is
-/// a hard, actionable error.
+/// a hard, actionable error. Returns the client identity for the audit log.
 #[allow(clippy::result_large_err)] // response envelopes are written once, to the wire
-async fn handle_hello(request: &Request, outbound: &Outbound) -> Result<(), Response> {
+async fn handle_hello(
+    request: &Request,
+    outbound: &Outbound,
+) -> Result<(String, String), Response> {
     if request.method != methods::DAEMON_HELLO {
         return Err(Response::err(
             request.id.clone(),
@@ -247,6 +290,7 @@ async fn handle_hello(request: &Request, outbound: &Outbound) -> Result<(), Resp
         version = %params.client.version,
         "client connected"
     );
+    let identity = (params.client.name.clone(), params.client.version.clone());
     let payload = match serde_json::to_value(result) {
         Ok(payload) => payload,
         Err(e) => {
@@ -262,7 +306,7 @@ async fn handle_hello(request: &Request, outbound: &Outbound) -> Result<(), Resp
     outbound
         .reply(Response::ok(request.id.clone(), payload))
         .await;
-    Ok(())
+    Ok(identity)
 }
 
 #[allow(clippy::result_large_err)] // response envelopes are written once, to the wire
@@ -552,6 +596,25 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                         .log_range(&server_id, max_lines, params.before_offset)
                         .await
                     {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::METRICS_RANGE => {
+            let params: zamin_protocol::metrics::MetricsRangeParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    let max = params
+                        .max_samples
+                        .unwrap_or(120)
+                        .clamp(1, zamin_protocol::metrics::METRICS_RANGE_MAX_SAMPLES);
+                    match engine.metrics_range(&server_id, max) {
                         Ok(result) => json_ok(id, result),
                         Err(e) => dispatch_error(id, e),
                     }

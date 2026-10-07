@@ -39,6 +39,9 @@ pub const STREAMS_NOTIFICATION: &str = "streams.notification";
 
 pub const LOGS_RANGE: &str = "logs.range";
 
+// Metrics history (protocol spec §6, ADR-0006).
+pub const METRICS_RANGE: &str = "metrics.range";
+
 pub const PLAYERS_LIST: &str = "players.list";
 
 // Specified in v0, implemented with the file manager (protocol spec §8).

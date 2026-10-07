@@ -17,6 +17,7 @@ path = "src/lib.rs"
 [dependencies]
 zamin-protocol = { path = "../zamin-protocol" }
 zamin-ipc = { path = "../zamin-ipc" }
+zamin-agent = { path = "../zamin-agent" }
 tokio = { workspace = true, features = ["io-std"] }
 bytes = { workspace = true }
 serde = { workspace = true }
@@ -38,6 +39,8 @@ clap = { version = "4", default-features = false, features = [
 [dev-dependencies]
 bytes = { workspace = true }
 serde = { workspace = true }
+base64 = { workspace = true }
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

@@ -7,6 +7,7 @@
 mod render;
 
 use std::io::Write as _;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use tokio::io::AsyncBufReadExt as _;
 
@@ -32,6 +33,26 @@ struct Cli {
     /// Defaults to the per-user endpoint zamind listens on.
     #[arg(long, global = true, value_name = "SOCKET_OR_PIPE")]
     endpoint: Option<String>,
+
+    /// Operate a remote box: connect to its agent (host:port) over TLS
+    /// instead of the local daemon. Requires --token-file, and
+    /// --fingerprint (recommended) or --insecure-skip-verify (explicit).
+    #[arg(long, global = true, value_name = "ADDR")]
+    remote: Option<String>,
+
+    /// The agent's certificate fingerprint (SHA-256 hex, printed at agent
+    /// startup). Pins TLS: the connection proves it talks to THAT agent.
+    #[arg(long, global = true, value_name = "HEX")]
+    fingerprint: Option<String>,
+
+    /// File holding the agent's token (0600, written at agent bootstrap).
+    #[arg(long, global = true, value_name = "PATH")]
+    token_file: Option<PathBuf>,
+
+    /// Accept any TLS certificate. Encryption stays on, but no server
+    /// identity is proven and the token can then be stolen by a MITM.
+    #[arg(long, global = true)]
+    insecure_skip_verify: bool,
 
     /// Machine-readable output: pretty JSON of the raw protocol result.
     /// Errors print the protocol error object and exit 1.
@@ -185,6 +206,54 @@ impl From<ClientError> for Failure {
 
 type CmdResult = Result<(), Failure>;
 
+/// Build the remote connection: read the token file, decide trust, connect
+/// through the agent. Fingerprint pinning is the default posture; skipping
+/// verification is allowed but loudly announced.
+async fn connect_remote(cli: &Cli, addr: String) -> Result<Client, Failure> {
+    let trust = if let Some(hex) = &cli.fingerprint {
+        zamin_agent::client::Trust::Fingerprint(hex.clone())
+    } else if cli.insecure_skip_verify {
+        eprintln!(
+            "WARNING: --insecure-skip-verify is on: the agent's certificate is NOT \
+             pinned, so this connection proves no server identity. Use --fingerprint."
+        );
+        zamin_agent::client::Trust::InsecureSkipVerify
+    } else {
+        return Err(Failure::error(
+            "--remote needs --fingerprint (the hex the agent printed at startup), \
+             or an explicit --insecure-skip-verify."
+                .to_owned(),
+        ));
+    };
+
+    let token_path = cli.token_file.clone().ok_or_else(|| {
+        Failure::error(
+            "--remote needs --token-file (the 0600 token file written at agent bootstrap)"
+                .to_owned(),
+        )
+    })?;
+    let token = std::fs::read_to_string(&token_path)
+        .map_err(|error| {
+            Failure::error(format!(
+                "cannot read token file {}: {error}",
+                token_path.display()
+            ))
+        })?
+        .trim()
+        .to_owned();
+    if token.is_empty() {
+        return Err(Failure::error(format!(
+            "token file {} is empty",
+            token_path.display()
+        )));
+    }
+
+    let cfg = zamin_agent::client::RemoteConnect { addr, token, trust };
+    Client::connect_remote(cfg)
+        .await
+        .map_err(|error| connect_failure(error, &None))
+}
+
 /// Connect-time failures get the endpoint-aware human message; protocol
 /// errors (a rejected handshake) keep their verbatim error object.
 fn connect_failure(error: ClientError, endpoint_arg: &Option<String>) -> Failure {
@@ -208,14 +277,18 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         return confirm_removal(server_id);
     }
 
-    let endpoint = match &cli.endpoint {
-        Some(value) => Endpoint::from_daemon_arg(value),
-        None => Endpoint::default_endpoint(),
+    let client = match &cli.remote {
+        Some(addr) => connect_remote(&cli, addr.clone()).await?,
+        None => {
+            let endpoint = match &cli.endpoint {
+                Some(value) => Endpoint::from_daemon_arg(value),
+                None => Endpoint::default_endpoint(),
+            };
+            Client::connect(endpoint)
+                .await
+                .map_err(|error| connect_failure(error, &cli.endpoint))?
+        }
     };
-
-    let client = Client::connect(endpoint)
-        .await
-        .map_err(|error| connect_failure(error, &cli.endpoint))?;
 
     match &cli.command {
         Commands::List => list(&cli, &client).await,

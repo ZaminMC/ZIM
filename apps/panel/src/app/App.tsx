@@ -4,7 +4,7 @@
 // area is either the Overview dashboard or one server's workspace.
 // Ctrl/Cmd+K remains the keyboard surface for the §53 journey.
 
-import { useEffect, useMemo } from "react";
+import { Suspense, lazy, useEffect, useMemo } from "react";
 import { useConnection } from "../state/connection";
 import { activeProfile, useConnections } from "../state/connections";
 import { useServers } from "../state/servers";
@@ -13,13 +13,21 @@ import { startWire } from "../state/wire";
 import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/StatusDot";
 import { IconDashboard, IconPlus, IconServer, IconSparkles } from "../ui/icons";
-import { ConnectionsModal } from "./ConnectionsModal";
 import { Dashboard } from "./Dashboard";
-import { NewServerModal } from "./NewServerModal";
-import { Palette } from "./Palette";
 import { ServerView } from "./ServerView";
 import styles from "./App.module.css";
 import listStyles from "./ServerList.module.css";
+
+// Modals are operator-invoked overlays, not boot surfaces: each loads on
+// first open so the cold start ships only the shell + dashboard
+// (PERFORMANCE-BUDGETS: cold start → interactive).
+const ConnectionsModal = lazy(() =>
+  import("./ConnectionsModal").then((m) => ({ default: m.ConnectionsModal })),
+);
+const NewServerModal = lazy(() =>
+  import("./NewServerModal").then((m) => ({ default: m.NewServerModal })),
+);
+const Palette = lazy(() => import("./Palette").then((m) => ({ default: m.Palette })));
 
 export function App() {
   useEffect(() => {
@@ -180,9 +188,11 @@ export function App() {
         )}
       </main>
 
-      {newServerOpen ? <NewServerModal /> : null}
-      {paletteOpen ? <Palette /> : null}
-      <ConnectionsModal />
+      <Suspense fallback={null}>
+        {newServerOpen ? <NewServerModal /> : null}
+        {paletteOpen ? <Palette /> : null}
+        <ConnectionsModal />
+      </Suspense>
     </div>
   );
 }

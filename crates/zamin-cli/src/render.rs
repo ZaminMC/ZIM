@@ -137,6 +137,9 @@ pub fn connection_error(error: &ClientError, endpoint_arg: &Option<String>) -> S
         ClientError::Timeout(_) => format!(
             "zamin: the daemon at {at} did not answer in time.\n  It may be wedged; retry, then restart it if this persists."
         ),
+        ClientError::Remote(detail) => format!(
+            "zamin: could not reach the agent at {at}.\n  {detail}\n  Check the agent is running there, the fingerprint matches what it printed at startup, and the token file is current."
+        ),
         _ => format!("zamin: {error}"),
     };
     text
