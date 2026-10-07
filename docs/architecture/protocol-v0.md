@@ -66,7 +66,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.create` (Phase 6: download, stamp, and register a fresh server — §7b), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream) |
 | `catalog` (Phase 6) | `catalog.list`, `catalog.versions`, `catalog.builds` (§7b) |
 | `java` (Phase 6) | `java.list`, `java.install` (§7c) |
-| `plugins` (§7d) | `plugins.search`, `plugins.versions`, `plugins.installed`, `plugins.install` (a job), `plugins.delete` |
+| `plugins` (§7d) | `plugins.search`, `plugins.versions`, `plugins.installed`, `plugins.install` (a job), `plugins.delete`, `plugins.updates` |
 | `jobs` | `jobs.list`, `jobs.get`, `jobs.cancel` |
 | `backups` (Phase 5) | `backup.create`, `backup.restore`, `backups.list` |
 | `files` (Phase 4) | `files.list`, `files.read`, `files.write`, `files.mkdir`, `files.rename`, `files.delete`, `files.chunks` semantics below |
@@ -175,6 +175,7 @@ The catalog is **data**, not an abstraction (ARCH-REVIEW §17.4/§17.8): the dae
 - `plugins.installed {serverId}` → `{target, entries: [{fileName, sizeBytes, modifiedMs, symlinkOutside}]}` — the directory **is** the inventory; the daemon keeps no plugin state beyond the files. A symlink leaving the server root is listed (the operator should know) and flagged `symlinkOutside`.
 - `plugins.delete {serverId, fileName}` — the wire's filename is a suggestion: it passes the sanitizer (no separators, no control bytes, no Windows reserved names, 255-byte cap) and the rooted filesystem's checks before the disk sees it. A unit result (`EmptyResult`).
 
+- `plugins.updates {serverId}` → `{target, entries: [{fileName, status, projectId?, installedVersion?, latestVersion?, latestVersionId?}]}` — the update check (ADR-0012's update rule, read side). Each jar in the target directory is identified by its own sha512 — the disk's bytes answer "what is this jar?" with no shadow state — and the catalog is asked, fresh, which version carries those bytes and what it now publishes for that project. `status` is one of `up-to-date` (the digest matches the newest installable version's published digest), `update-available` (a newer or different-loader installable version exists; the entry carries the full recipe — `projectId`, both version numbers, and the `latestVersionId` pin that applies the update through `plugins.install` with `replace`), or `unmanaged` (the catalog has no file with these bytes, or knows them but publishes nothing installable for this server's loader family — the honest "no update button", with whatever story the catalog did supply). Entries sort by file name. A direct request, the same trade as `plugins.search`: jars are few, round trips are two per recognized file. A missing directory answers an empty report.
 ## 8. Files
 
 - Paths in every `files.*` call are **server-root-relative**, POSIX-style (`plugins/EssentialsX.jar`). `..` and absolute paths are rejected (`FS_PATH_ESCAPES_ROOT`) — the rooted filesystem (ADR-0009) is the only filesystem. Symlinks that resolve outside the root are listed (with `symlinkOutside: true`) but every operation on them is denied.

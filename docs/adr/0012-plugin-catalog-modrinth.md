@@ -45,8 +45,18 @@ The original decision deferred the overwrite discipline "until real demand". The
 
 The genuinely different-file update (a version bump that publishes a new jar name) is two ordinary installs plus a delete — the daemon cannot and should not map jar names to projects (the directory is the inventory), so composing those verbs stays client-side, where the version list already carries the file names.
 
+### The update check (added 2026-10-07, the rule's read side)
+
+The overwrite rule made *applying* an update one explicit step; *noticing* one still meant the operator eyeballing Modrinth by hand — the last manual jar handling in the story. The update check (`plugins.updates`) closes it without revisiting a single rule above. It never invents state to remember which project a jar came from: each jar's own sha512 identifies it (the disk's checksum decides, exactly as the overwrite rule words it), Modrinth's version-from-hash endpoint answers which version carries those bytes, and the project's version list — filtered by the same loader rule the install path uses — decides the verdict:
+
+- `up-to-date` — the digest matches the newest installable version's published digest. Nothing else is claimed: a project may publish newer versions for other loader families and the server's directory still hears "up to date".
+- `update-available` — a newer (or different-loader) installable version exists. The entry carries the full recipe (`projectId`, both version numbers, the `latestVersionId` pin), so applying it is the overwrite rule's own flow — `plugins.install` with the pin and `replace` — through the CLI, the panel, or any third client. A foreign-family jar (say, a fabric build copied into a paper server) reads `update-available` on purpose: the update *is* the fix, replacing the wrong-family bytes with the proper ones.
+- `unmanaged` — the catalog has no file with these bytes (a jar dropped in by hand), or it knows the bytes but publishes nothing installable for this loader family. The operator action is "none through the panel", said plainly instead of inventing a version to click.
+
+The check is an explicit request, not a startup obligation or a background poll: it costs the operator one round trip per recognized jar, network access stays a user decision (the same trade `plugins.search` made on day one), and a server whose target directory does not exist yet answers an empty report.
+
 ## Consequences
 
 - The panel gains a Plugins tab per workspace: search, install (with live progress), installed list, delete. No plugin state lives in the daemon beyond the files themselves — the file system is the inventory.
-- Update flows are installs with the target already present; the overwrite rule is landed — see "The overwrite rule" above: identical bytes short-circuit, different bytes answer `PLUGIN_EXISTS` and land only behind the explicit `replace`.
+- Update flows are installs with the target already present; the overwrite rule is landed — see "The overwrite rule" above: identical bytes short-circuit, different bytes answer `PLUGIN_EXISTS` and land only behind the explicit `replace`. The update check (`plugins.updates`) tells the operator which rows want that flow; the verdicts are computed from the disk's bytes on demand, never stored.
 - A second catalog (CurseForge, Hangar) earns its place as another client behind the same engine methods; the protocol's `plugins.*` surface does not change.
