@@ -108,6 +108,19 @@ of downtime is not a firing storm at boot. `lastFiredMs` on the record is
 the clock's only memory; the panel's Schedules tab and
 `zamin schedules list/add/pause/resume/remove` are the two ways to author it.
 
+## Players
+
+The Players tab asks the server itself — Server List Ping plus the log's
+join/leave roster, no plugins required. Selecting a name opens the
+moderation cluster: **kick**, **op**, **deop**, **whitelist add**, and
+**ban** (the lasting verb confirms first). There is deliberately no
+moderation protocol: the panel composes ordinary console lines over the
+same stdin path the Console uses, so the server executes, the answer
+lands in the log, and events, jobs, and the audit tell the same story
+they tell for a typed command. The composer guards the vanilla username
+charset, verbs disable while the server is not running, and the notes
+never claim an outcome they cannot know.
+
 ## Development loop
 
 ```
