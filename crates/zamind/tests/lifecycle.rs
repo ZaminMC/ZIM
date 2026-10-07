@@ -853,10 +853,30 @@ async fn players_list_pings_the_running_server() {
         .expect("start accepted");
     wait_list_state(&mut client, "test", "running", Duration::from_secs(30)).await;
 
-    let result = client
-        .request(methods::PLAYERS_LIST, json!({"serverId": "test"}))
-        .await
-        .expect("players ping");
+    // A running fake server answers the ping — the fake binds its port
+    // before its first stdout line, so "running" already implies listening.
+    // Under extreme machine load a single attempt can still burn the
+    // daemon's whole PING_TIMEOUT (5 s) and surface as an honest empty
+    // room; the semantics under test are "a live server answers", so a
+    // few attempts are fair. A dead port never starts answering, and the
+    // stopped-server assertion below stays strict.
+    let mut result = None;
+    for attempt in 0..3 {
+        let attempt_result = client
+            .request(methods::PLAYERS_LIST, json!({"serverId": "test"}))
+            .await
+            .expect("players ping");
+        if attempt_result["online"].as_u64() == Some(1) {
+            result = Some(attempt_result);
+            break;
+        }
+        assert!(
+            attempt + 1 < 3,
+            "running server never answered the ping: {attempt_result}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let result = result.unwrap();
     assert_eq!(result["source"], "ping");
     assert_eq!(result["online"], 1);
     assert_eq!(result["max"], 20);

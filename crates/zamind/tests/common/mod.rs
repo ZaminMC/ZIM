@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -93,6 +94,14 @@ pub fn write_server_config(data_dir: &Path, server_id: &str, settings_toml: &str
 pub struct Client {
     pub connection: Connection,
     pub next_id: u64,
+    /// Event-stream notifications that arrived while a request's response
+    /// was being awaited. Notifications and responses share one
+    /// connection, and the daemon publishes a state transition in the
+    /// same actor step that answers the request — so an event can legally
+    /// race the very reply it caused (the kill path did exactly that).
+    /// They are queued here in arrival order and replayed by
+    /// `recv_notification`, never dropped.
+    inbox: VecDeque<Value>,
 }
 
 impl Client {
@@ -125,9 +134,32 @@ impl Client {
                         (None, None) => panic!("response without result or error"),
                     };
                 }
-                Some(IncomingMessage::Notification(_)) => continue, // streams
+                Some(IncomingMessage::Notification(_)) => self.inbox.push_back(value),
                 _ => panic!("unexpected message shape: {value}"),
             }
+        }
+    }
+
+    /// Next event-stream notification: the inbox first (events that raced
+    /// a response inside `request`), then the live connection. Responses
+    /// have no business here — every request awaits its own reply.
+    pub async fn recv_notification(&mut self) -> Value {
+        if let Some(value) = self.inbox.pop_front() {
+            return value;
+        }
+        let frame = self
+            .connection
+            .recv()
+            .await
+            .expect("recv")
+            .expect("connection open");
+        let value: Value = serde_json::from_slice(&frame).unwrap();
+        match IncomingMessage::parse(&value) {
+            Some(IncomingMessage::Notification(_)) => value,
+            Some(IncomingMessage::Response(_)) => {
+                panic!("unsolicited response while awaiting a notification: {value}")
+            }
+            _ => panic!("unexpected message shape: {value}"),
         }
     }
 }
@@ -195,6 +227,7 @@ pub async fn connect_daemon(endpoint: &zamin_ipc::Endpoint) -> Client {
                 let mut client = Client {
                     connection,
                     next_id: 0,
+                    inbox: VecDeque::new(),
                 };
                 let hello = client
                     .request(
@@ -259,13 +292,14 @@ pub async fn wait_for_state(
     timeout: Duration,
 ) -> Option<Value> {
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        let frame = tokio::time::timeout(timeout, client.connection.recv())
-            .await
-            .expect("recv within timeout")
-            .expect("open")
-            .expect("frame");
-        let value: Value = serde_json::from_slice(&frame).unwrap();
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        // Each recv is bounded by the time the whole wait has left, so the
+        // deadline is honest: a wait for 10 s fails at 10 s, and the
+        // caller's expect names the state that never came.
+        let value = match tokio::time::timeout(remaining, client.recv_notification()).await {
+            Ok(value) => value,
+            Err(_) => break,
+        };
         let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
             continue;
         };
@@ -291,12 +325,11 @@ pub async fn poll_logs(
     matches: impl Fn(&str) -> bool,
 ) -> bool {
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        let frame = match tokio::time::timeout(timeout, client.connection.recv()).await {
-            Ok(Ok(Some(frame))) => frame,
-            _ => return false,
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        let value = match tokio::time::timeout(remaining, client.recv_notification()).await {
+            Ok(value) => value,
+            Err(_) => break,
         };
-        let value: Value = serde_json::from_slice(&frame).unwrap();
         let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
             continue;
         };
