@@ -183,9 +183,21 @@ Closed tabs land in a bounded most-recent-first memory; Ctrl+Shift+T (or
 the menu) reopens them. A view that throws crashes into a recoverable
 "This tab crashed" page — the strip and the other tabs never notice, and
 the recovery verb is reload, which still never touches the server
-process. The §48 context menu carries the verbs with real machinery and
-keeps the rest honest: Mute, Move to new window, Share with Dutchmen,
-and the vertical strip are named rooms, not fakes.
+process. Tabs drag ([ADR-0018](docs/adr/0018-window-machinery-and-drag-reorder.md)):
+an accent edge shows where the drop lands, the pinned head clamps both
+ways, and dragging out of a group leaves it — the same honest verb the
+menu carries.
+
+And the panel is a multi-window browser
+([ADR-0018](docs/adr/0018-window-machinery-and-drag-reorder.md)):
+**Move tab to new window** (§50) hands the tab to a second ZaminPanel
+window through a claimed-once handoff slot — a move, not a close; the
+server behind it stays daemon-owned and untouched, because a UI window
+is only a client. Every window owns its strip under its own storage
+key, so windows coexist without clobbering each other; a blocked popup
+brings the tab home instead of swallowing it. The §48 context menu
+still keeps the remaining rooms honest: Mute, Share with Dutchmen, and
+the vertical strip are named reservations, not fakes.
 
 ## Development loop
 

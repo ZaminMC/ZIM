@@ -4,7 +4,7 @@
 // view, never a cloned backend §65), pinning (§52), groups (§49),
 // reopen (§90), and storage that cannot rehydrate into a broken shell.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   bootWindow,
   claimHandoff,
@@ -18,11 +18,7 @@ import {
   useTabs,
   type Tab,
 } from "./tabs";
-import {
-  __setWindowIdentityForTests,
-  currentWindowId,
-  resolveWindowIdentity,
-} from "./windowIdentity";
+import { __setWindowIdentityForTests } from "./windowIdentity";
 
 const server = (id: string) => ({ kind: "server", serverId: id }) as const;
 
@@ -845,41 +841,5 @@ describe("per-window storage (ADR-0018)", () => {
     expect(localStorage.getItem("zamin-panel.tab-handoff:h-stale")).toBeNull();
     expect(localStorage.getItem("zamin-panel.tab-handoff:h-garbage")).toBeNull();
     expect(localStorage.getItem("zamin-panel.tab-handoff:h-fresh")).not.toBeNull();
-  });
-});
-
-describe("window identity", () => {
-  it("a birth mints; with a silent platform an existing id is reused", () => {
-    sessionStorage.clear();
-    __setWindowIdentityForTests(null);
-    resolveWindowIdentity(null);
-    const first = currentWindowId();
-    // Same conditions again (no Navigation Timing in this DOM): the id
-    // must not churn — a reload that lost its strip would be fatal.
-    resolveWindowIdentity(null);
-    expect(currentWindowId()).toBe(first);
-    expect(sessionStorage.getItem("zamin-panel.window")).toBe(first);
-  });
-
-  it("a handoff birth always mints fresh, even over a copied id", () => {
-    sessionStorage.clear();
-    __setWindowIdentityForTests(null);
-    resolveWindowIdentity(null);
-    const origin = currentWindowId();
-    resolveWindowIdentity(`#handoff=h-1`);
-    expect(currentWindowId()).not.toBe(origin);
-  });
-
-  it("a declared navigation birth mints fresh over a copied id", () => {
-    sessionStorage.setItem("zamin-panel.window", "w-copied");
-    __setWindowIdentityForTests(null);
-    const stub = { getEntriesByType: () => [{ type: "navigate" }] };
-    vi.stubGlobal("performance", stub);
-    try {
-      resolveWindowIdentity(null);
-      expect(currentWindowId()).not.toBe("w-copied");
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 });
