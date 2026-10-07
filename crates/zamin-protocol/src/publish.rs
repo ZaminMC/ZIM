@@ -344,7 +344,7 @@ pub struct ProvidersListResult {
 
 /// A publish job failed the security gate. The context carries the
 /// blocking count and each blocking file (kind included, secrets never).
-pub fn secrets_detected_error(blocking: &[SecretFinding]) -> ProtocolError {
+pub fn secrets_detected_error(blocking: &[&SecretFinding]) -> ProtocolError {
     let files: Vec<String> = blocking
         .iter()
         .map(|f| format!("{} ({})", f.file, f.kind))

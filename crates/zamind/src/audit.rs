@@ -44,6 +44,9 @@ pub const AUDITED_METHODS: &[&str] = &[
     zamin_protocol::methods::SCHEDULES_CREATE,
     zamin_protocol::methods::SCHEDULES_UPDATE,
     zamin_protocol::methods::SCHEDULES_DELETE,
+    zamin_protocol::methods::PUBLISH_CONFIG_SET,
+    zamin_protocol::methods::PUBLISH_EXECUTE,
+    zamin_protocol::methods::PUBLISH_REVIEW_SET,
 ];
 
 #[derive(Clone)]

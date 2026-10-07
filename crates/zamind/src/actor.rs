@@ -1309,6 +1309,31 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             ErrorCode::InternalError,
             format!("The schedule store at {path:?} is corrupt: {reason}."),
         ),
+        E::InvalidPublishConfig { reason } => ProtocolError::new(
+            ErrorCode::ProtocolInvalidRequest,
+            format!("The publish configuration is invalid: {reason}."),
+        ),
+        E::PublishStateCorrupt { path, reason } => ProtocolError::new(
+            ErrorCode::InternalError,
+            format!("The publish state at {path:?} is corrupt: {reason}."),
+        ),
+        E::PublishTooLarge {
+            found,
+            entries,
+            max_bytes,
+            max_entries,
+        } => ProtocolError::new(
+            ErrorCode::PublishSelectionTooLarge,
+            format!(
+                "The publish selection exceeds the safety limits: {found} across {entries} entries; \
+                 the limits are {max_bytes} bytes and {max_entries} entries."
+            ),
+        ),
+        E::PublishUpload { provider, reason } => ProtocolError::new(
+            ErrorCode::PublishUploadFailed,
+            format!("The {provider} upload failed: {reason}."),
+        )
+        .with_remediation(&["retry_later", "check_provider_settings"]),
         E::ChecksumMismatch {
             path,
             algorithm,

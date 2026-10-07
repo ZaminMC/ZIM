@@ -12,6 +12,7 @@ use zamin_core::server::marker;
 use zamin_core::server::registry::Registry;
 use zamin_core::server::ServerId;
 use zamin_protocol::error::{ErrorCode, ProtocolError};
+use zamin_protocol::publish::PublishConfig;
 use zamin_protocol::server::{LifecycleResult, ServerDetails, ServerState, ServerSummary};
 use zamin_protocol::streams::{EventsSnapshot, StreamCursor, StreamKind, SubscribeResult};
 
@@ -49,6 +50,8 @@ struct Inner {
     /// tiny and the operations rare; one daemon-wide lock keeps each
     /// whole (no await is ever held across it).
     schedules_io: Mutex<()>,
+    /// Same story for the publish dir's JSON stores (config, reviews).
+    publish_io: Mutex<()>,
     /// The daemon's boot instant: interval schedules re-anchor here, so
     /// downtime never stacks up firings (ADR-0014).
     boot_ms: i64,
@@ -102,6 +105,7 @@ impl Engine {
                 fabric_url,
                 java_cache: Mutex::new(HashMap::new()),
                 schedules_io: Mutex::new(()),
+                publish_io: Mutex::new(()),
                 boot_ms: now_ms_unix(),
             }),
         }
@@ -2230,6 +2234,600 @@ impl Engine {
         .unwrap_or(false) // unregistered mid-flight: nothing to remember
     }
 
+    // ---- Publish (founder §40–47, §74, ADR-0017) --------------------
+    //
+    // The publish dir lives under the server's daemon metadata, never
+    // inside the server root: the record describes the published tree,
+    // so it must not be able to publish itself. Layout:
+    //   <data>/servers/<id>/publish/{config.json, publication.json,
+    //                                 scan-reviews.json, package.zip}
+    //
+    // The AI changelog room (§43) stays empty by standing scope: the
+    // changelog is an operator-edited string everywhere below.
+
+    fn publish_dir(&self, server_id: &str) -> PathBuf {
+        server_dir(&self.inner.data_dir, server_id).join("publish")
+    }
+
+    fn publish_io_lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .publish_io
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub fn publish_providers_list(&self) -> zamin_protocol::publish::ProvidersListResult {
+        zamin_protocol::publish::ProvidersListResult {
+            providers: zamin_core::publish::provider::all_providers()
+                .into_iter()
+                .map(|p| zamin_protocol::publish::ProviderInfo {
+                    id: p.id().to_owned(),
+                    display_name: p.display_name().to_owned(),
+                    needs_credential: p.needs_credential(),
+                    credential_env_var: if p.needs_credential() {
+                        p.credential_env_var()
+                    } else {
+                        None
+                    },
+                    settings: p.settings(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Load the per-server publish config. Absent = the honest defaults
+    /// (nothing selected, the archive provider); corrupt = a loud typed
+    /// error, never a silent reset.
+    fn publish_config_load(&self, server_id: &ServerId) -> Result<PublishConfig, EngineError> {
+        if self.registry_lock().get(server_id).is_none() {
+            return Err(EngineError::Protocol(not_found(server_id)));
+        }
+        let path = self.publish_dir(server_id.as_str()).join("config.json");
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(PublishConfig::default())
+            }
+            Err(source) => {
+                return Err(EngineError::Protocol(to_protocol(
+                    &zamin_core::error::CoreError::Io { path, source },
+                )))
+            }
+        };
+        serde_json::from_slice(&bytes).map_err(|e| {
+            EngineError::Protocol(ProtocolError::new(
+                ErrorCode::InternalError,
+                format!("The publish config at {path:?} is corrupt: {e}."),
+            ))
+        })
+    }
+
+    fn publish_config_save(
+        &self,
+        server_id: &ServerId,
+        config: &PublishConfig,
+    ) -> Result<(), EngineError> {
+        let path = self.publish_dir(server_id.as_str()).join("config.json");
+        let bytes = serde_json::to_vec_pretty(config)
+            .map_err(|e| internal(&format!("publish config serialize: {e}")))?;
+        let _io = self.publish_io_lock();
+        zamin_core::fsops::atomic_write(&path, &bytes)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))
+    }
+
+    /// The edge validation every write and execute passes: selection
+    /// rules well-formed, the provider known, its settings accepted.
+    fn validate_publish_config(
+        config: &PublishConfig,
+    ) -> Result<&'static dyn zamin_core::publish::provider::PublishProvider, EngineError> {
+        zamin_core::publish::selection::validate_selection(&config.selection)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let provider =
+            zamin_core::publish::provider::provider_by_id(&config.provider_id).ok_or_else(
+                || {
+                    EngineError::Protocol(ProtocolError::new(
+                        ErrorCode::ProtocolInvalidRequest,
+                        format!(
+                            "The publish provider {:?} is unknown; publish.providers.list names the choices.",
+                            config.provider_id
+                        ),
+                    ))
+                },
+            )?;
+        provider
+            .validate_settings(&config.provider_settings)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        Ok(provider)
+    }
+
+    pub async fn publish_config_get(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<PublishConfig, EngineError> {
+        self.publish_config_load(server_id)
+    }
+
+    pub async fn publish_config_set(
+        &self,
+        server_id: &ServerId,
+        config: &PublishConfig,
+    ) -> Result<PublishConfig, EngineError> {
+        Self::validate_publish_config(config)?;
+        self.publish_config_save(server_id, config)?;
+        Ok(config.clone())
+    }
+
+    pub async fn publish_preview(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::publish::PublishPreviewResult, EngineError> {
+        use zamin_core::publish::state::{load_publication, load_reviews, PublicationFile};
+        let root = self.file_root(server_id)?;
+        let config = self.publish_config_load(server_id)?;
+        let publish_dir = self.publish_dir(server_id.as_str());
+        let record = load_publication(&publish_dir.join("publication.json"))
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let (previous, last_publication) = match &record {
+            Some(r) => (
+                r.files.clone(),
+                Some(zamin_protocol::publish::PublicationSummary {
+                    published_at_ms: r.published_at_ms,
+                    version: r.version.clone(),
+                    provider_id: r.provider_id.clone(),
+                    package_sha512: r.package_sha512.clone(),
+                    package_bytes: r.package_bytes,
+                    file_count: r.files.len() as u64,
+                }),
+            ),
+            None => (std::collections::BTreeMap::new(), None),
+        };
+        let running = self.describe_state(server_id).await == ServerState::Running;
+
+        let selection = config.selection.clone();
+        let work = tokio::task::spawn_blocking(
+            move || -> Result<
+                (
+                    Vec<zamin_protocol::publish::FileDiffEntry>,
+                    zamin_protocol::publish::DiffCounts,
+                    zamin_protocol::publish::ScanReport,
+                    u64,
+                    u64,
+                ),
+                zamin_core::error::CoreError,
+            > {
+                let resolved = zamin_core::publish::selection::resolve_selection(
+                    &root,
+                    &selection,
+                    Default::default(),
+                )?;
+                let selected_files = resolved.len() as u64;
+                let selected_bytes = resolved.values().map(|f| f.size).sum();
+                let previous: std::collections::BTreeMap<String, PublicationFile> = previous;
+                let (files, counts) =
+                    zamin_core::publish::diff::diff_publication(&previous, &resolved);
+                let reviews = load_reviews(&publish_dir.join("scan-reviews.json"))?;
+                let scan = zamin_core::publish::secrets::scan(
+                    &resolved,
+                    &zamin_core::publish::secrets::ScanContext {
+                        discord_srv_active: discord_srv_loaded(&root, running),
+                    },
+                    &reviews,
+                );
+                Ok((files, counts, scan, selected_files, selected_bytes))
+            },
+        )
+        .await
+        .map_err(|e| internal(&format!("publish preview task failed: {e}")))?
+        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+
+        let (files, counts, scan, selected_files, selected_bytes) = work;
+        let blocking_count = zamin_core::publish::secrets::blocking(&scan).len() as u64;
+        Ok(zamin_protocol::publish::PublishPreviewResult {
+            server_id: server_id.to_string(),
+            config,
+            files,
+            counts,
+            scan,
+            blocking_count,
+            selected_files,
+            selected_bytes,
+            last_publication,
+        })
+    }
+
+    pub async fn publish_state(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::publish::PublishStateResult, EngineError> {
+        use zamin_core::publish::state::load_publication;
+        let _registered = self.file_root(server_id)?;
+        let publish_dir = self.publish_dir(server_id.as_str());
+        let record = load_publication(&publish_dir.join("publication.json"))
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let (last_publication, receipt) = match record {
+            Some(r) => (
+                Some(zamin_protocol::publish::PublicationSummary {
+                    published_at_ms: r.published_at_ms,
+                    version: r.version.clone(),
+                    provider_id: r.provider_id.clone(),
+                    package_sha512: r.package_sha512.clone(),
+                    package_bytes: r.package_bytes,
+                    file_count: r.files.len() as u64,
+                }),
+                Some(r.receipt),
+            ),
+            None => (None, None),
+        };
+        Ok(zamin_protocol::publish::PublishStateResult {
+            server_id: server_id.to_string(),
+            last_publication,
+            receipt,
+            package_present: publish_dir.join("package.zip").is_file(),
+        })
+    }
+
+    /// Mark or clear a false-positive review (§46), then answer with the
+    /// fresh preview so the security panel re-renders in one round trip.
+    pub async fn publish_review_set(
+        &self,
+        server_id: &ServerId,
+        file: &str,
+        kind: &str,
+        reviewed: bool,
+    ) -> Result<zamin_protocol::publish::PublishPreviewResult, EngineError> {
+        use zamin_core::publish::state::{load_reviews, save_reviews};
+        if self.registry_lock().get(server_id).is_none() {
+            return Err(EngineError::Protocol(not_found(server_id)));
+        }
+        // The review never touches the disk, but its key must still be a
+        // sane root-relative path — garbage keys would never match a
+        // finding and would silently rot in the review file.
+        let file = zamin_core::publish::selection::validate_relative_path(file)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let kind = kind.trim().to_owned();
+        if kind.is_empty() {
+            return Err(EngineError::Protocol(ProtocolError::new(
+                ErrorCode::ProtocolInvalidRequest,
+                "A review needs the finding's kind.",
+            )));
+        }
+        let reviews_path = self
+            .publish_dir(server_id.as_str())
+            .join("scan-reviews.json");
+        let entry = zamin_protocol::publish::ReviewEntry {
+            file: file.clone(),
+            kind: kind.clone(),
+        };
+        {
+            let _io = self.publish_io_lock();
+            let mut reviews =
+                load_reviews(&reviews_path).map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+            if reviewed {
+                reviews.insert(entry);
+            } else {
+                reviews.remove(&entry);
+            }
+            save_reviews(&reviews_path, &reviews)
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        }
+        self.publish_preview(server_id).await
+    }
+
+    /// Run a publication as a job (§74): preparing → scanning →
+    /// packaging → uploading → completed. Everything refusable is
+    /// refused BEFORE the job exists (the java.install convention); the
+    /// job re-runs resolve and scan on fresh disk state so a publication
+    /// is never packaged from stale knowledge.
+    pub async fn publish_execute(
+        &self,
+        server_id: &ServerId,
+        confirm_unsafe: bool,
+    ) -> Result<zamin_protocol::jobs::Job, EngineError> {
+        use zamin_core::publish::provider::ProviderPackageRef;
+        use zamin_core::publish::state::{
+            load_reviews, save_publication, PublicationFile, PublicationRecord,
+            PUBLICATION_SCHEMA_VERSION,
+        };
+
+        let root = self.file_root(server_id)?;
+        let config = self.publish_config_load(server_id)?;
+        let provider = Self::validate_publish_config(&config)?;
+        let publish_dir = self.publish_dir(server_id.as_str());
+        let running = self.describe_state(server_id).await == ServerState::Running;
+        let root_for_job = root.clone();
+
+        // Preflight: resolve + scan on the current disk, refuse what can
+        // be refused without a job.
+        let selection = config.selection.clone();
+        let reviews_path = publish_dir.join("scan-reviews.json");
+        let preflight = tokio::task::spawn_blocking(
+            move || -> Result<
+                (usize, zamin_protocol::publish::ScanReport),
+                zamin_core::error::CoreError,
+            > {
+                let resolved = zamin_core::publish::selection::resolve_selection(
+                    &root,
+                    &selection,
+                    Default::default(),
+                )?;
+                let count = resolved.len();
+                let reviews = load_reviews(&reviews_path)?;
+                let scan = zamin_core::publish::secrets::scan(
+                    &resolved,
+                    &zamin_core::publish::secrets::ScanContext {
+                        discord_srv_active: discord_srv_loaded(&root, running),
+                    },
+                    &reviews,
+                );
+                Ok((count, scan))
+            },
+        )
+        .await
+        .map_err(|e| internal(&format!("publish preflight task failed: {e}")))?
+        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let (selected, scan_report) = preflight;
+        if selected == 0 {
+            return Err(EngineError::Protocol(
+                zamin_protocol::publish::nothing_selected_error(),
+            ));
+        }
+        let blocking_findings = zamin_core::publish::secrets::blocking(&scan_report);
+        if !blocking_findings.is_empty() && !confirm_unsafe {
+            return Err(EngineError::Protocol(
+                zamin_protocol::publish::secrets_detected_error(&blocking_findings),
+            ));
+        }
+        let credential = zamin_core::publish::credentials::resolve_credential(provider.id());
+        if provider.needs_credential() && credential.is_none() {
+            return Err(EngineError::Protocol(ProtocolError::new(
+                ErrorCode::AuthRequired,
+                format!(
+                    "The {} provider needs a credential; set {} in the daemon's environment.",
+                    provider.id(),
+                    zamin_core::publish::credentials::credential_env_var(provider.id())
+                ),
+            )));
+        }
+
+        let engine = self.clone();
+        let sid = server_id.clone();
+        let dir_for_job = publish_dir;
+        Ok(self.inner.jobs.spawn(
+            zamin_protocol::jobs::JobKind::PublishExecute,
+            Some(server_id.to_string()),
+            move |ctl| async move {
+                // Stage 0: preparing — fresh resolve, fresh diff.
+                ctl.progress(
+                    0,
+                    Some(4),
+                    Some("stage"),
+                    Some("preparing: resolving the selection against the server"),
+                );
+                let reviews_path = dir_for_job.join("scan-reviews.json");
+                let pub_path = dir_for_job.join("publication.json");
+                let selection = config.selection.clone();
+                let root_for_resolve = root_for_job.clone();
+                let resolved = {
+                    let resolve = tokio::task::spawn_blocking(move || {
+                        zamin_core::publish::selection::resolve_selection(
+                            &root_for_resolve,
+                            &selection,
+                            Default::default(),
+                        )
+                    })
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("publish resolve task failed: {e}"),
+                        ))
+                    })?
+                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
+                    resolve
+                };
+                if resolved.is_empty() {
+                    return Err(JobFailure::Error(
+                        zamin_protocol::publish::nothing_selected_error(),
+                    ));
+                }
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+
+                // Stage 1: scanning — the gate runs again on fresh disk.
+                ctl.progress(
+                    1,
+                    Some(4),
+                    Some("stage"),
+                    Some("scanning the selection for secrets"),
+                );
+                let running = engine.describe_state(&sid).await == ServerState::Running;
+                let scan_report = {
+                    let root_for_scan = root_for_job.clone();
+                    let resolved_for_scan = resolved.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let reviews = load_reviews(&reviews_path)?;
+                        let scan = zamin_core::publish::secrets::scan(
+                            &resolved_for_scan,
+                            &zamin_core::publish::secrets::ScanContext {
+                                discord_srv_active: discord_srv_loaded(&root_for_scan, running),
+                            },
+                            &reviews,
+                        );
+                        Ok::<_, zamin_core::error::CoreError>(scan)
+                    })
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("publish scan task failed: {e}"),
+                        ))
+                    })?
+                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?
+                };
+                let blocking = zamin_core::publish::secrets::blocking(&scan_report);
+                if !blocking.is_empty() && !confirm_unsafe {
+                    return Err(JobFailure::Error(
+                        zamin_protocol::publish::secrets_detected_error(&blocking),
+                    ));
+                }
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+
+                // Stage 2: packaging — staging + fsync + rename inside
+                // the publish dir. The owned clone moves into the
+                // blocking closure; the manifest comes back out for the
+                // provider's receipt.
+                ctl.progress(
+                    2,
+                    Some(4),
+                    Some("stage"),
+                    Some("packaging the selected files"),
+                );
+                let title = if config.title.trim().is_empty() {
+                    sid.to_string()
+                } else {
+                    config.title.trim().to_owned()
+                };
+                let version = config.version.trim().to_owned();
+                let resolved_for_package = resolved.clone();
+                let dir_for_package = dir_for_job.clone();
+                let provider_id = provider.id().to_owned();
+                let progress_ctl = ctl.clone();
+                let cancel_flag = ctl.cancel_flag();
+                let title_for_package = title.clone();
+                let version_for_package = version.clone();
+                let description = config.description.clone();
+                let changelog = config.changelog.clone();
+                let (package_sha, package_bytes, manifest) =
+                    tokio::task::spawn_blocking(
+                        move || -> Result<
+                            (String, u64, zamin_core::publish::package::PublishManifest),
+                            zamin_core::error::CoreError,
+                        > {
+                            let files: Vec<
+                                &zamin_core::publish::selection::ResolvedFile,
+                            > = resolved_for_package.values().collect();
+                            let mut package_opts = zamin_core::publish::package::PackageOptions {
+                                files: &files,
+                                out_path: &dir_for_package.join("package.zip"),
+                                staging_path: &dir_for_package.join("package.zip.staging"),
+                                title: title_for_package,
+                                description,
+                                version: Some(version_for_package).filter(|v| !v.is_empty()),
+                                changelog: Some(changelog).filter(|c| !c.is_empty()),
+                                provider_id,
+                                created_at_ms: now_ms_unix(),
+                                max_entries: zamin_core::publish::selection::MAX_ENTRIES,
+                                max_total_bytes: zamin_core::publish::selection::MAX_TOTAL_BYTES,
+                                cancel: cancel_flag,
+                                progress: {
+                                    let ctl = progress_ctl.clone();
+                                    Arc::new(
+                                        move |p: zamin_core::publish::package::PackageProgress| {
+                                            ctl.progress(
+                                                p.files_done,
+                                                Some(p.total_files),
+                                                Some("files"),
+                                                Some("packaging the selected files"),
+                                            );
+                                        },
+                                    )
+                                },
+                            };
+                            let outcome =
+                                zamin_core::publish::package::build_package(&mut package_opts)?;
+                            Ok((outcome.sha512, outcome.size_bytes, outcome.manifest))
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("publish package task failed: {e}"),
+                        ))
+                    })?
+                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+
+                // Stage 3: uploading — the provider answers, then and
+                // only then the publication record commits (§42: the
+                // record names what actually went out).
+                let upload_message = format!("uploading via {}", provider.display_name());
+                ctl.progress(3, Some(4), Some("stage"), Some(upload_message.as_str()));
+                let receipt = {
+                    let package_path = dir_for_job.join("package.zip");
+                    let settings = config.provider_settings.clone();
+                    let credential = credential.clone();
+                    let package_sha = package_sha.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let package = ProviderPackageRef {
+                            path: &package_path,
+                            sha512: &package_sha,
+                            size_bytes: package_bytes,
+                            manifest: &manifest,
+                        };
+                        provider.upload(&package, &settings, credential.as_deref())
+                    })
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("publish upload task failed: {e}"),
+                        ))
+                    })?
+                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?
+                };
+
+                let record = PublicationRecord {
+                    schema_version: PUBLICATION_SCHEMA_VERSION,
+                    published_at_ms: now_ms_unix(),
+                    title,
+                    version: Some(version).filter(|v| !v.is_empty()),
+                    changelog: Some(config.changelog.clone()).filter(|c| !c.is_empty()),
+                    provider_id: receipt.provider_id.clone(),
+                    receipt,
+                    package_sha512: package_sha,
+                    package_bytes,
+                    files: resolved
+                        .into_iter()
+                        .map(|(path, f)| {
+                            (
+                                path,
+                                PublicationFile {
+                                    sha512: f.sha512,
+                                    size: f.size,
+                                },
+                            )
+                        })
+                        .collect(),
+                };
+                {
+                    let pub_path = pub_path.clone();
+                    tokio::task::spawn_blocking(move || save_publication(&pub_path, &record))
+                        .await
+                        .map_err(|e| {
+                            JobFailure::Error(ProtocolError::new(
+                                ErrorCode::InternalError,
+                                format!("publish commit task failed: {e}"),
+                            ))
+                        })?
+                        .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
+                }
+                ctl.progress(
+                    4,
+                    Some(4),
+                    Some("stage"),
+                    Some("completed: the publication is recorded"),
+                );
+                Ok(())
+            },
+        ))
+    }
+
     /// Broadcast a registry-driven transition (registration, removal).
     /// These are state changes from the registry's point of view, not the
     /// actor's, so they are published here rather than in an actor.
@@ -2311,6 +2909,24 @@ pub fn to_protocol(error: &zamin_core::error::CoreError) -> ProtocolError {
     // The actor owns the canonical mapping; sessions reuse it so the two
     // never diverge.
     crate::actor::to_protocol_error(error)
+}
+
+/// §44's DiscordSRV special treatment, the daemon's half: the plugin is
+/// "loaded and functioning" only when the server is actually running and
+/// its plugins directory carries the jar. Runs inside spawn_blocking
+/// closures; never follows symlinks out (a read_dir listing only).
+fn discord_srv_loaded(root: &Path, running: bool) -> bool {
+    if !running {
+        return false;
+    }
+    let plugins = root.join("plugins");
+    let Ok(entries) = std::fs::read_dir(&plugins) else {
+        return false;
+    };
+    entries.filter_map(|e| e.ok()).any(|e| {
+        let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+        name.starts_with("discordsrv") && name.ends_with(".jar")
+    })
 }
 
 /// Point the stamped `server.properties` at the requested port. The file

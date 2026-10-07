@@ -351,6 +351,7 @@ pub fn kind_text(kind: JobKind) -> &'static str {
         JobKind::ArchiveExtract => "archive.extract",
         JobKind::JavaInstall => "java.install",
         JobKind::PluginInstall => "plugins.install",
+        JobKind::PublishExecute => "publish.execute",
     }
 }
 

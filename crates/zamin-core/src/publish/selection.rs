@@ -59,6 +59,13 @@ fn invalid(reason: impl Into<String>) -> CoreError {
     }
 }
 
+/// Validate any operator-supplied root-relative path (review keys, file
+/// rules): relative, `/`-separated, no `..`, no backslashes, capped.
+/// Returns the normalized payload (trailing slashes trimmed).
+pub fn validate_relative_path(raw: &str) -> Result<String, CoreError> {
+    validate_rule_payload(raw, "path")
+}
+
 /// Validate one rule's path-ish payload: relative, `/`-separated, no
 /// `..`, no backslashes, no empty segments, capped. Returns the
 /// normalized payload (trailing slashes trimmed on folder rules).

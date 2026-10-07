@@ -594,6 +594,101 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
             let read = audit.read(params.limit, params.offset);
             json_ok(id, read)
         }
+        // Publish (founder §40–47, §74, ADR-0017). Mutations ride the
+        // AUDITED_METHODS list; the reads (config.get, preview, state,
+        // providers.list) are observation like every other read.
+        methods::PUBLISH_CONFIG_GET => {
+            let params: zamin_protocol::publish::PublishConfigGetParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.publish_config_get(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PUBLISH_CONFIG_SET => {
+            let params: zamin_protocol::publish::PublishConfigSetParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    match engine.publish_config_set(&server_id, &params.config).await {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PUBLISH_PROVIDERS_LIST => json_ok(id, engine.publish_providers_list()),
+        methods::PUBLISH_PREVIEW => {
+            let params: zamin_protocol::publish::PublishPreviewParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.publish_preview(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PUBLISH_EXECUTE => {
+            let params: zamin_protocol::publish::PublishExecuteParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine
+                    .publish_execute(&server_id, params.confirm_unsafe.unwrap_or(false))
+                    .await
+                {
+                    Ok(job) => json_ok(id, zamin_protocol::publish::PublishExecuteResult { job }),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PUBLISH_STATE => {
+            let params: zamin_protocol::publish::PublishStateParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.publish_state(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PUBLISH_REVIEW_SET => {
+            let params: zamin_protocol::publish::PublishReviewSetParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine
+                    .publish_review_set(&server_id, &params.file, &params.kind, params.reviewed)
+                    .await
+                {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::CATALOG_LIST => json_ok(id, engine.catalog_list().await),
         methods::CATALOG_VERSIONS => {
             let params: zamin_protocol::software::CatalogVersionsParams =
