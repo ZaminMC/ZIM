@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   LOCAL_PROFILE,
   activeProfile,
+  hostSpec,
   transportSpec,
   useConnections,
 } from "./connections";
@@ -105,5 +106,59 @@ describe("transportSpec", () => {
     });
     const spec = transportSpec("ws://127.0.0.1:8787", useConnections.getState());
     expect(spec.url).not.toContain("fingerprint");
+  });
+});
+
+describe("hostSpec (the Tauri path)", () => {
+  beforeEach(resetStore);
+
+  it("local profile: no remote, no auth — the host speaks the local socket", () => {
+    expect(hostSpec(useConnections.getState())).toEqual({
+      remote: null,
+      auth: undefined,
+    });
+  });
+
+  it("pinned remote profile: the fields the host command expects, token as auth", () => {
+    const id = useConnections.getState().addRemote({
+      name: "box",
+      addr: "203.0.113.7:7443",
+      token: "secret-token",
+      fingerprint: "AB".repeat(32),
+    });
+    useConnections.getState().setActive(id);
+    const spec = hostSpec(useConnections.getState());
+    expect(spec.remote).toEqual({
+      addr: "203.0.113.7:7443",
+      token: "secret-token",
+      fingerprint: "AB".repeat(32),
+    });
+    expect(spec.auth).toBe("secret-token");
+  });
+
+  it("unpinned remote profile: empty fingerprint passes through, the host owns the rule", () => {
+    const id = useConnections.getState().addRemote({
+      name: "box",
+      addr: "10.0.0.2:7443",
+      token: "t",
+      fingerprint: "",
+    });
+    useConnections.getState().setActive(id);
+    const spec = hostSpec(useConnections.getState());
+    expect(spec.remote?.fingerprint).toBe("");
+    expect(spec.auth).toBe("t");
+  });
+
+  it("an inactive remote is invisible to the spec", () => {
+    useConnections.getState().addRemote({
+      name: "box",
+      addr: "10.0.0.2:7443",
+      token: "t",
+      fingerprint: "",
+    });
+    expect(hostSpec(useConnections.getState())).toEqual({
+      remote: null,
+      auth: undefined,
+    });
   });
 });

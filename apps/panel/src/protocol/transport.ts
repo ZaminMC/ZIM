@@ -63,8 +63,22 @@ export class WsTransport implements Transport {
 // (handshake, correlation, reconnect, cursors) stays in this webview. The
 // `@tauri-apps/api` import is dynamic so browser builds and tests never
 // load it.
+//
+// A non-null `remote` points the host at a zaminagent over TLS (ADR-0011):
+// the host dials the relay with the fingerprint pinned; the token still
+// travels only inside the tunnel, as hello.auth from this webview. A
+// remote wire has no `daemon_ensure` safety net — a remote box's daemon
+// is nobody's spawn target from here.
+
+export interface TauriRemoteSpec {
+  addr: string;
+  token: string;
+  fingerprint: string;
+}
 
 export class TauriTransport implements Transport {
+  constructor(private readonly remote: TauriRemoteSpec | null = null) {}
+
   async start(sink: (batch: IncomingBatch) => void, onDown: () => void): Promise<void> {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
 
@@ -83,16 +97,25 @@ export class TauriTransport implements Transport {
         }
       });
       const down = new Channel<null>(() => onDown());
-      await invoke("daemon_connect", { frames, down });
+      await invoke("daemon_connect", {
+        frames,
+        down,
+        remoteAddr: this.remote?.addr ?? null,
+        remoteToken: this.remote?.token ?? null,
+        remoteFingerprint: this.remote?.fingerprint ?? null,
+      });
     };
 
     try {
       await attempt();
     } catch (error) {
-      // Connection refused: first contact or the daemon died mid-session.
+      // Local wire down: first contact or the daemon died mid-session.
       // §1.2 — double-clicking the panel must never show a daemon error,
       // so the host brings the daemon back (probe → spawn sibling → wait
       // for bind) before the client's retry schedule gets its next turn.
+      // A remote wire gets the honest failure instead: the box's daemon is
+      // out of reach from here, spawning one would be a lie.
+      if (this.remote) throw error;
       const outcome = await invoke<string>("daemon_ensure").catch(() => null);
       if (outcome !== "spawned" && outcome !== "already-running") {
         throw error; // original failure is the honest one (e.g. no binary)

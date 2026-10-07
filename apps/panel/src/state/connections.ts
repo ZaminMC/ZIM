@@ -96,3 +96,29 @@ export function transportSpec(
   });
   return { url: `${bridgeUrl}/?${query.toString()}`, auth: profile.token };
 }
+
+/** The active profile as the Tauri host command wants it (ADR-0011): the
+ *  remote fields for the TLS relay when a remote profile is active, plus
+ *  the hello credential. Tauri path only — the browser/dev path rides
+ *  transportSpec's WebSocket. An empty fingerprint passes through: the
+ *  host's resolver owns the "blank means skip-verify" rule, the modal
+ *  owns the warning. */
+export function hostSpec(
+  state: { remotes: RemoteProfile[]; activeId: string },
+): {
+  remote: { addr: string; token: string; fingerprint: string } | null;
+  auth: string | undefined;
+} {
+  const profile = activeProfile(state);
+  if (!("addr" in profile)) {
+    return { remote: null, auth: undefined };
+  }
+  return {
+    remote: {
+      addr: profile.addr,
+      token: profile.token,
+      fingerprint: profile.fingerprint,
+    },
+    auth: profile.token,
+  };
+}

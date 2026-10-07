@@ -15,7 +15,7 @@ import {
 import type { JobOutcomeName } from "../integration/notifications";
 import { logWarn } from "../logger";
 import { useConnection } from "./connection";
-import { transportSpec, useConnections } from "./connections";
+import { hostSpec, transportSpec, useConnections } from "./connections";
 import { forgetMetrics } from "./metrics";
 import { useServers } from "./servers";
 import { useJobs } from "./jobs";
@@ -25,11 +25,20 @@ const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 const bridgeUrl = import.meta.env.VITE_BRIDGE_URL ?? "ws://127.0.0.1:8787";
 
 // The transport is chosen per connect: the active connection profile
-// (ADR-0011) decides local socket vs. remote agent relay. Switching
-// profiles goes through `reconnectWire`.
+// (ADR-0011) decides local socket vs. remote agent relay — in the
+// webview both ways. The Tauri host dials the agent from Rust with the
+// profile's fingerprint pinned (the token rides hello.auth inside the
+// TLS tunnel, never as a host argument on the wire); the dev bridge
+// relays from a query-string session. Switching profiles goes through
+// `reconnectWire`.
 export const client = new ProtocolClient(() => {
-  if (isTauri) return Promise.resolve(new TauriTransport());
-  const spec = transportSpec(bridgeUrl, useConnections.getState());
+  const state = useConnections.getState();
+  if (isTauri) {
+    const spec = hostSpec(state);
+    client.setAuth(spec.auth);
+    return Promise.resolve(new TauriTransport(spec.remote));
+  }
+  const spec = transportSpec(bridgeUrl, state);
   client.setAuth(spec.auth);
   return Promise.resolve(new WsTransport(spec.url));
 });
