@@ -141,6 +141,12 @@ enum Commands {
         #[command(subcommand)]
         command: SchedulesCommands,
     },
+    /// Publish a server (ADR-0017): pick files, review the diff and the
+    /// security scan, package, and hand the package to a provider
+    Publish {
+        #[command(subcommand)]
+        command: PublishCommands,
+    },
     /// Long-running daemon jobs: installs, backups, downloads
     Jobs {
         #[command(subcommand)]
@@ -246,6 +252,64 @@ enum SchedulesCommands {
         server_id: String,
         schedule_id: String,
     },
+}
+
+#[derive(Subcommand)]
+enum PublishCommands {
+    /// Show the publish configuration as it stands
+    Show { server_id: String },
+    /// Replace the publish configuration. Unspecified flags keep their
+    /// current value. Rules read `folder:PATH`, `file:PATH`, or
+    /// `glob:PATTERN` (e.g. --include "glob:plugins/**/*.yml").
+    Config {
+        server_id: String,
+        /// The publish provider id (`zamin publish providers` lists them)
+        #[arg(long, value_name = "ID")]
+        provider: Option<String>,
+        /// The package's title (the server id is used when blank)
+        #[arg(long, value_name = "TEXT")]
+        title: Option<String>,
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+        #[arg(long, value_name = "VER")]
+        version: Option<String>,
+        #[arg(long, value_name = "TEXT")]
+        changelog: Option<String>,
+        /// A provider setting, KEY=VAL (e.g. --setting outDir=/srv/out)
+        #[arg(long, value_name = "KEY=VAL")]
+        setting: Vec<String>,
+        /// Include rules (repeatable; replaces the current list)
+        #[arg(long = "include", value_name = "RULE")]
+        includes: Vec<String>,
+        /// Exclude rules (repeatable; replaces the current list)
+        #[arg(long = "exclude", value_name = "RULE")]
+        excludes: Vec<String>,
+    },
+    /// List the available publish providers
+    Providers,
+    /// Preview the publication: the M/A/D diff and the security scan
+    Preview { server_id: String },
+    /// Publish: package the selection and hand it to the provider
+    Run {
+        server_id: String,
+        /// Publish anyway despite unreviewed scan findings — the
+        /// founder's explicit Publish Anyway confirmation
+        #[arg(long)]
+        confirm_unsafe: bool,
+    },
+    /// Review a scan finding as a false positive (--unreview clears it)
+    Review {
+        server_id: String,
+        /// The finding's file (as the preview printed it)
+        file: String,
+        /// The finding's kind (as the preview printed it)
+        kind: String,
+        /// Clear the review instead of setting it
+        #[arg(long)]
+        unreview: bool,
+    },
+    /// Show the last publication: when, provider, receipt, package
+    State { server_id: String },
 }
 
 #[derive(Subcommand)]
@@ -577,6 +641,54 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 server_id,
                 schedule_id,
             } => schedules_pause_resume(&cli, &client, server_id, schedule_id, true).await,
+        },
+        Commands::Publish { command } => match command {
+            PublishCommands::Show { server_id } => {
+                publish_config_show(&cli, &client, server_id).await
+            }
+            PublishCommands::Config {
+                server_id,
+                provider,
+                title,
+                description,
+                version,
+                changelog,
+                setting,
+                includes,
+                excludes,
+            } => {
+                publish_config_set(
+                    &cli,
+                    &client,
+                    server_id,
+                    PublishConfigOpts {
+                        provider: provider.as_deref(),
+                        title: title.as_deref(),
+                        description: description.as_deref(),
+                        version: version.as_deref(),
+                        changelog: changelog.as_deref(),
+                        settings: setting,
+                        includes,
+                        excludes,
+                    },
+                )
+                .await
+            }
+            PublishCommands::Providers => publish_providers(&cli, &client).await,
+            PublishCommands::Preview { server_id } => {
+                publish_preview(&cli, &client, server_id).await
+            }
+            PublishCommands::Run {
+                server_id,
+                confirm_unsafe,
+            } => publish_run(&cli, &client, server_id, *confirm_unsafe).await,
+            PublishCommands::Review {
+                server_id,
+                file,
+                kind,
+                unreview,
+            } => publish_review(&cli, &client, server_id, file, kind, !*unreview).await,
+            PublishCommands::State { server_id } => publish_state(&cli, &client, server_id).await,
         },
     }
 }
@@ -1295,5 +1407,280 @@ async fn schedules_pause_resume(
         result.schedule.schedule.name,
         if enabled { "resumed" } else { "paused" },
     );
+    Ok(())
+}
+
+// ---- Publish (founder §40–47, §74, ADR-0017) ------------------------
+
+/// Parse one CLI selection rule: `folder:PATH`, `file:PATH`, or
+/// `glob:PATTERN`. The daemon re-validates; this split just needs to
+/// catch typos early with a message that teaches the syntax.
+fn parse_rule(raw: &str) -> Result<zamin_protocol::publish::SelectionRule, Failure> {
+    let (kind, payload) = raw.split_once(':').ok_or_else(|| {
+        Failure::error(format!(
+            "a publish rule reads `folder:PATH`, `file:PATH`, or `glob:PATTERN`; got {raw:?}"
+        ))
+    })?;
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "folder" => Ok(zamin_protocol::publish::SelectionRule::Folder {
+            path: payload.to_owned(),
+        }),
+        "file" => Ok(zamin_protocol::publish::SelectionRule::File {
+            path: payload.to_owned(),
+        }),
+        "glob" => Ok(zamin_protocol::publish::SelectionRule::Glob {
+            pattern: payload.to_owned(),
+        }),
+        other => Err(Failure::error(format!(
+            "unknown rule kind {other:?} — use folder:, file:, or glob:"
+        ))),
+    }
+}
+
+async fn publish_config_show(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let params = zamin_protocol::publish::PublishConfigGetParams {
+        server_id: server_id.to_owned(),
+    };
+    let config: zamin_protocol::publish::PublishConfig = client
+        .request_typed(methods::PUBLISH_CONFIG_GET, params)
+        .await?;
+    if cli.json {
+        print_json(&config);
+        return Ok(());
+    }
+    render::publish_config(&config);
+    Ok(())
+}
+
+/// The `publish config` overrides: every field the operator did not pass
+/// keeps its current value (the daemon replace is full; the CLI merges).
+struct PublishConfigOpts<'a> {
+    provider: Option<&'a str>,
+    title: Option<&'a str>,
+    description: Option<&'a str>,
+    version: Option<&'a str>,
+    changelog: Option<&'a str>,
+    settings: &'a [String],
+    includes: &'a [String],
+    excludes: &'a [String],
+}
+
+async fn publish_config_set(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    opts: PublishConfigOpts<'_>,
+) -> CmdResult {
+    let PublishConfigOpts {
+        provider,
+        title,
+        description,
+        version,
+        changelog,
+        settings,
+        includes,
+        excludes,
+    } = opts;
+    // config.set is a full replace; the CLI fetches the current config
+    // and applies only the flags the operator passed, so a partial
+    // command never silently erases the rest.
+    let current: zamin_protocol::publish::PublishConfig = client
+        .request_typed(
+            methods::PUBLISH_CONFIG_GET,
+            zamin_protocol::publish::PublishConfigGetParams {
+                server_id: server_id.to_owned(),
+            },
+        )
+        .await?;
+
+    let mut settings_map = current.provider_settings.clone();
+    for pair in settings {
+        let Some((key, value)) = pair.split_once('=') else {
+            return Err(Failure::error(format!(
+                "a provider setting reads KEY=VAL; got {pair:?}"
+            )));
+        };
+        settings_map.insert(key.trim().to_owned(), value.to_owned());
+    }
+
+    let config = zamin_protocol::publish::PublishConfig {
+        selection: zamin_protocol::publish::PublishSelection {
+            includes: includes
+                .iter()
+                .map(|r| parse_rule(r))
+                .collect::<Result<Vec<_>, _>>()?,
+            excludes: excludes
+                .iter()
+                .map(|r| parse_rule(r))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        provider_id: provider.map(str::to_owned).unwrap_or(current.provider_id),
+        provider_settings: settings_map,
+        title: title.map(str::to_owned).unwrap_or(current.title),
+        description: description
+            .map(str::to_owned)
+            .unwrap_or(current.description),
+        version: version.map(str::to_owned).unwrap_or(current.version),
+        changelog: changelog.map(str::to_owned).unwrap_or(current.changelog),
+    };
+    let saved: zamin_protocol::publish::PublishConfig = client
+        .request_typed(
+            methods::PUBLISH_CONFIG_SET,
+            zamin_protocol::publish::PublishConfigSetParams {
+                server_id: server_id.to_owned(),
+                config: config.clone(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&saved);
+        return Ok(());
+    }
+    println!("Publish configuration saved.");
+    render::publish_config(&saved);
+    Ok(())
+}
+
+async fn publish_providers(cli: &Cli, client: &Client) -> CmdResult {
+    let result: zamin_protocol::publish::ProvidersListResult = client
+        .request_typed(
+            methods::PUBLISH_PROVIDERS_LIST,
+            zamin_protocol::publish::ProvidersListParams {},
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::providers_table(&result);
+    Ok(())
+}
+
+async fn publish_preview(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let result: zamin_protocol::publish::PublishPreviewResult = client
+        .request_typed(
+            methods::PUBLISH_PREVIEW,
+            zamin_protocol::publish::PublishPreviewParams {
+                server_id: server_id.to_owned(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::publish_preview(&result);
+    Ok(())
+}
+
+async fn publish_run(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    confirm_unsafe: bool,
+) -> CmdResult {
+    let result: zamin_protocol::publish::PublishExecuteResult = client
+        .request_typed(
+            methods::PUBLISH_EXECUTE,
+            zamin_protocol::publish::PublishExecuteParams {
+                server_id: server_id.to_owned(),
+                confirm_unsafe: Some(confirm_unsafe),
+            },
+        )
+        .await?;
+    let job = result.job;
+    if cli.json {
+        print_json(&job);
+        return Ok(());
+    }
+    println!(
+        "Publishing as job {} — packaging, then {}.",
+        job.job_id,
+        if confirm_unsafe {
+            "publishing DESPITE unreviewed findings"
+        } else {
+            "uploading"
+        },
+    );
+    let (state, error) = wait_publish_job(client, &job.job_id.to_string()).await?;
+    if state != "succeeded" {
+        let detail = error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "no details".to_owned());
+        return Err(Failure::error(format!("the publish job {state}: {detail}")));
+    }
+    println!("Published.");
+    Ok(())
+}
+
+/// Poll jobs.get until the publish job reaches a terminal state.
+async fn wait_publish_job(
+    client: &Client,
+    job_id: &str,
+) -> Result<(String, Option<serde_json::Value>), Failure> {
+    loop {
+        let job: serde_json::Value = client
+            .request(methods::JOBS_GET, serde_json::json!({ "jobId": job_id }))
+            .await?;
+        let state = job["state"].as_str().unwrap_or_default().to_owned();
+        if state != "running" && state != "queued" {
+            return Ok((
+                state,
+                job["error"].as_object().map(|_| job["error"].clone()),
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
+async fn publish_review(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    file: &str,
+    kind: &str,
+    reviewed: bool,
+) -> CmdResult {
+    let result: zamin_protocol::publish::PublishPreviewResult = client
+        .request_typed(
+            methods::PUBLISH_REVIEW_SET,
+            zamin_protocol::publish::PublishReviewSetParams {
+                server_id: server_id.to_owned(),
+                file: file.to_owned(),
+                kind: kind.to_owned(),
+                reviewed,
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!(
+        "Review {} for {file:?}.",
+        if reviewed { "recorded" } else { "cleared" },
+    );
+    render::publish_findings(&result.scan);
+    println!(
+        "\n{} finding(s) still block an execute (zamin publish preview {} shows everything).",
+        result.blocking_count, server_id
+    );
+    Ok(())
+}
+
+async fn publish_state(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let result: zamin_protocol::publish::PublishStateResult = client
+        .request_typed(
+            methods::PUBLISH_STATE,
+            zamin_protocol::publish::PublishStateParams {
+                server_id: server_id.to_owned(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::publish_state(&result);
     Ok(())
 }

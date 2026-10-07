@@ -559,6 +559,232 @@ pub fn schedule_table(result: &SchedulesListResult) {
     }
 }
 
+// ---- Publish (ADR-0017) --------------------------------------------
+
+use zamin_protocol::publish::{
+    FileDiffStatus, ProvidersListResult, PublishConfig, PublishPreviewResult, PublishStateResult,
+    ScanReport, SecretSeverity,
+};
+
+fn rule_text(rule: &zamin_protocol::publish::SelectionRule) -> String {
+    match rule {
+        zamin_protocol::publish::SelectionRule::Folder { path } => format!("folder:{path}"),
+        zamin_protocol::publish::SelectionRule::File { path } => format!("file:{path}"),
+        zamin_protocol::publish::SelectionRule::Glob { pattern } => format!("glob:{pattern}"),
+    }
+}
+
+pub fn publish_config(config: &PublishConfig) {
+    println!(
+        "Provider: {} ({})",
+        config.provider_id,
+        provider_display(&config.provider_id)
+    );
+    if !config.provider_settings.is_empty() {
+        for (key, value) in &config.provider_settings {
+            println!("  setting {key} = {value}");
+        }
+    }
+    println!(
+        "Title: {}",
+        if config.title.is_empty() {
+            "(the server id)"
+        } else {
+            &config.title
+        }
+    );
+    if !config.description.is_empty() {
+        println!("Description: {}", config.description);
+    }
+    if !config.version.is_empty() {
+        println!("Version: {}", config.version);
+    }
+    if !config.changelog.is_empty() {
+        println!("Changelog: {}", config.changelog);
+    }
+    println!("Includes:");
+    if config.selection.includes.is_empty() {
+        println!("  (nothing selected — an empty include list publishes nothing)");
+    }
+    for rule in &config.selection.includes {
+        println!("  {}", rule_text(rule));
+    }
+    println!("Excludes:");
+    for rule in &config.selection.excludes {
+        println!("  {}", rule_text(rule));
+    }
+}
+
+fn provider_display(id: &str) -> &'static str {
+    match id {
+        "archive" => "archive only, no upload",
+        "local-dir" => "copy into a local folder",
+        _ => "unknown provider",
+    }
+}
+
+pub fn providers_table(result: &ProvidersListResult) {
+    println!("Publish providers (marketplaces arrive as new providers;\nnothing is hardcoded):\n");
+    println!("{:<12}  {:<28}  CREDENTIAL", "ID", "NAME");
+    for provider in &result.providers {
+        println!(
+            "{:<12}  {:<28}  {}",
+            provider.id,
+            provider.display_name,
+            match &provider.credential_env_var {
+                Some(env) => format!("env var {env}"),
+                None => "none needed".to_owned(),
+            },
+        );
+        for setting in &provider.settings {
+            println!("  setting {} — {}", setting.key, setting.description);
+        }
+    }
+}
+
+fn diff_status_text(status: &FileDiffStatus) -> &'static str {
+    match status {
+        FileDiffStatus::Added => "A",
+        FileDiffStatus::Modified => "M",
+        FileDiffStatus::Removed => "D",
+        FileDiffStatus::Unchanged => " ",
+    }
+}
+
+fn severity_text(severity: &SecretSeverity) -> &'static str {
+    match severity {
+        SecretSeverity::Critical => "critical",
+        SecretSeverity::High => "high",
+        SecretSeverity::Medium => "medium",
+        SecretSeverity::Low => "low",
+    }
+}
+
+pub fn publish_findings(scan: &ScanReport) {
+    if scan.files_skipped > 0 {
+        println!(
+            "Scanned {} file(s); {} skipped (too large or unreadable) — a skip is counted, never silent.",
+            scan.files_scanned, scan.files_skipped
+        );
+    } else {
+        println!("Scanned {} file(s).", scan.files_scanned);
+    }
+    println!("The scan is a safety mechanism, not a guarantee (founder §46).");
+    if scan.findings.is_empty() {
+        println!("No findings.");
+        return;
+    }
+    println!("\n{:<9}  {:<22}  FINDING", "SEVERITY", "KIND");
+    for finding in &scan.findings {
+        let where_text = if finding.line == 0 {
+            finding.file.clone()
+        } else {
+            format!("{}:{}", finding.file, finding.line)
+        };
+        let review_mark = if finding.reviewed { " [reviewed]" } else { "" };
+        println!(
+            "{:<9}  {:<22}  {}{}",
+            severity_text(&finding.severity),
+            finding.kind,
+            where_text,
+            review_mark,
+        );
+        println!("{:<9}  {:<22}  {}", "", "", finding.excerpt);
+    }
+}
+
+pub fn publish_preview(result: &PublishPreviewResult) {
+    let counts = &result.counts;
+    if counts.changed == 0 {
+        println!(
+            "No changes since the last publication ({} selected, {} unchanged).",
+            result.selected_files, counts.unchanged
+        );
+    } else {
+        println!(
+            "{} file(s) changed: {} added, {} modified, {} removed ({} unchanged).",
+            counts.changed, counts.added, counts.modified, counts.removed, counts.unchanged
+        );
+    }
+    println!(
+        "Selection: {} file(s), {} bytes total.\n",
+        result.selected_files, result.selected_bytes
+    );
+    let width = result
+        .files
+        .iter()
+        .map(|f| f.path.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    println!(
+        "{:<2}  {:<width$}  {:>10}",
+        "",
+        "FILE",
+        "SIZE",
+        width = width
+    );
+    for file in &result.files {
+        println!(
+            "{:<2}  {:<width$}  {:>10}",
+            diff_status_text(&file.status),
+            file.path,
+            file.size
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".to_owned()),
+            width = width
+        );
+    }
+    println!("\nSecurity scan:");
+    publish_findings(&result.scan);
+    if result.blocking_count > 0 {
+        println!(
+            "\n{} finding(s) block the publish: review them (`zamin publish review`),\nexclude the files, or publish anyway explicitly (`zamin publish run --confirm-unsafe`).",
+            result.blocking_count
+        );
+    }
+    match &result.last_publication {
+        Some(last) => println!(
+            "\nLast published {} as {:?} via {} ({} file(s), {} bytes).",
+            utc_date_text(last.published_at_ms),
+            last.version.as_deref().unwrap_or("(no version)"),
+            last.provider_id,
+            last.file_count,
+            last.package_bytes
+        ),
+        None => println!("\nNever published."),
+    }
+}
+
+pub fn publish_state(result: &PublishStateResult) {
+    match &result.last_publication {
+        Some(last) => {
+            println!("Last publication of {}:", result.server_id);
+            println!("  when      {}", utc_date_text(last.published_at_ms));
+            println!("  provider  {}", last.provider_id);
+            if let Some(version) = &last.version {
+                println!("  version   {version}");
+            }
+            println!(
+                "  package   {} bytes, sha512 {}…",
+                last.package_bytes,
+                &last.package_sha512[..12.min(last.package_sha512.len())]
+            );
+            println!(
+                "  on disk   {}",
+                if result.package_present { "yes" } else { "no" }
+            );
+            if let Some(receipt) = &result.receipt {
+                println!("  receipt   {}", receipt.reference);
+                if let Some(detail) = &receipt.detail {
+                    println!("            {detail}");
+                }
+            }
+        }
+        None => println!("{} has never been published.", result.server_id),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
