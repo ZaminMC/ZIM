@@ -27,6 +27,9 @@ struct DaemonConfig {
     catalog_url: String,
     /// The Adoptium API base URL (JDK fetch); same override story.
     adoptium_url: String,
+    /// The Modrinth API base URL (plugin catalog, ADR-0012); same
+    /// override story.
+    modrinth_url: String,
 }
 
 /// The live PaperMC Fill API. (The legacy api.papermc.io/v2 is retired
@@ -34,6 +37,8 @@ struct DaemonConfig {
 const DEFAULT_CATALOG_URL: &str = "https://fill.papermc.io/v3";
 /// The live Adoptium API (Temurin JDK builds).
 const DEFAULT_ADOPTIUM_URL: &str = "https://api.adoptium.net";
+/// The live Modrinth API (plugin catalog).
+const DEFAULT_MODRINTH_URL: &str = "https://api.modrinth.com/v2";
 
 fn parse_args() -> DaemonConfig {
     let mut config = DaemonConfig {
@@ -41,6 +46,7 @@ fn parse_args() -> DaemonConfig {
         data_dir: zamin_core::platform::paths::data_dir(),
         catalog_url: DEFAULT_CATALOG_URL.to_owned(),
         adoptium_url: DEFAULT_ADOPTIUM_URL.to_owned(),
+        modrinth_url: DEFAULT_MODRINTH_URL.to_owned(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -68,6 +74,12 @@ fn parse_args() -> DaemonConfig {
                     .next()
                     .unwrap_or_else(|| panic!("--adoptium-url needs a value"));
                 config.adoptium_url = value.trim_end_matches('/').to_owned();
+            }
+            "--modrinth-url" => {
+                let value = args
+                    .next()
+                    .unwrap_or_else(|| panic!("--modrinth-url needs a value"));
+                config.modrinth_url = value.trim_end_matches('/').to_owned();
             }
             "--version" => {
                 println!("{DAEMON_NAME} {DAEMON_VERSION}");
@@ -111,6 +123,7 @@ async fn run(config: DaemonConfig) {
         config.data_dir.clone(),
         config.catalog_url,
         config.adoptium_url,
+        config.modrinth_url,
     )
     .await;
     let audit = audit::Audit::new(&config.data_dir);

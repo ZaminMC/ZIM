@@ -1295,13 +1295,14 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
         .with_remediation(&["check_connection", "retry_later"]),
         E::ChecksumMismatch {
             path,
+            algorithm,
             expected,
             actual,
         } => ProtocolError::new(
             ErrorCode::ChecksumMismatch,
             format!(
                 "The downloaded file at {path:?} does not match its published checksum \
-                 (expected sha256 {expected}, computed {actual}); the download was discarded."
+                 (expected {algorithm} {expected}, computed {actual}); the download was discarded."
             ),
         )
         .with_context("expected", expected.clone())

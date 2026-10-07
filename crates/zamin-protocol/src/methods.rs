@@ -44,6 +44,12 @@ pub const METRICS_RANGE: &str = "metrics.range";
 
 pub const PLAYERS_LIST: &str = "players.list";
 
+pub const PLUGINS_SEARCH: &str = "plugins.search";
+pub const PLUGINS_VERSIONS: &str = "plugins.versions";
+pub const PLUGINS_INSTALLED: &str = "plugins.installed";
+pub const PLUGINS_INSTALL: &str = "plugins.install";
+pub const PLUGINS_DELETE: &str = "plugins.delete";
+
 // Specified in v0, implemented with the file manager (protocol spec §8).
 pub const FILES_LIST: &str = "files.list";
 pub const FILES_READ: &str = "files.read";

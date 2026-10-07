@@ -23,6 +23,7 @@ pub mod logs;
 pub mod methods;
 pub mod metrics;
 pub mod players;
+pub mod plugins;
 pub mod server;
 pub mod software;
 pub mod streams;

@@ -32,6 +32,9 @@ struct Inner {
     /// The software catalog's base URL (Fill API v3); overridable so
     /// tests and air-gapped installs can point at a mirror.
     catalog_url: String,
+    /// The Modrinth API base URL (plugin catalog, ADR-0012); same
+    /// override story.
+    modrinth_url: String,
     /// The Adoptium API base URL (JDK fetch); same override story.
     adoptium_url: String,
     /// Java inspection cache keyed by path: (mtime_s, size, info). The
@@ -61,7 +64,12 @@ fn server_dir(data_dir: &Path, id: &str) -> PathBuf {
 }
 
 impl Engine {
-    pub async fn with_urls(data_dir: PathBuf, catalog_url: String, adoptium_url: String) -> Engine {
+    pub async fn with_urls(
+        data_dir: PathBuf,
+        catalog_url: String,
+        adoptium_url: String,
+        modrinth_url: String,
+    ) -> Engine {
         let _ = std::fs::create_dir_all(data_dir.join("servers"));
         let registry = Registry::load(data_dir.join("registry.json")).unwrap_or_else(|e| {
             tracing::error!("registry is unreadable: {e}; refusing to start over it");
@@ -78,6 +86,7 @@ impl Engine {
                 jobs,
                 catalog_url,
                 adoptium_url,
+                modrinth_url,
                 java_cache: Mutex::new(HashMap::new()),
             }),
         }
@@ -1447,6 +1456,256 @@ impl Engine {
                 }
             },
         ))
+    }
+
+    // --- plugin catalog (ADR-0012; protocol spec §7d) -------------------
+
+    fn modrinth_client(&self) -> zamin_core::plugins::ModrinthClient {
+        zamin_core::plugins::ModrinthClient::new(&self.inner.modrinth_url)
+    }
+
+    /// The plugin target for a server, derived from the server root's own
+    /// directory layout — a `mods/` directory means mods, everything else
+    /// is plugins. The disk is the truth: the daemon does not track a
+    /// registered server's software (ADR-0012).
+    fn plugin_target(&self, server_id: &ServerId) -> Result<(&'static str, PathBuf), EngineError> {
+        let root = self.file_root(server_id)?;
+        Ok(zamin_core::plugins::target_for_root(&root))
+    }
+
+    pub async fn plugins_search(
+        &self,
+        server_id: &ServerId,
+        query: &str,
+        limit: u32,
+    ) -> Result<zamin_protocol::plugins::PluginsSearchResult, EngineError> {
+        use zamin_protocol::plugins::{PluginSearchHit, PluginsSearchResult};
+        let (target, _) = self.plugin_target(server_id)?;
+        let client = self.modrinth_client();
+        let loaders = zamin_core::plugins::loaders_for_target(target).to_vec();
+        let query = query.to_owned();
+        let hits = tokio::task::spawn_blocking(move || client.search(&query, &loaders, limit))
+            .await
+            .map_err(|e| internal(&format!("plugin search task failed: {e}")))?
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        Ok(PluginsSearchResult {
+            target: target.to_owned(),
+            hits: hits
+                .into_iter()
+                .map(|h| PluginSearchHit {
+                    project_id: h.project_id,
+                    slug: h.slug,
+                    title: h.title,
+                    description: h.description,
+                    downloads: h.downloads,
+                    icon_url: h.icon_url,
+                    loaders: h.loaders,
+                })
+                .collect(),
+        })
+    }
+
+    pub async fn plugins_versions(
+        &self,
+        server_id: &ServerId,
+        project_id: &str,
+    ) -> Result<zamin_protocol::plugins::PluginsVersionsResult, EngineError> {
+        use zamin_protocol::plugins::{PluginVersionInfo, PluginsVersionsResult};
+        let (target, _) = self.plugin_target(server_id)?;
+        let client = self.modrinth_client();
+        let loaders = zamin_core::plugins::loaders_for_target(target).to_vec();
+        let project = project_id.to_owned();
+        let versions = tokio::task::spawn_blocking(move || client.versions(&project))
+            .await
+            .map_err(|e| internal(&format!("plugin versions task failed: {e}")))?
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        Ok(PluginsVersionsResult {
+            target: target.to_owned(),
+            versions: versions
+                .into_iter()
+                .filter(|v| v.loaders.iter().any(|l| loaders.contains(&l.as_str())))
+                .map(|v| {
+                    let file_name = v.file.as_ref().map(|f| f.filename.clone());
+                    let size_bytes = v.file.as_ref().and_then(|f| f.size);
+                    PluginVersionInfo {
+                        id: v.id,
+                        version_number: v.version_number,
+                        game_versions: v.game_versions,
+                        loaders: v.loaders,
+                        date_published: v.date_published,
+                        file_name,
+                        size_bytes,
+                    }
+                })
+                .collect(),
+        })
+    }
+
+    pub async fn plugins_installed(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::plugins::PluginsInstalledResult, EngineError> {
+        use zamin_core::fsops::{EntryKind, RootedFs};
+        use zamin_protocol::plugins::{InstalledPlugin, PluginsInstalledResult};
+        let (target, dir) = self.plugin_target(server_id)?;
+        let entries =
+            tokio::task::spawn_blocking(move || -> Result<Vec<InstalledPlugin>, ProtocolError> {
+                // A server that never ran has no plugins directory yet: an
+                // empty inventory, not an error.
+                if !dir.exists() {
+                    return Ok(Vec::new());
+                }
+                let fs = RootedFs::open(&dir).map_err(|e| to_protocol(&e))?;
+                let listing = fs.list(".").map_err(|e| to_protocol(&e))?;
+                Ok(listing
+                    .into_iter()
+                    .filter(|e| matches!(e.kind, EntryKind::File))
+                    .map(|e| InstalledPlugin {
+                        file_name: e.name,
+                        size_bytes: e.size.unwrap_or(0),
+                        modified_ms: e.modified_ms.unwrap_or(0) as i64,
+                        symlink_outside: e.symlink_outside,
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(|e| internal(&format!("plugins installed task failed: {e}")))?
+            .map_err(EngineError::Protocol)?;
+        Ok(PluginsInstalledResult {
+            target: target.to_owned(),
+            entries,
+        })
+    }
+
+    pub async fn plugins_install(
+        &self,
+        server_id: &ServerId,
+        project_id: &str,
+        version_id: Option<String>,
+    ) -> Result<zamin_protocol::plugins::PluginsInstallResult, EngineError> {
+        let (target, target_dir) = self.plugin_target(server_id)?;
+        let client = self.modrinth_client();
+        let loaders = zamin_core::plugins::loaders_for_target(target).to_vec();
+        let project = project_id.to_owned();
+
+        // Resolve the version up front — before any job exists (the
+        // java.install convention): an unreachable catalog or a project
+        // without an installable file for this loader is a typed
+        // rejection now, never a running job that fails a second later.
+        let resolved = tokio::task::spawn_blocking(move || -> Result<
+            Option<zamin_core::plugins::VersionFile>,
+            zamin_core::error::CoreError,
+        > {
+            let versions = client.versions(&project)?;
+            let mut pool: Vec<zamin_core::plugins::ProjectVersion> = versions
+                .into_iter()
+                .filter(|v| v.loaders.iter().any(|l| loaders.contains(&l.as_str())))
+                .collect();
+            if let Some(pin) = &version_id {
+                pool.retain(|v| &v.id == pin);
+            }
+            Ok(pool
+                .into_iter()
+                .find_map(|v| v.file)
+                .filter(|f| !f.sha512.is_empty()))
+        })
+        .await
+        .map_err(|e| internal(&format!("plugin resolve task failed: {e}")))?
+        .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+
+        let file = match resolved {
+            Some(file) => file,
+            None => {
+                return Err(EngineError::Protocol(ProtocolError::new(
+                    ErrorCode::CatalogNotFound,
+                    format!("No installable {target} version found for this project."),
+                )))
+            }
+        };
+
+        let name = file.filename.clone();
+        let total = file.size;
+        let job = self.inner.jobs.spawn(
+            zamin_protocol::jobs::JobKind::PluginInstall,
+            Some(server_id.to_string()),
+            move |ctl| async move {
+                if ctl.cancelled() {
+                    return Err(JobFailure::Cancelled);
+                }
+                ctl.progress(0, total, Some("bytes"), Some(&format!("installing {name}")));
+
+                let install_ctl = ctl.clone();
+                let outcome = tokio::task::spawn_blocking(move || {
+                    zamin_core::plugins::install_file(
+                        &target_dir,
+                        &file,
+                        &zamin_core::software::DownloadOptions {
+                            cancel: install_ctl.cancel_flag(),
+                            progress: Some(Arc::new(
+                                move |p: zamin_core::software::DownloadProgress| {
+                                    install_ctl.progress(
+                                        p.bytes_done,
+                                        p.total,
+                                        Some("bytes"),
+                                        None,
+                                    );
+                                },
+                            )),
+                        },
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    JobFailure::Error(ProtocolError::new(
+                        ErrorCode::InternalError,
+                        format!("plugin install task failed: {e}"),
+                    ))
+                })?;
+
+                match outcome {
+                    Ok(installed) => {
+                        let message = format!(
+                            "installed {} into {target} ({} bytes)",
+                            installed
+                                .path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&name),
+                            installed.size,
+                        );
+                        ctl.progress(1, Some(1), Some("steps"), Some(&message));
+                        Ok(())
+                    }
+                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                    Err(e) => Err(JobFailure::Error(to_protocol(&e))),
+                }
+            },
+        );
+        Ok(zamin_protocol::plugins::PluginsInstallResult {
+            kind: zamin_protocol::jobs::JobKind::PluginInstall,
+            job,
+        })
+    }
+
+    pub async fn plugins_delete(
+        &self,
+        server_id: &ServerId,
+        file_name: &str,
+    ) -> Result<(), EngineError> {
+        // The wire's name is a suggestion; only the sanitized form
+        // reaches the disk, through the rooted filesystem's checks.
+        let name = zamin_core::plugins::safe_file_name(file_name)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let (_, dir) = self.plugin_target(server_id)?;
+        tokio::task::spawn_blocking(move || -> Result<(), ProtocolError> {
+            use zamin_core::fsops::RootedFs;
+            let fs = RootedFs::open(&dir).map_err(|e| to_protocol(&e))?;
+            fs.delete(&name).map_err(|e| to_protocol(&e))
+        })
+        .await
+        .map_err(|e| internal(&format!("plugins delete task failed: {e}")))?
+        .map_err(EngineError::Protocol)?;
+        Ok(())
     }
 
     /// Broadcast a registry-driven transition (registration, removal).

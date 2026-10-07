@@ -20,6 +20,8 @@ pub enum JobKind {
     ArchiveExtract,
     #[serde(rename = "java.install")]
     JavaInstall,
+    #[serde(rename = "plugins.install")]
+    PluginInstall,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

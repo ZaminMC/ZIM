@@ -584,6 +584,90 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => dispatch_error(id, e),
             }
         }
+        methods::PLUGINS_SEARCH => {
+            let params: zamin_protocol::plugins::PluginsSearchParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    let limit = params.limit.unwrap_or(20);
+                    match engine
+                        .plugins_search(&server_id, &params.query, limit)
+                        .await
+                    {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PLUGINS_VERSIONS => {
+            let params: zamin_protocol::plugins::PluginsVersionsParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    match engine
+                        .plugins_versions(&server_id, &params.project_id)
+                        .await
+                    {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PLUGINS_INSTALLED => {
+            let params: zamin_protocol::plugins::PluginsInstalledParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.plugins_installed(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PLUGINS_INSTALL => {
+            let params: zamin_protocol::plugins::PluginsInstallParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine
+                    .plugins_install(&server_id, &params.project_id, params.version_id)
+                    .await
+                {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::PLUGINS_DELETE => {
+            let params: zamin_protocol::plugins::PluginsDeleteParams = match request.parse_params()
+            {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.plugins_delete(&server_id, &params.file_name).await {
+                    Ok(()) => json_ok(id, zamin_protocol::server::EmptyResult {}),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::LOGS_RANGE => {
             let params: zamin_protocol::logs::LogRangeParams = match request.parse_params() {
                 Ok(params) => params,
