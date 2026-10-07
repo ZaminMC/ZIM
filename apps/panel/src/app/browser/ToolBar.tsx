@@ -7,7 +7,7 @@ import { useConnection } from "../../state/connection";
 import { activeProfile, useConnections } from "../../state/connections";
 import { hostHint } from "../../state/destinations";
 import { sortedServers, useServers } from "../../state/servers";
-import { canBack, canForward, tabDestination, tabKeyOf, useTabs } from "../../state/tabs";
+import { canBack, canForward, tabDestination, useTabs } from "../../state/tabs";
 import { useUi } from "../../state/ui";
 import { Button } from "../../ui/Button";
 import { IconDots, IconPlus, IconReload, IconArrowLeft, IconArrowRight } from "../../ui/icons";
@@ -16,7 +16,7 @@ import styles from "./ToolBar.module.css";
 
 export function ToolBar() {
   const tabs = useTabs((s) => s.tabs);
-  const activeKey = useTabs((s) => s.activeKey);
+  const activeTabId = useTabs((s) => s.activeId);
   const back = useTabs((s) => s.back);
   const forward = useTabs((s) => s.forward);
   const reload = useTabs((s) => s.reload);
@@ -30,7 +30,7 @@ export function ToolBar() {
   const lastError = useConnection((s) => s.lastError);
   const serverMap = useServers((s) => s.servers);
 
-  const active = tabs.find((t) => tabKeyOf(t) === activeKey) ?? tabs[0];
+  const active = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const destination = active ? tabDestination(active) : undefined;
   const entries = sortedServers(serverMap);
   const profile = activeProfile({ remotes, activeId });

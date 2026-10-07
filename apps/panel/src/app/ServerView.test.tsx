@@ -60,8 +60,8 @@ describe("ServerView", () => {
     });
     useUi.setState({ pending: {} });
     useTabs.setState({
-      tabs: [{ history: [{ kind: "server", serverId: "alpha" }], historyIndex: 0, reloadToken: 0 }],
-      activeKey: "server:alpha",
+      tabs: [{ id: "t-alpha", history: [{ kind: "server", serverId: "alpha" }], historyIndex: 0, reloadToken: 0 }],
+      activeId: "t-alpha",
       discoveryQuery: null,
     });
     useMetrics.setState({ samples: {} });
@@ -204,8 +204,8 @@ describe("ServerView — EULA acceptance", () => {
     });
     useUi.setState({ pending: {} });
     useTabs.setState({
-      tabs: [{ history: [{ kind: "server", serverId: "fresh" }], historyIndex: 0, reloadToken: 0 }],
-      activeKey: "server:fresh",
+      tabs: [{ id: "t-fresh", history: [{ kind: "server", serverId: "fresh" }], historyIndex: 0, reloadToken: 0 }],
+      activeId: "t-fresh",
       discoveryQuery: null,
     });
     mocks.getServer.mockReset().mockResolvedValue({

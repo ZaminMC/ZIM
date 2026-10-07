@@ -12,7 +12,7 @@ import {
   validateServerId,
 } from "./NewServerModal";
 import { useUi } from "../state/ui";
-import { tabKeyOf, useTabs } from "../state/tabs";
+import { activeKeyOf, tabKeyOf, useTabs } from "../state/tabs";
 import { useJobs } from "../state/jobs";
 
 vi.mock("../state/wire", () => ({ client: {}, startWire: vi.fn() }));
@@ -157,7 +157,7 @@ describe("NewServerModal — download door", () => {
     await waitFor(() => expect(useJobs.getState().jobs["job-1"]).toBeDefined());
     useJobs.getState().completed("job-1", "succeeded");
     await waitFor(() => expect(useUi.getState().newServerOpen).toBe(false));
-    expect(useTabs.getState().activeKey).toBe("server:survival");
+    expect(activeKeyOf(useTabs.getState())).toBe("server:survival");
   });
 
   it("creates a fabric server by pinning a loader instead of a build", async () => {
@@ -282,7 +282,7 @@ describe("NewServerModal — register door", () => {
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
     await waitFor(() => expect(useUi.getState().newServerOpen).toBe(false));
-    expect(useTabs.getState().activeKey).toBe("server:survival");
+    expect(activeKeyOf(useTabs.getState())).toBe("server:survival");
     expect(useTabs.getState().tabs.map((t) => tabKeyOf(t))).toContain("server:survival");
   });
 

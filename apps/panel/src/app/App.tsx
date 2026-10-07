@@ -1,8 +1,10 @@
-// The browser shell (ADR-0015): a tab strip, a tool bar whose address bar
-// speaks the product's dialects, and one destination at a time. The
-// sidebar is gone — ZaminPanel is a browser for Minecraft servers, and
-// §84's first slice lives here. Every view below the chrome is the
-// workspace that already existed; the frame is what changed.
+// The browser shell (ADR-0015, ADR-0016): a tab strip, a tool bar whose
+// address bar speaks the product's dialects, and one destination at a
+// time. The sidebar is gone — ZaminPanel is a browser for Minecraft
+// servers. Every view below the chrome is the workspace that already
+// existed; the frame is what changed. §51: the mounted tab content sits
+// inside an isolation boundary — a crashed view is a recoverable page,
+// never a dead shell.
 
 import { Suspense, lazy, useEffect, useMemo } from "react";
 import type { Destination } from "../state/destinations";
@@ -15,6 +17,7 @@ import { FleetPage } from "./FleetPage";
 import { MissingPage } from "./browser/MissingPage";
 import { NewTabPage } from "./browser/NewTabPage";
 import { SettingsPage } from "./browser/SettingsPage";
+import { TabBoundary } from "./browser/TabCrash";
 import { TabStrip } from "./browser/TabStrip";
 import { ToolBar } from "./browser/ToolBar";
 import styles from "./App.module.css";
@@ -60,16 +63,16 @@ export function App() {
   }, []);
 
   const tabs = useTabs((s) => s.tabs);
-  const activeKey = useTabs((s) => s.activeKey);
+  const activeId = useTabs((s) => s.activeId);
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
   const newServerOpen = useUi((s) => s.newServerOpen);
   const paletteOpen = useUi((s) => s.paletteOpen);
 
   // The active tab, with the first tab as the honest fallback when the
-  // stored key went stale.
+  // stored id went stale.
   const active = useMemo(
-    () => tabs.find((t) => tabKeyOf(t) === activeKey) ?? tabs[0],
-    [tabs, activeKey],
+    () => tabs.find((t) => t.id === activeId) ?? tabs[0],
+    [tabs, activeId],
   );
   const destination = useMemo<Destination>(
     () => (active ? tabDestination(active) : { kind: "new" }),
@@ -88,13 +91,18 @@ export function App() {
       }
       if (mod && event.key.toLowerCase() === "t") {
         event.preventDefault();
-        tabsApi.newTab();
+        if (event.shiftKey) {
+          // §90: reopen the most recently closed tab.
+          tabsApi.reopen();
+        } else {
+          tabsApi.newTab();
+        }
         return;
       }
       if (mod && event.key.toLowerCase() === "w") {
         event.preventDefault();
-        const key = useTabs.getState().activeKey;
-        if (key) tabsApi.close(key);
+        const id = useTabs.getState().activeId;
+        if (id) tabsApi.close(id);
         return;
       }
       if (mod && event.key.toLowerCase() === "l") {
@@ -126,28 +134,33 @@ export function App() {
         event.preventDefault();
         const list = useTabs.getState().tabs;
         if (list.length < 2) return;
-        const currentKey = useTabs.getState().activeKey;
-        const index = list.findIndex((t) => tabKeyOf(t) === currentKey);
+        const currentId = useTabs.getState().activeId;
+        const index = list.findIndex((t) => t.id === currentId);
         const step = event.shiftKey ? -1 : 1;
         const next = list[(index + step + list.length) % list.length];
-        if (next) tabsApi.setActive(tabKeyOf(next));
+        if (next) tabsApi.setActive(next.id);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setPaletteOpen]);
 
-  // The content key: a new destination or a reload token rebuilds the
-  // view — refresh state, reconnect subscriptions, never touch the
-  // server process (§60).
-  const contentKey = `${active ? tabKeyOf(active) : "none"}:${active?.reloadToken ?? 0}`;
+  // The content key: the TAB's own id (two views of one server stay
+  // isolated, §51), its destination, and a reload token — a new value
+  // rebuilds the view, refreshes subscriptions, never touches the server
+  // process (§60).
+  const contentKey = `${active?.id ?? "none"}:${active ? tabKeyOf(active) : "none"}:${
+    active?.reloadToken ?? 0
+  }`;
 
   return (
     <div className={styles.shell}>
       <TabStrip />
       <ToolBar />
       <main className={styles.content} key={contentKey}>
-        <DestinationView destination={destination} />
+        <TabBoundary>
+          <DestinationView destination={destination} />
+        </TabBoundary>
       </main>
       <Suspense fallback={null}>
         {newServerOpen ? <NewServerModal /> : null}

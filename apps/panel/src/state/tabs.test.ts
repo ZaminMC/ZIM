@@ -1,10 +1,13 @@
-// The tab store's contract (ADR-0015): singleton identity, per-tab
-// destination history, honest reload tokens, neighbor-aware close, and
-// storage that cannot rehydrate into a broken shell.
+// The tab store's contract (ADR-0015, ADR-0016): singleton navigation
+// identity, per-tab destination history, honest reload tokens,
+// neighbor-aware close, per-tab ids that make Duplicate honest (a cloned
+// view, never a cloned backend §65), pinning (§52), groups (§49),
+// reopen (§90), and storage that cannot rehydrate into a broken shell.
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   canForward,
+  newTabId,
   sanitizeTabs,
   tabDestination,
   tabKeyOf,
@@ -13,63 +16,99 @@ import {
 } from "./tabs";
 
 const server = (id: string) => ({ kind: "server", serverId: id }) as const;
-const tab = (history: Tab["history"], historyIndex = history.length - 1, reloadToken = 0): Tab => ({
+
+let seq = 0;
+const tab = (
+  history: Tab["history"],
+  historyIndex = history.length - 1,
+  extra: Partial<Tab> = {},
+): Tab => ({
+  id: `seed${++seq}`,
   history,
   historyIndex,
-  reloadToken,
+  reloadToken: 0,
+  ...extra,
 });
 
-const reset = () =>
-  useTabs.setState({ tabs: [tab([{ kind: "new" }])], activeKey: "new", discoveryQuery: null });
+/** Seed the store deterministically: the array is built first, then wired. */
+const seed = (tabs: Tab[], opts: { active?: number } = {}) => {
+  useTabs.setState({
+    tabs,
+    activeId: tabs[opts.active ?? 0]!.id,
+    discoveryQuery: null,
+    recentlyClosed: [],
+    groups: {},
+  });
+};
 
-beforeEach(reset);
+const seedGroups = (groups: Record<string, { label: string; color: string; collapsed: boolean }>) =>
+  useTabs.setState({ groups: groups as never });
+
+beforeEach(() => {
+  seq = 0;
+  seed([tab([{ kind: "new" }])]);
+});
+
+/** The current strip, as destination keys, for readable assertions. */
+const strip = () => useTabs.getState().tabs.map(tabKeyOf);
+const activeKey = () => {
+  const s = useTabs.getState();
+  const t = s.tabs.find((x) => x.id === s.activeId);
+  return t ? tabKeyOf(t) : null;
+};
 
 describe("navigation and identity", () => {
   it("opens with one new tab", () => {
-    reset();
+    seed([tab([{ kind: "new" }])]);
     expect(useTabs.getState().tabs).toHaveLength(1);
     expect(tabDestination(useTabs.getState().tabs[0]!)).toEqual({ kind: "new" });
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKey()).toBe("new");
   });
 
   it("navigates the active tab and keeps history honest", () => {
     const { navigate } = useTabs.getState();
     navigate({ kind: "servers" });
     let s = useTabs.getState();
-    expect(s.activeKey).toBe("servers");
+    expect(activeKey()).toBe("servers");
     expect(tabDestination(s.tabs[0]!)).toEqual({ kind: "servers" });
 
     navigate(server("alpha"));
     s = useTabs.getState();
-    expect(s.activeKey).toBe("server:alpha");
+    expect(activeKey()).toBe("server:alpha");
     expect(s.tabs[0]!.history).toEqual([{ kind: "new" }, { kind: "servers" }, server("alpha")]);
 
     // Back returns to the fleet; the tab's key follows its destination.
     useTabs.getState().back();
     s = useTabs.getState();
-    expect(s.activeKey).toBe("servers");
+    expect(activeKey()).toBe("servers");
     expect(canForward(s.tabs[0]!)).toBe(true);
 
-    // Forward returns to the server again.
+    // Forward returns to the server again — same tab, same id.
     useTabs.getState().forward();
-    expect(useTabs.getState().activeKey).toBe("server:alpha");
+    expect(activeKey()).toBe("server:alpha");
   });
 
   it("focuses a destination that already rests in another tab, never duplicates", () => {
-    useTabs.setState({
-      tabs: [tab([{ kind: "new" }, server("alpha")], 1), tab([{ kind: "servers" }])],
-      activeKey: "servers",
+    seed([tab([{ kind: "new" }, server("alpha")], 1), tab([{ kind: "servers" }])], {
+      active: 1,
     });
     useTabs.getState().navigate(server("alpha"));
     const s = useTabs.getState();
-    expect(s.activeKey).toBe("server:alpha");
+    expect(activeKey()).toBe("server:alpha");
     expect(s.tabs, "no third tab was created").toHaveLength(2);
     // The fleet tab's history was not polluted by the focus.
     expect(s.tabs[1]!.history).toEqual([{ kind: "servers" }]);
   });
 
+  it("navigating to the active tab's own destination is a quiet no-op", () => {
+    useTabs.getState().navigate({ kind: "servers" });
+    useTabs.getState().navigate({ kind: "servers" });
+    const s = useTabs.getState();
+    expect(s.tabs[0]!.history).toEqual([{ kind: "new" }, { kind: "servers" }]);
+  });
+
   it("truncates the forward tail when navigating from the past", () => {
-    useTabs.setState({ tabs: [tab([{ kind: "new" }, { kind: "servers" }, server("alpha")], 0)], activeKey: "new" });
+    seed([tab([{ kind: "new" }, { kind: "servers" }, server("alpha")], 0)]);
     useTabs.getState().navigate(server("beta"));
     const s = useTabs.getState();
     expect(s.tabs[0]!.history).toEqual([{ kind: "new" }, server("beta")]);
@@ -81,7 +120,7 @@ describe("navigation and identity", () => {
     useTabs.getState().newTab();
     let s = useTabs.getState();
     expect(s.tabs).toHaveLength(2);
-    expect(s.activeKey).toBe("new");
+    expect(activeKey()).toBe("new");
 
     useTabs.getState().newTab();
     s = useTabs.getState();
@@ -99,10 +138,7 @@ describe("navigation and identity", () => {
 
 describe("reload", () => {
   it("bumps only the active tab's token", () => {
-    useTabs.setState({
-      tabs: [tab([{ kind: "servers" }], 0, 3), tab([server("alpha")])],
-      activeKey: "servers",
-    });
+    seed([tab([{ kind: "servers" }], 0, { reloadToken: 3 }), tab([server("alpha")])]);
     useTabs.getState().reload();
     const s = useTabs.getState();
     expect(s.tabs[0]!.reloadToken).toBe(4);
@@ -112,41 +148,327 @@ describe("reload", () => {
 
 describe("closing", () => {
   it("activates the right neighbor, then the left when none", () => {
-    useTabs.setState({
-      tabs: [tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])],
-      activeKey: "server:alpha",
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])], {
+      active: 1,
     });
-    useTabs.getState().close("server:alpha");
-    expect(useTabs.getState().activeKey).toBe("server:beta");
+    const [, alpha, beta] = useTabs.getState().tabs;
+    useTabs.getState().close(alpha!.id);
+    expect(activeKey()).toBe("server:beta");
 
-    useTabs.getState().close("server:beta");
-    expect(useTabs.getState().activeKey).toBe("servers");
+    useTabs.getState().close(beta!.id);
+    expect(activeKey()).toBe("servers");
   });
 
   it("closing the last tab leaves a fresh new tab", () => {
-    useTabs.setState({ tabs: [tab([server("alpha")])], activeKey: "server:alpha" });
-    useTabs.getState().close("server:alpha");
+    seed([tab([server("alpha")])]);
+    useTabs.getState().close(useTabs.getState().tabs[0]!.id);
     const s = useTabs.getState();
     expect(s.tabs).toHaveLength(1);
-    expect(s.activeKey).toBe("new");
+    expect(activeKey()).toBe("new");
   });
 
   it("closeToTheRight and closeOthers keep their promise", () => {
-    useTabs.setState({
-      tabs: [tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])],
-      activeKey: "server:beta",
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])], {
+      active: 2,
     });
-    useTabs.getState().closeToTheRight("server:alpha");
+    const [, alpha] = useTabs.getState().tabs;
+    useTabs.getState().closeToTheRight(alpha!.id);
     let s = useTabs.getState();
-    expect(s.tabs.map(tabKeyOf)).toEqual(["servers", "server:alpha"]);
-    expect(s.activeKey, "the closed active tab hands over to its left neighbor").toBe(
+    expect(strip()).toEqual(["servers", "server:alpha"]);
+    expect(activeKey(), "the closed active tab hands over to its left neighbor").toBe(
       "server:alpha",
     );
 
-    useTabs.getState().closeOthers("servers");
+    useTabs.getState().closeOthers(s.tabs[0]!.id);
     s = useTabs.getState();
-    expect(s.tabs.map(tabKeyOf)).toEqual(["servers"]);
-    expect(s.activeKey).toBe("servers");
+    expect(strip()).toEqual(["servers"]);
+    expect(activeKey()).toBe("servers");
+  });
+
+  it("closes a pinned tab only when asked explicitly, and remembers it", () => {
+    seed([tab([server("alpha")], 0, { pinned: true }), tab([{ kind: "servers" }])], {
+      active: 1,
+    });
+    const pinned = useTabs.getState().tabs[0]!;
+    useTabs.getState().close(pinned.id);
+    const s = useTabs.getState();
+    expect(strip()).toEqual(["servers"]);
+    expect(s.recentlyClosed, "the explicit close enters the memory").toHaveLength(1);
+    expect(s.recentlyClosed[0]!.pinned).toBe(true);
+  });
+});
+
+describe("duplicate (§48, §65)", () => {
+  it("clones the view next to the original and focuses the clone", () => {
+    seed([tab([{ kind: "new" }, { kind: "servers" }, server("alpha")], 2), tab([{ kind: "settings" }])]);
+    const original = useTabs.getState().tabs[0]!;
+    useTabs.getState().duplicate(original.id);
+    const s = useTabs.getState();
+    expect(s.tabs).toHaveLength(3);
+    expect(strip()).toEqual(["server:alpha", "server:alpha", "settings"]);
+    expect(activeKey(), "the clone holds the focus").toBe("server:alpha");
+    const clone = s.tabs[1]!;
+    expect(clone.id, "a fresh identity, not the original's").not.toBe(original.id);
+    expect(clone.history, "the destination history travels").toEqual(original.history);
+    expect(clone.historyIndex).toBe(original.historyIndex);
+    expect(clone.reloadToken, "the clone starts unrestored").toBe(0);
+  });
+
+  it("the duplicate is unpinned and ungrouped even when the origin is both", () => {
+    seed([tab([server("alpha")], 0, { pinned: true, groupId: "g1" })]);
+    seedGroups({ g1: { label: "Lab", color: "sky", collapsed: false } });
+    const original = useTabs.getState().tabs[0]!;
+    useTabs.getState().duplicate(original.id);
+    const s = useTabs.getState();
+    const clone = s.tabs.find((t) => t.id !== original.id)!;
+    expect(clone.pinned).toBe(false);
+    expect(clone.groupId).toBeUndefined();
+    expect(Object.keys(s.groups), "the group is untouched").toHaveLength(1);
+  });
+
+  it("duplicates of the same server run one process behind many views", () => {
+    // A store-level statement of §65: duplication changes only the strip.
+    seed([tab([server("alpha")])]);
+    const only = useTabs.getState().tabs[0]!;
+    useTabs.getState().duplicate(only.id);
+    useTabs.getState().duplicate(only.id);
+    const s = useTabs.getState();
+    expect(s.tabs.filter((t) => tabKeyOf(t) === "server:alpha")).toHaveLength(3);
+    // The navigation identity still focuses rather than multiplies.
+    useTabs.getState().navigate({ kind: "servers" });
+    useTabs.getState().navigate(server("alpha"));
+    const s2 = useTabs.getState();
+    expect(s2.tabs, "navigation added no tab").toHaveLength(3);
+    expect(activeKey()).toBe("server:alpha");
+  });
+});
+
+describe("pinning (§52)", () => {
+  it("pins compact-first and unpins back into the free block", () => {
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])], {
+      active: 2,
+    });
+    const beta = useTabs.getState().tabs[2]!;
+    useTabs.getState().togglePin(beta.id);
+    expect(strip()).toEqual(["server:beta", "servers", "server:alpha"]);
+    expect(useTabs.getState().tabs[0]!.pinned).toBe(true);
+
+    useTabs.getState().togglePin(beta.id);
+    // Unpinning keeps the stable order: beta stays where it sits, at the
+    // head of the free block — exactly how a browser lets go of a pin.
+    expect(strip()).toEqual(["server:beta", "servers", "server:alpha"]);
+    expect(useTabs.getState().tabs[0]!.pinned).toBe(false);
+  });
+
+  it("stays stable when several pins stack", () => {
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])], {
+      active: 2,
+    });
+    const [, alpha, beta] = useTabs.getState().tabs;
+    useTabs.getState().togglePin(alpha!.id);
+    useTabs.getState().togglePin(beta!.id);
+    // alpha pinned first keeps its head start; beta joins after it.
+    expect(strip()).toEqual(["server:alpha", "server:beta", "servers"]);
+  });
+
+  it("pinning a grouped tab leaves the group, and an empty group dissolves", () => {
+    seed([tab([server("alpha")], 0, { groupId: "g1" })]);
+    seedGroups({ g1: { label: "Lab", color: "sky", collapsed: false } });
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.getState().togglePin(alpha.id);
+    const s = useTabs.getState();
+    expect(s.tabs[0]!.pinned).toBe(true);
+    expect(s.tabs[0]!.groupId).toBeUndefined();
+    expect(s.groups, "no members, no group").toEqual({});
+  });
+});
+
+describe("reopen (§90)", () => {
+  it("reopens the most recently closed tab at its old spot", () => {
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")]), tab([server("beta")])], {
+      active: 1,
+    });
+    const alpha = useTabs.getState().tabs[1]!;
+    useTabs.getState().close(alpha.id);
+    expect(strip()).toEqual(["servers", "server:beta"]);
+
+    useTabs.getState().reopen();
+    const s = useTabs.getState();
+    expect(strip()).toEqual(["servers", "server:alpha", "server:beta"]);
+    expect(activeKey(), "the revived tab holds the focus").toBe("server:alpha");
+    expect(s.recentlyClosed).toHaveLength(0);
+  });
+
+  it("restores pinned state but not group membership", () => {
+    seed([tab([server("alpha")], 0, { pinned: true, groupId: "g1" })]);
+    seedGroups({ g1: { label: "Lab", color: "sky", collapsed: false } });
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.getState().close(alpha.id);
+    useTabs.getState().reopen();
+    const s = useTabs.getState();
+    const revived = s.tabs[0]!;
+    expect(revived.pinned).toBe(true);
+    expect(revived.groupId).toBeUndefined();
+    expect(s.groups, "the group itself dissolved with its last member").toEqual({});
+  });
+
+  it("keeps a bounded memory, most recent first", () => {
+    seed([
+      tab([server("s1")]),
+      tab([server("s2")]),
+      tab([server("s3")]),
+      tab([{ kind: "servers" }]),
+    ], { active: 3 });
+    const [a, b, c] = useTabs.getState().tabs;
+    useTabs.getState().close(a!.id);
+    useTabs.getState().close(b!.id);
+    useTabs.getState().close(c!.id);
+    const s = useTabs.getState();
+    expect(s.recentlyClosed.map((e) => e.history[e.historyIndex])).toEqual([
+      server("s3"),
+      server("s2"),
+      server("s1"),
+    ]);
+    useTabs.getState().reopen();
+    expect(activeKey()).toBe("server:s3");
+    useTabs.getState().reopen();
+    expect(activeKey()).toBe("server:s2");
+  });
+
+  it("the auto-created replacement after a last close is not remembered", () => {
+    seed([tab([server("alpha")])]);
+    useTabs.getState().close(useTabs.getState().tabs[0]!.id);
+    expect(useTabs.getState().recentlyClosed).toHaveLength(1);
+    useTabs.getState().reopen();
+    // Closing the revived single tab again still records exactly one tab.
+    useTabs.getState().close(useTabs.getState().tabs[0]!.id);
+    expect(useTabs.getState().recentlyClosed).toHaveLength(1);
+  });
+
+  it("reopen with an empty memory is a no-op", () => {
+    useTabs.getState().reopen();
+    expect(useTabs.getState().tabs).toHaveLength(1);
+  });
+});
+
+describe("new tab to the right (§48)", () => {
+  it("inserts a fresh new tab immediately right of the origin", () => {
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")])]);
+    useTabs.getState().newTabToTheRight(useTabs.getState().tabs[0]!.id);
+    expect(strip()).toEqual(["servers", "new", "server:alpha"]);
+    expect(activeKey()).toBe("new");
+  });
+
+  it("moves the resting singleton over instead of cloning it", () => {
+    seed([tab([{ kind: "new" }]), tab([{ kind: "servers" }]), tab([server("alpha")])], {
+      active: 2,
+    });
+    useTabs.getState().newTabToTheRight(useTabs.getState().tabs[2]!.id);
+    expect(strip(), "the singleton moved, none was born").toEqual([
+      "servers",
+      "server:alpha",
+      "new",
+    ]);
+    expect(useTabs.getState().tabs).toHaveLength(3);
+  });
+});
+
+describe("groups (§49)", () => {
+  /** Two grouped server tabs + one free fleet tab. */
+  const seedGrouped = () => {
+    seed([tab([server("alpha")]), tab([server("beta")]), tab([{ kind: "servers" }])], {
+      active: 2,
+    });
+    useTabs.setState({
+      groups: { g1: { label: "Lab", color: "sky", collapsed: false } } as never,
+      tabs: useTabs
+        .getState()
+        .tabs.map((t, i) => (i < 2 ? { ...t, groupId: "g1" } : t)),
+    });
+  };
+
+  it("adds a tab to a new group with the next palette color", () => {
+    seed([tab([{ kind: "new" }])]);
+    useTabs.getState().addToNewGroup(useTabs.getState().tabs[0]!.id);
+    const s = useTabs.getState();
+    const gid = s.tabs[0]!.groupId!;
+    expect(s.groups[gid]).toEqual({ label: "New group", color: "sky", collapsed: false });
+  });
+
+  it("palette colors cycle across groups", () => {
+    seed([tab([{ kind: "new" }])]);
+    useTabs.getState().addToNewGroup(useTabs.getState().tabs[0]!.id);
+    useTabs.getState().duplicate(useTabs.getState().tabs[0]!.id);
+    const clone = useTabs.getState().tabs[1]!;
+    useTabs.getState().addToNewGroup(clone.id);
+    const s = useTabs.getState();
+    const [g1, g2] = Object.values(s.groups);
+    expect(g1!.color).toBe("sky");
+    expect(g2!.color).toBe("grass");
+  });
+
+  it("moves a tab into an existing group and out again", () => {
+    seedGrouped();
+    const free = useTabs.getState().tabs[2]!;
+    useTabs.getState().moveToGroup(free.id, "g1");
+    expect(useTabs.getState().tabs[2]!.groupId).toBe("g1");
+
+    useTabs.getState().removeFromGroup(free.id);
+    expect(useTabs.getState().tabs[2]!.groupId).toBeUndefined();
+    expect(useTabs.getState().groups, "g1 still has two members").toHaveProperty("g1");
+  });
+
+  it("an unknown group is refused honestly", () => {
+    seed([tab([server("alpha")])]);
+    const only = useTabs.getState().tabs[0]!;
+    useTabs.getState().moveToGroup(only.id, "ghost");
+    expect(only.groupId).toBeUndefined();
+    expect(useTabs.getState().groups).toEqual({});
+  });
+
+  it("a pinned tab cannot be grouped", () => {
+    seed([tab([server("alpha")])]);
+    const only = useTabs.getState().tabs[0]!;
+    useTabs.getState().togglePin(only.id);
+    useTabs.getState().addToNewGroup(only.id);
+    expect(useTabs.getState().tabs[0]!.groupId).toBeUndefined();
+    expect(useTabs.getState().groups).toEqual({});
+  });
+
+  it("closing members dissolves the emptied group", () => {
+    seedGrouped();
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.getState().close(alpha.id);
+    expect(useTabs.getState().groups, "one member left").toHaveProperty("g1");
+    const beta = useTabs.getState().tabs.find((t) => t.groupId === "g1")!;
+    useTabs.getState().close(beta.id);
+    expect(useTabs.getState().groups).toEqual({});
+  });
+
+  it("collapse and rename keep the group's memory honest", () => {
+    seedGrouped();
+    useTabs.getState().toggleGroupCollapse("g1");
+    expect(useTabs.getState().groups["g1"]!.collapsed).toBe(true);
+    useTabs.getState().toggleGroupCollapse("g1");
+    expect(useTabs.getState().groups["g1"]!.collapsed).toBe(false);
+
+    useTabs.getState().renameGroup("g1", "  Survival  ");
+    expect(useTabs.getState().groups["g1"]!.label).toBe("Survival");
+
+    useTabs.getState().renameGroup("g1", "   ");
+    expect(useTabs.getState().groups["g1"]!.label, "an empty rename is refused").toBe("Survival");
+    useTabs.getState().renameGroup("ghost", "Nope");
+    expect(useTabs.getState().groups).toHaveProperty("g1");
+  });
+
+  it("the reopen of a group member does not resurrect the group", () => {
+    seedGrouped();
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.getState().close(alpha.id);
+    useTabs.getState().reopen();
+    const s = useTabs.getState();
+    expect(tabKeyOf(s.tabs[0]!)).toBe("server:alpha");
+    expect(s.tabs[0]!.groupId).toBeUndefined();
   });
 });
 
@@ -154,12 +476,23 @@ describe("storage hygiene", () => {
   it("rehydrates a real session", () => {
     // sanitizeTabs is the merge guard; the happy path keeps everything.
     const raw = [
-      { history: [{ kind: "servers" }, server("alpha")], historyIndex: 1, reloadToken: 2 },
+      {
+        id: "kept",
+        history: [{ kind: "servers" }, server("alpha")],
+        historyIndex: 1,
+        reloadToken: 2,
+        pinned: true,
+      },
+      { id: "kept2", history: [{ kind: "settings" }], historyIndex: 0, reloadToken: 0 },
     ];
     const tabs = sanitizeTabs(raw);
-    expect(tabs).toHaveLength(1);
+    expect(tabs).toHaveLength(2);
     expect(tabs![0]!.reloadToken).toBe(2);
+    expect(tabs![0]!.id).toBe("kept");
+    expect(tabs![0]!.pinned).toBe(true);
     expect(tabKeyOf(tabs![0]!)).toBe("server:alpha");
+    // §52: the pinned tab rehydrates at the head.
+    expect(tabs!.map((t) => t.id)).toEqual(["kept", "kept2"]);
   });
 
   it("refuses torn payloads instead of half-believing them", () => {
@@ -168,6 +501,36 @@ describe("storage hygiene", () => {
     expect(sanitizeTabs([{}])).toBeNull();
     expect(sanitizeTabs([{ history: [{ kind: "nope" }] }])).toBeNull();
     expect(sanitizeTabs([{ history: [{ kind: "server" }] }])).toBeNull(); // no id
-    expect(sanitizeTabs([{ history: [{ kind: "servers" }], historyIndex: 9 }])).toHaveLength(1); // clamped, not rejected
+    expect(
+      sanitizeTabs([{ history: [{ kind: "servers" }], historyIndex: 9 }]),
+    ).toHaveLength(1); // clamped, not rejected
+  });
+
+  it("regenerates missing ids and deduplicates collisions", () => {
+    const raw = [
+      { history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 0 },
+      { id: "dup", history: [server("alpha")], historyIndex: 0, reloadToken: 0 },
+      { id: "dup", history: [server("beta")], historyIndex: 0, reloadToken: 0 },
+    ];
+    const tabs = sanitizeTabs(raw)!;
+    expect(tabs).toHaveLength(3);
+    const ids = new Set(tabs.map((t) => t.id));
+    expect(ids.size).toBe(3);
+    expect(tabs[1]!.id).toBe("dup");
+    expect(tabs[2]!.id).not.toBe("dup");
+  });
+
+  it("migrates a v1 payload: fresh ids, destination-keyed active restored", () => {
+    // The migrate path runs inside the persist wrapper; here its inputs are
+    // exercised through sanitize + the merge contract it feeds.
+    const raw = [
+      { history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 0 },
+      { history: [server("alpha")], historyIndex: 0, reloadToken: 1 },
+    ];
+    const tabs = sanitizeTabs(raw)!;
+    const ids = tabs.map((t) => t.id);
+    expect(ids.every((id) => typeof id === "string" && id !== "")).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+    expect(newTabId()).not.toBe(newTabId());
   });
 });

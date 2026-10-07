@@ -6,10 +6,11 @@
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { ServerView } from "./ServerView";
 import { useConnection } from "../state/connection";
 import { useConnections } from "../state/connections";
 import { useServers } from "../state/servers";
-import { tabKeyOf, useTabs } from "../state/tabs";
+import { activeKeyOf, tabKeyOf, useTabs } from "../state/tabs";
 import { getServer } from "../state/actions";
 
 vi.mock("../state/wire", () => ({
@@ -31,10 +32,14 @@ vi.mock("../state/actions", () => ({
 // The console is the heaviest surface (xterm) and irrelevant to the frame.
 vi.mock("./Console", () => ({ Console: () => null }));
 
+// The workspace view is controllable here: the frame tests assert the
+// strip and the chrome, and the isolation test needs a view that throws.
+vi.mock("./ServerView", () => ({ ServerView: vi.fn(() => null) }));
+
 const seedTabs = () =>
   useTabs.setState({
-    tabs: [{ history: [{ kind: "new" }], historyIndex: 0, reloadToken: 0 }],
-    activeKey: "new",
+    tabs: [{ id: "t-new", history: [{ kind: "new" }], historyIndex: 0, reloadToken: 0 }],
+    activeId: "t-new",
     discoveryQuery: null,
   });
 
@@ -68,7 +73,7 @@ describe("the shell at boot", () => {
     render(<App />);
     expect(screen.getByText("Find a server")).toBeTruthy();
     expect(screen.getByText(/No servers registered yet/)).toBeTruthy();
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
   });
 
   it("carries the daemon pulse and version in the chrome", () => {
@@ -92,17 +97,17 @@ describe("the address bar's dialects", () => {
     typeAddress("zaminpanel://servers/");
     expect(screen.getByRole("heading", { name: "Servers" })).toBeTruthy();
     expect(screen.getByText("Alpha")).toBeTruthy();
-    expect(useTabs.getState().activeKey).toBe("servers");
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
   });
 
   it("answers an unknown internal page with an honest page, and backs out of it", () => {
     render(<App />);
     typeAddress("zaminpanel://nope/");
     expect(screen.getByText("No such page")).toBeTruthy();
-    expect(useTabs.getState().activeKey).toBe("missing:zaminpanel://nope/");
+    expect(activeKeyOf(useTabs.getState())).toBe("missing:zaminpanel://nope/");
 
     fireEvent.click(screen.getByRole("button", { name: "Back (Alt+Left)" }));
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
     expect(screen.getByText("Find a server")).toBeTruthy();
   });
 
@@ -115,7 +120,7 @@ describe("the address bar's dialects", () => {
     });
     render(<App />);
     typeAddress("localhost:25565");
-    await waitFor(() => expect(useTabs.getState().activeKey).toBe("server:alpha"));
+    await waitFor(() => expect(activeKeyOf(useTabs.getState())).toBe("server:alpha"));
     // The workspace opened: the tab strip wears the server's name (the
     // workspace's own surfaces render role=tab too, so scan the selected
     // ones), and the address bar rests on the join address.
@@ -127,7 +132,7 @@ describe("the address bar's dialects", () => {
   it("refuses a join address nothing is registered on — no navigation, a note instead", () => {
     render(<App />);
     typeAddress(":25577");
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
     expect(screen.getByRole("status").textContent).toContain("Nothing registered on :25577");
   });
 
@@ -157,22 +162,22 @@ describe("tabs behave like tabs", () => {
     });
     useTabs.setState({
       tabs: [
-        { history: [{ kind: "new" }], historyIndex: 0, reloadToken: 0 },
-        { history: [{ kind: "server", serverId: "alpha" }], historyIndex: 0, reloadToken: 0 },
+        { id: "t-new", history: [{ kind: "new" }], historyIndex: 0, reloadToken: 0 },
+        { id: "t-alpha", history: [{ kind: "server", serverId: "alpha" }], historyIndex: 0, reloadToken: 0 },
       ],
-      activeKey: "new",
+      activeId: "t-new",
     });
     render(<App />);
     typeAddress("zaminpanel://server/alpha");
     const s = useTabs.getState();
     expect(s.tabs).toHaveLength(2);
-    expect(s.activeKey).toBe("server:alpha");
+    expect(activeKeyOf(s)).toBe("server:alpha");
   });
 
   it("back and forward ride the active tab's destination history", () => {
     render(<App />);
     typeAddress("zaminpanel://servers/");
-    expect(useTabs.getState().activeKey).toBe("servers");
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
 
     const back = screen.getByRole<HTMLButtonElement>("button", { name: "Back (Alt+Left)" });
     const forward = screen.getByRole<HTMLButtonElement>("button", { name: "Forward (Alt+Right)" });
@@ -180,27 +185,27 @@ describe("tabs behave like tabs", () => {
     expect(forward.disabled).toBe(true);
 
     fireEvent.click(back);
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
     expect(forward.disabled).toBe(false);
 
     fireEvent.click(forward);
-    expect(useTabs.getState().activeKey).toBe("servers");
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
   });
 
   it("closing the active tab hands over to a neighbor, and the last close leaves a new tab", () => {
     useTabs.setState({
       tabs: [
-        { history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 0 },
-        { history: [{ kind: "settings" }], historyIndex: 0, reloadToken: 0 },
+        { id: "t-servers", history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 0 },
+        { id: "t-settings", history: [{ kind: "settings" }], historyIndex: 0, reloadToken: 0 },
       ],
-      activeKey: "settings",
+      activeId: "t-settings",
     });
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Close Settings" }));
-    expect(useTabs.getState().activeKey).toBe("servers");
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
 
     fireEvent.click(screen.getByRole("button", { name: "Close Servers" }));
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
     expect(screen.getByText("Find a server")).toBeTruthy();
   });
 
@@ -208,27 +213,92 @@ describe("tabs behave like tabs", () => {
     render(<App />);
     fireEvent.keyDown(window, { key: "t", ctrlKey: true });
     typeAddress("zaminpanel://servers/");
-    expect(useTabs.getState().activeKey).toBe("servers");
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
 
     fireEvent.keyDown(window, { key: "t", ctrlKey: true });
-    expect(useTabs.getState().activeKey).toBe("new");
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
 
     fireEvent.keyDown(window, { key: "w", ctrlKey: true });
-    expect(useTabs.getState().activeKey).toBe("servers");
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
   });
 
   it("reload bumps only the active tab's token", () => {
     useTabs.setState({
       tabs: [
-        { history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 1 },
-        { history: [{ kind: "settings" }], historyIndex: 0, reloadToken: 0 },
+        { id: "t-servers", history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 1 },
+        { id: "t-settings", history: [{ kind: "settings" }], historyIndex: 0, reloadToken: 0 },
       ],
-      activeKey: "servers",
+      activeId: "t-servers",
     });
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Reload (Ctrl+R)" }));
     const s = useTabs.getState();
     expect(s.tabs.find((t) => tabKeyOf(t) === "servers")!.reloadToken).toBe(2);
     expect(s.tabs.find((t) => tabKeyOf(t) === "settings")!.reloadToken).toBe(0);
+  });
+});
+
+describe("tab machinery (ADR-0016)", () => {
+  it("Ctrl+Shift+T reopens the most recently closed tab", () => {
+    render(<App />);
+    typeAddress("zaminpanel://servers/");
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+    expect(activeKeyOf(useTabs.getState())).toBe("new");
+
+    fireEvent.keyDown(window, { key: "T", shiftKey: true, ctrlKey: true });
+    expect(activeKeyOf(useTabs.getState())).toBe("servers");
+    expect(useTabs.getState().tabs).toHaveLength(2);
+  });
+});
+
+describe("tab isolation (§51)", () => {
+  it("a crashed view is a recoverable page, never a dead shell", () => {
+    useServers.setState({
+      servers: {
+        alpha: { serverId: "alpha", displayName: "Alpha", state: "running", port: 25565 },
+      },
+      crashes: {},
+    });
+    render(<App />);
+    vi.mocked(ServerView).mockImplementation(() => {
+      throw new Error("the view exploded");
+    });
+    typeAddress("zaminpanel://server/alpha");
+    expect(screen.getByText("This tab crashed")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Other tabs are unaffected");
+
+    // The chrome survived the crash: the strip still lists its tabs
+    // (this tab included) and the shell still navigates.
+    expect(screen.getByRole("tablist", { name: "Open tabs" })).toBeTruthy();
+    expect(screen.getAllByRole("tab").length).toBeGreaterThanOrEqual(1);
+    vi.mocked(ServerView).mockImplementation(() => <div>recovered workspace</div>);
+    fireEvent.click(screen.getByRole("button", { name: "Reload this tab" }));
+    expect(screen.getByText("recovered workspace")).toBeTruthy();
+  });
+
+  it("another tab keeps working while one sits crashed", () => {
+    useServers.setState({
+      servers: {
+        alpha: { serverId: "alpha", displayName: "Alpha", state: "running", port: 25565 },
+      },
+      crashes: {},
+    });
+    useTabs.setState({
+      tabs: [
+        { id: "t-alpha", history: [{ kind: "server", serverId: "alpha" }], historyIndex: 0, reloadToken: 0 },
+        { id: "t-fleet", history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 0 },
+      ],
+      activeId: "t-alpha",
+      discoveryQuery: null,
+    });
+    vi.mocked(ServerView).mockImplementation(() => {
+      throw new Error("the view exploded");
+    });
+    render(<App />);
+    expect(screen.getByText("This tab crashed")).toBeTruthy();
+
+    // Switch away: the fleet page renders fine on the other tab.
+    fireEvent.click(screen.getAllByRole("tab").find((el) => el.textContent === "Servers")!);
+    expect(screen.getByRole("heading", { name: "Servers" })).toBeTruthy();
   });
 });
