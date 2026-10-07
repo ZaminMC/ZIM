@@ -30,11 +30,14 @@ async fn collect_metrics(client: &mut Client, duration: Duration) -> Vec<Value> 
         if remaining.is_zero() {
             return samples;
         }
-        let frame = match tokio::time::timeout(remaining, client.connection.recv()).await {
-            Ok(Ok(Some(frame))) => frame,
-            _ => return samples,
+        // recv_notification replays the inbox first: notifications that
+        // raced an earlier reply (the running event against the start
+        // reply, say) are queued by the Client, never dropped — and the
+        // collection below sees the stream, not the race's leftovers.
+        let value = match tokio::time::timeout(remaining, client.recv_notification()).await {
+            Ok(value) => value,
+            Err(_) => return samples,
         };
-        let value: Value = serde_json::from_slice(&frame).unwrap();
         if value["params"]["stream"] == "metrics" {
             samples.push(value["params"]["payload"]["sample"].clone());
         }

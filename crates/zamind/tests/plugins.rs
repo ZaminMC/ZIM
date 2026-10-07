@@ -233,3 +233,166 @@ async fn mods_target_loader_filter_and_typed_rejections() {
         .expect_err("no installable version for the loader");
     assert_eq!(error["code"], "CATALOG_NOT_FOUND");
 }
+
+fn sha512_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha512};
+    let mut h = Sha512::new();
+    h.update(bytes);
+    h.finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+}
+
+/// The catalog for the updates test: `version_file/{hash}` answers what
+/// the catalog knows per digest (404 for never-published bytes), the
+/// project's version list publishes ver9 — whose primary file is the
+/// jar bytes the /files/ route serves, sha-pinned to `latest_sha`.
+fn spawn_updates_modrinth(latest_jar: Vec<u8>, latest_sha: String, stale_sha: String) -> MockHttp {
+    let jar_for_files = latest_jar.clone();
+    let latest_for_versions = latest_sha.clone();
+    let origin: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let origin_for_handler = Arc::clone(&origin);
+    let latest_for_handler = latest_sha.clone();
+    let stale_for_handler = stale_sha.clone();
+    let mock = MockHttp::spawn(move |path| {
+        if let Some(rest) = path.strip_prefix("/v2/version_file/") {
+            let hash = rest.split('?').next().unwrap_or("");
+            if hash == latest_for_handler {
+                return MockHttpResponse::json(format!(
+                    r#"{{"id": "ver9", "project_id": "AABBCC", "version_number": "2.20.0",
+                        "game_versions": ["1.21.1"], "loaders": ["paper"],
+                        "date_published": "2026-09-01T10:00:00Z",
+                        "files": [{{"url": "http://mock/files/EssentialsX-2.20.0.jar",
+                                   "filename": "EssentialsX-2.20.0.jar", "size": null,
+                                   "primary": true,
+                                   "hashes": {{"sha1": "aa", "sha512": "{latest_for_handler}"}}}}]}}"#
+                ));
+            }
+            if hash == stale_for_handler {
+                return MockHttpResponse::json(format!(
+                    r#"{{"id": "ver8", "project_id": "AABBCC", "version_number": "2.19.0",
+                        "game_versions": ["1.21.1"], "loaders": ["paper"],
+                        "date_published": "2026-03-01T10:00:00Z",
+                        "files": [{{"url": "http://mock/files/EssentialsX-2.19.0.jar",
+                                   "filename": "EssentialsX-2.19.0.jar", "size": null,
+                                   "primary": true,
+                                   "hashes": {{"sha1": "ee", "sha512": "{stale_for_handler}"}}}}]}}"#
+                ));
+            }
+            return MockHttpResponse::not_found();
+        }
+        if path.starts_with("/v2/project/AABBCC/version") {
+            let base = origin_for_handler.lock().unwrap().clone();
+            return MockHttpResponse::json(versions_json(&base, &latest_for_versions));
+        }
+        if path.starts_with("/files/") {
+            return MockHttpResponse::bytes(jar_for_files.clone());
+        }
+        MockHttpResponse::not_found()
+    });
+    *origin.lock().unwrap() = mock.url.clone();
+    mock
+}
+
+#[tokio::test]
+async fn plugins_updates_reports_verdicts_and_the_install_recipe_applies() {
+    // Three jars, three verdicts: the published newest bytes (up to
+    // date), the previous release's bytes (update available), and bytes
+    // the catalog never carried (unmanaged).
+    let latest_jar: Vec<u8> = (0..128 * 1024u32).map(|i| (i % 251) as u8).collect();
+    let latest_sha = sha512_hex(&latest_jar);
+    let stale_jar: Vec<u8> = (0..96 * 1024u32).map(|i| (i % 233) as u8).collect();
+    let stale_sha = sha512_hex(&stale_jar);
+    let manual_jar = b"dropped in by hand, published nowhere".to_vec();
+
+    let modrinth = spawn_updates_modrinth(latest_jar.clone(), latest_sha, stale_sha);
+
+    let data_dir = scoped_dir("plugins-updates");
+    let endpoint = unique_endpoint();
+    let _daemon = spawn_daemon_with(&data_dir, &endpoint, &["--modrinth-url", &modrinth.url]);
+    let mut client = connect_daemon(&endpoint).await;
+
+    let root = make_server_root("updates-target");
+    register_server(&mut client, "plug", &root).await;
+
+    // No plugins directory yet: an empty report, not an error.
+    let result = client
+        .request(methods::PLUGINS_UPDATES, json!({"serverId": "plug"}))
+        .await
+        .expect("plugins.updates on an empty server");
+    assert_eq!(result["target"], "plugins");
+    assert_eq!(result["entries"].as_array().unwrap().len(), 0);
+
+    // Seed the inventory the honest way: a catalog install (the newest
+    // bytes) and a stale jar dropped on disk by the test.
+    let plugins_dir = root.join("plugins");
+    let result = client
+        .request(
+            methods::PLUGINS_INSTALL,
+            json!({"serverId": "plug", "projectId": "AABBCC", "versionId": "ver9"}),
+        )
+        .await
+        .expect("install the newest jar");
+    let job_id = result["job"]["jobId"].as_str().expect("jobId").to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "error: {error:?}");
+    std::fs::write(plugins_dir.join("EssentialsX-2.19.0.jar"), &stale_jar).unwrap();
+    std::fs::write(plugins_dir.join("hand-dropped.jar"), &manual_jar).unwrap();
+
+    // The check: sorted by name, every verdict honest, and the stale
+    // entry carries the full recipe — project id, both version numbers,
+    // and the pin that applies the update.
+    let result = client
+        .request(methods::PLUGINS_UPDATES, json!({"serverId": "plug"}))
+        .await
+        .expect("plugins.updates");
+    let entries = result["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0]["fileName"], "EssentialsX-2.19.0.jar");
+    assert_eq!(entries[0]["status"], "update-available");
+    assert_eq!(entries[0]["projectId"], "AABBCC");
+    assert_eq!(entries[0]["installedVersion"], "2.19.0");
+    assert_eq!(entries[0]["latestVersion"], "2.20.0");
+    assert_eq!(entries[0]["latestVersionId"], "ver9");
+
+    assert_eq!(entries[1]["fileName"], "EssentialsX-2.20.0.jar");
+    assert_eq!(entries[1]["status"], "up-to-date");
+
+    assert_eq!(entries[2]["fileName"], "hand-dropped.jar");
+    assert_eq!(entries[2]["status"], "unmanaged");
+    assert!(entries[2].get("projectId").is_none());
+
+    // The recipe applies through the exact flow the panel uses —
+    // install with the pin and replace, per the update rule.
+    let result = client
+        .request(
+            methods::PLUGINS_INSTALL,
+            json!({
+                "serverId": "plug", "projectId": "AABBCC",
+                "versionId": "ver9", "replace": true
+            }),
+        )
+        .await
+        .expect("apply the update");
+    let job_id = result["job"]["jobId"].as_str().expect("jobId").to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "error: {error:?}");
+    // The update replaced the wrong-version file's neighbor: the newest
+    // jar is in place byte-identical, the stale jar still its own file.
+    assert_eq!(
+        std::fs::read(plugins_dir.join("EssentialsX-2.20.0.jar")).unwrap(),
+        latest_jar
+    );
+    assert_eq!(
+        std::fs::read(plugins_dir.join("EssentialsX-2.19.0.jar")).unwrap(),
+        stale_jar
+    );
+
+    // An unknown server is the usual typed miss.
+    let error = client
+        .request(methods::PLUGINS_UPDATES, json!({"serverId": "ghost"}))
+        .await
+        .expect_err("ghost server");
+    assert_eq!(error["code"], "SERVER_NOT_FOUND");
+}

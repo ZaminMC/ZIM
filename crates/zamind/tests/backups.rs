@@ -29,12 +29,16 @@ async fn wait_job_done(
     let mut saw_started = false;
     let mut saw_progress = false;
     while std::time::Instant::now() < deadline {
-        let frame = tokio::time::timeout(timeout, client.connection.recv())
-            .await
-            .expect("recv within timeout")
-            .expect("open")
-            .expect("frame");
-        let value: Value = serde_json::from_slice(&frame).unwrap();
+        // recv_notification replays the inbox first: the job.started
+        // event races the create reply it answers, and the Client queues
+        // that race's loser instead of dropping it.
+        let value =
+            match tokio::time::timeout(remaining_or_deadline(deadline), client.recv_notification())
+                .await
+            {
+                Ok(value) => value,
+                Err(_) => break,
+            };
         let Some(IncomingMessage::Notification(note)) = IncomingMessage::parse(&value) else {
             continue;
         };
@@ -72,6 +76,10 @@ fn seed_world(root: &std::path::Path) {
     std::fs::write(root.join("world/level.dat"), b"world-v1").unwrap();
     std::fs::write(root.join("world/region/r.0.0.mca"), vec![3u8; 2048]).unwrap();
     std::fs::write(root.join("server.properties"), "motd=before\n").unwrap();
+}
+
+fn remaining_or_deadline(deadline: std::time::Instant) -> Duration {
+    deadline.saturating_duration_since(std::time::Instant::now())
 }
 
 #[tokio::test]
