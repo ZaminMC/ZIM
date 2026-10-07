@@ -40,8 +40,11 @@ struct DaemonConfig {
 const DEFAULT_CATALOG_URL: &str = "https://fill.papermc.io/v3";
 /// The live Adoptium API (Temurin JDK builds).
 const DEFAULT_ADOPTIUM_URL: &str = "https://api.adoptium.net";
-/// The live Modrinth API (plugin catalog).
-const DEFAULT_MODRINTH_URL: &str = "https://api.modrinth.com/v2";
+/// The live Modrinth API (plugin catalog). The base carries NO version
+/// segment: the client appends `/v2/...` itself (`ModrinthClient::new`),
+/// so this constant must stay origin-only — `…/v2` here would compose
+/// `/v2/v2/…` requests that 404 every real jar into "unmanaged".
+const DEFAULT_MODRINTH_URL: &str = "https://api.modrinth.com";
 /// The live FabricMC meta API (the software catalog's Fabric family).
 const DEFAULT_FABRIC_URL: &str = "https://meta.fabricmc.net";
 
@@ -183,5 +186,26 @@ async fn run(config: DaemonConfig) {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_MODRINTH_URL;
+
+    /// The Modrinth client appends `/v2/...` to the base itself
+    /// (`ModrinthClient::new`'s contract; the mock-catalog e2e passes a
+    /// bare URL and would catch a client change). The daemon default is
+    /// the one composition nobody exercises until a real panel meets the
+    /// real API — lock it to origin-only, or every search/install/update
+    /// request doubles the version segment and 404s into "unmanaged".
+    #[test]
+    fn modrinth_default_is_origin_only() {
+        assert!(
+            !DEFAULT_MODRINTH_URL.ends_with("/v2"),
+            "DEFAULT_MODRINTH_URL must not carry the version segment: \
+             the client appends /v2 itself, so {DEFAULT_MODRINTH_URL:?} \
+             would request /v2/v2/... (404s every real jar)"
+        );
     }
 }

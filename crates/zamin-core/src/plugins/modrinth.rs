@@ -79,6 +79,9 @@ pub struct ProjectVersion {
 }
 
 impl ModrinthClient {
+    /// `base` is origin-only (`https://api.modrinth.com`) — every method
+    /// appends the `/v2/...` path segment itself. Passing a base that
+    /// already carries `/v2` composes `/v2/v2/...` requests.
     pub fn new(base: &str) -> ModrinthClient {
         ModrinthClient {
             base: base.trim_end_matches('/').to_owned(),
