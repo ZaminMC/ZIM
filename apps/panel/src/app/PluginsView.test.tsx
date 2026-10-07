@@ -1,0 +1,179 @@
+// Plugins: the catalog answers, the install button becomes a job, and
+// the inventory is the directory's truth. The daemon side is e2e-tested
+// against a real mock catalog (crates/zamind/tests/plugins.rs); here the
+// view's contract holds: search renders hits, install hands the job to
+// the jobs store, completion refreshes the inventory, delete confirms.
+
+import { fireEvent, render, screen, cleanup, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PluginsView } from "./PluginsView";
+import { useJobs } from "../state/jobs";
+
+const mocks = vi.hoisted(() => ({
+  pluginsSearch: vi.fn(),
+  pluginsInstalled: vi.fn(),
+  pluginsInstall: vi.fn(),
+  pluginsDelete: vi.fn(),
+}));
+
+vi.mock("../state/actions", () => ({
+  pluginsSearch: mocks.pluginsSearch,
+  pluginsInstalled: mocks.pluginsInstalled,
+  pluginsInstall: mocks.pluginsInstall,
+  pluginsDelete: mocks.pluginsDelete,
+}));
+
+beforeEach(() => {
+  useJobs.setState({ jobs: {} });
+  mocks.pluginsSearch.mockReset();
+  mocks.pluginsInstalled.mockReset().mockResolvedValue({
+    target: "plugins",
+    entries: [],
+  });
+  mocks.pluginsInstall.mockReset();
+  mocks.pluginsDelete.mockReset();
+});
+
+afterEach(cleanup);
+
+describe("PluginsView", () => {
+  it("shows the daemon's target and the empty-catalog note", async () => {
+    render(<PluginsView serverId="alpha" />);
+    await waitFor(() =>
+      expect(screen.getByText(/Installs land in plugins\//)).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/Search the catalog to install a plugin/),
+    ).toBeTruthy();
+  });
+
+  it("renders search hits with install buttons", async () => {
+    mocks.pluginsSearch.mockResolvedValue({
+      target: "plugins",
+      hits: [
+        {
+          projectId: "AABBCC",
+          slug: "essentialsx",
+          title: "EssentialsX",
+          description: "The essential plugin suite.",
+          downloads: 4000000,
+          loaders: ["paper", "spigot"],
+        },
+      ],
+    });
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.change(screen.getByLabelText(/Search the plugin catalog/), {
+      target: { value: "essentials" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
+
+    expect(await screen.findByText("EssentialsX")).toBeTruthy();
+    expect(screen.getByText(/4,000,000 downloads · paper, spigot/)).toBeTruthy();
+    const install = screen.getByRole<HTMLButtonElement>("button", { name: "Install" });
+    expect(install.disabled).toBe(false);
+  });
+
+  it("an install hands the job to the store and the progress chip shows", async () => {
+    mocks.pluginsSearch.mockResolvedValue({
+      target: "plugins",
+      hits: [
+        {
+          projectId: "AABBCC",
+          slug: "essentialsx",
+          title: "EssentialsX",
+          description: "Suite.",
+          downloads: 1,
+          loaders: ["paper"],
+        },
+      ],
+    });
+    mocks.pluginsInstall.mockResolvedValue({
+      kind: "plugins.install",
+      job: {
+        jobId: "job-1",
+        kind: "plugins.install",
+        serverId: "alpha",
+        state: "running",
+        createdAtMs: 1,
+      },
+    });
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.change(screen.getByLabelText(/Search the plugin catalog/), {
+      target: { value: "essentials" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() => expect(mocks.pluginsInstall).toHaveBeenCalledWith("alpha", "AABBCC"));
+    expect(mocks.pluginsInstall).toHaveBeenCalledTimes(1);
+
+    // The daemon broadcasts job events on the wire; the store is the
+    // panel's reconciled truth. Progress arrives; the chip shows it.
+    useJobs.getState().started({
+      jobId: "job-1",
+      kind: "plugins.install",
+      serverId: "alpha",
+      state: "running",
+      createdAtMs: 1,
+      progress: { current: 640, total: 1024, unit: "bytes", message: "installing EssentialsX-2.20.0.jar" },
+    });
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.getByText("installing EssentialsX-2.20.0.jar")).toBeTruthy();
+
+    // While the job runs, installs stay disabled (one at a time).
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Install" }).disabled,
+    ).toBe(true);
+
+    // Completion releases the busy state and refreshes the inventory.
+    useJobs.getState().completed("job-1", "succeeded");
+    mocks.pluginsInstalled.mockResolvedValueOnce({
+      target: "plugins",
+      entries: [
+        {
+          fileName: "EssentialsX-2.20.0.jar",
+          sizeBytes: 1024,
+          modifiedMs: 1,
+          symlinkOutside: false,
+        },
+      ],
+    });
+    await waitFor(() =>
+      expect(screen.getByText("EssentialsX-2.20.0.jar")).toBeTruthy(),
+    );
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Install" }).disabled,
+    ).toBe(false);
+  });
+
+  it("a typed install rejection surfaces as an alert, not a stuck button", async () => {
+    mocks.pluginsSearch.mockResolvedValue({
+      target: "plugins",
+      hits: [
+        {
+          projectId: "GHOST",
+          slug: "ghost",
+          title: "Ghost Plugin",
+          description: "Nothing installable.",
+          downloads: 0,
+          loaders: ["paper"],
+        },
+      ],
+    });
+    mocks.pluginsInstall.mockRejectedValue(
+      new Error("No installable plugins version found for this project."),
+    );
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.change(screen.getByLabelText(/Search the plugin catalog/), {
+      target: { value: "ghost" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText(/No installable plugins version/)).toBeTruthy();
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Install" }).disabled,
+    ).toBe(false);
+  });
+});

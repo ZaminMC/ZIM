@@ -1,0 +1,196 @@
+.plugins {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+}
+
+.target {
+  font-size: var(--text-s);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.searchForm {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.search {
+  width: 220px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--text-s);
+  padding: 6px 10px;
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--accent-border);
+}
+
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.jobBar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+  display: block;
+}
+
+.jobFill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 200ms ease;
+}
+
+.jobText {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.alert {
+  border: 1px solid rgba(220, 100, 100, 0.4);
+  background: rgba(220, 100, 100, 0.08);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  font-size: var(--text-s);
+}
+
+.emptyNote {
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  margin: 0;
+}
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hitBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hitTitle {
+  font-weight: 600;
+  font-size: var(--text-s);
+  color: var(--text);
+}
+
+.hitDesc {
+  font-size: var(--text-s);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hitMeta {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.installedBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.installedLabel {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.installedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.installed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-s);
+}
+
+.installedName {
+  font-family: var(--font-mono, monospace);
+  color: var(--text);
+}
+
+.installedMeta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.badge {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.remove {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 0;
+}
+
+.remove:hover {
+  color: var(--text);
+}

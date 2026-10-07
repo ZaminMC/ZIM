@@ -143,7 +143,8 @@ export type JobKind =
   | "backup.create"
   | "backup.restore"
   | "archive.extract"
-  | "java.install";
+  | "java.install"
+  | "plugins.install";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type JobOutcome = "succeeded" | "failed" | "cancelled";
 export type BackupTaken = "live" | "cold";
@@ -461,3 +462,53 @@ export interface JavaInstallParams {
 }
 
 export type JavaInstallResult = BackupJobResult;
+
+// --- plugin catalog (§7d, ADR-0012) ---
+
+export interface PluginSearchHit {
+  projectId: string;
+  slug: string;
+  title: string;
+  description: string;
+  downloads: number;
+  iconUrl?: string;
+  loaders: string[];
+}
+
+export interface PluginsSearchResult {
+  /** Where installs land for this server ("plugins" or "mods"). */
+  target: string;
+  hits: PluginSearchHit[];
+}
+
+export interface PluginVersionInfo {
+  id: string;
+  versionNumber: string;
+  gameVersions: string[];
+  loaders: string[];
+  datePublished?: string;
+  fileName?: string;
+  sizeBytes?: number;
+}
+
+export interface PluginsVersionsResult {
+  target: string;
+  versions: PluginVersionInfo[];
+}
+
+export interface InstalledPlugin {
+  fileName: string;
+  sizeBytes: number;
+  modifiedMs: number;
+  symlinkOutside: boolean;
+}
+
+export interface PluginsInstalledResult {
+  target: string;
+  entries: InstalledPlugin[];
+}
+
+export interface PluginsInstallResult {
+  kind: JobKind;
+  job: Job;
+}

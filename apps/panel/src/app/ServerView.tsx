@@ -27,6 +27,7 @@ import {
   IconFolder,
   IconLogs,
   IconPlayers,
+  IconPuzzle,
   IconTerminal,
 } from "../ui/icons";
 import { CrashCard } from "./CrashCard";
@@ -34,6 +35,7 @@ import { FilesView } from "./FilesView";
 import { LogViewer } from "./LogViewer";
 import { MetricsView } from "./MetricsView";
 import { PlayersView } from "./PlayersView";
+import { PluginsView } from "./PluginsView";
 import { BackupsView } from "./BackupsView";
 import styles from "./ServerView.module.css";
 
@@ -73,6 +75,7 @@ const LOWER_VIEWS = [
   { id: "logs", label: "Logs", icon: IconLogs },
   { id: "files", label: "Files", icon: IconFolder },
   { id: "players", label: "Players", icon: IconPlayers },
+  { id: "plugins", label: "Plugins", icon: IconPuzzle },
   { id: "backups", label: "Backups", icon: IconBackups },
 ] as const;
 
@@ -278,6 +281,8 @@ export function ServerView({ serverId }: { serverId: string }) {
             <FilesView serverId={serverId} />
           ) : lowerView === "players" ? (
             <PlayersView serverId={serverId} />
+          ) : lowerView === "plugins" ? (
+            <PluginsView serverId={serverId} />
           ) : (
             <BackupsView serverId={serverId} running={server.state === "running"} />
           )}

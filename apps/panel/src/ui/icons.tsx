@@ -142,3 +142,11 @@ export function IconWake(p: IconProps) {
     </svg>
   );
 }
+
+export function IconPuzzle(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M10 3.5a1.75 1.75 0 0 1 3.5 0V5h3a1.5 1.5 0 0 1 1.5 1.5v3h1.5a1.75 1.75 0 0 1 0 3.5H18v4a1.5 1.5 0 0 1-1.5 1.5h-4V17a1.75 1.75 0 0 0-3.5 0v1.5h-4A1.5 1.5 0 0 1 3.5 17v-4H5a1.75 1.75 0 0 0 0-3.5H3.5v-3A1.5 1.5 0 0 1 5 5h5V3.5Z" />
+    </svg>
+  );
+}

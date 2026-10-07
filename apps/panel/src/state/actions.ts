@@ -34,6 +34,10 @@ import type {
   StreamCursor,
   SubscribeResult,
   UpdateServerParams,
+  PluginsSearchResult,
+  PluginsVersionsResult,
+  PluginsInstalledResult,
+  PluginsInstallResult,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -326,4 +330,40 @@ export async function installJava(majorVersion: number): Promise<JavaInstallResu
     requestId: newRequestId(),
     majorVersion,
   });
+}
+
+// --- plugin catalog (§7d, ADR-0012) ---
+
+export async function pluginsSearch(
+  serverId: string,
+  query: string,
+): Promise<PluginsSearchResult> {
+  return client.request<PluginsSearchResult>("plugins.search", { serverId, query, limit: 20 });
+}
+
+export async function pluginsVersions(
+  serverId: string,
+  projectId: string,
+): Promise<PluginsVersionsResult> {
+  return client.request<PluginsVersionsResult>("plugins.versions", { serverId, projectId });
+}
+
+export async function pluginsInstalled(serverId: string): Promise<PluginsInstalledResult> {
+  return client.request<PluginsInstalledResult>("plugins.installed", { serverId });
+}
+
+export async function pluginsInstall(
+  serverId: string,
+  projectId: string,
+  versionId?: string,
+): Promise<PluginsInstallResult> {
+  return client.request<PluginsInstallResult>("plugins.install", {
+    serverId,
+    projectId,
+    ...(versionId === undefined ? {} : { versionId }),
+  });
+}
+
+export async function pluginsDelete(serverId: string, fileName: string): Promise<void> {
+  await client.request("plugins.delete", { serverId, fileName });
 }
