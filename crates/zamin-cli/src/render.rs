@@ -10,6 +10,7 @@ use zamin_protocol::plugins::{
     PluginUpdateStatus, PluginsInstalledResult, PluginsSearchResult, PluginsUpdatesResult,
     PluginsVersionsResult,
 };
+use zamin_protocol::schedules::{ScheduleAction, ScheduleSpec, SchedulesListResult};
 use zamin_protocol::server::{ServerDetails, ServerState, ServerSummary};
 use zamin_protocol::streams::{LogLevel, LogLine};
 
@@ -474,6 +475,87 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 fn width_of<'a>(values: impl Iterator<Item = &'a str>) -> usize {
     values.map(|value| value.len()).max().unwrap_or(0)
+}
+
+/// One line per schedule: the when in words, the action, the clock's
+/// memory. The when reads like the operator wrote it ("daily at 04:30"),
+/// not like the JSON it is stored as.
+pub fn schedule_spec_text(spec: &ScheduleSpec) -> String {
+    match spec {
+        ScheduleSpec::Interval { every_secs } => {
+            let secs = *every_secs;
+            if secs % 3600 == 0 {
+                format!("every {} h", secs / 3600)
+            } else if secs % 60 == 0 {
+                format!("every {} min", secs / 60)
+            } else {
+                format!("every {secs} s")
+            }
+        }
+        ScheduleSpec::Daily { at } => format!("daily at {at}"),
+        ScheduleSpec::Weekly { weekdays, at } => {
+            format!("weekly ({}) at {at}", weekdays.join(","))
+        }
+    }
+}
+
+fn schedule_action_text(action: &ScheduleAction) -> String {
+    match action {
+        ScheduleAction::Restart => "restart".to_owned(),
+        ScheduleAction::Backup => "backup".to_owned(),
+        ScheduleAction::Command { line } => format!("console: {line}"),
+    }
+}
+
+pub fn schedule_table(result: &SchedulesListResult) {
+    if result.schedules.is_empty() {
+        println!(
+            "No schedules for {} — the daemon runs the clock, but nobody has\n\
+             asked it for anything yet (zamin schedules add).",
+            result.server_id
+        );
+        return;
+    }
+    let name_width = width_of(result.schedules.iter().map(|s| s.schedule.name.as_str())).max(4);
+    println!(
+        "Schedules for {} (times are the daemon's own clock):\n",
+        result.server_id
+    );
+    println!(
+        "{:<name_width$}  {:<24}  {:<20}  CLOCK",
+        "NAME",
+        "WHEN",
+        "THEN",
+        name_width = name_width
+    );
+    for schedule in &result.schedules {
+        let status = if !schedule.schedule.enabled {
+            "paused".to_owned()
+        } else {
+            match schedule.schedule.last_fired_ms {
+                Some(fired) => format!("fired {}", utc_date_text(fired)),
+                None => "never fired".to_owned(),
+            }
+        };
+        println!(
+            "{:<name_width$}  {:<24}  {:<20}  {}",
+            schedule.schedule.name,
+            schedule_spec_text(&schedule.schedule.spec),
+            schedule_action_text(&schedule.schedule.action),
+            status,
+            name_width = name_width
+        );
+        if schedule.schedule.enabled {
+            if let Some(next) = schedule.next_run_ms {
+                println!(
+                    "{:<name_width$}  next run {}",
+                    "",
+                    utc_date_text(next),
+                    name_width = name_width
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

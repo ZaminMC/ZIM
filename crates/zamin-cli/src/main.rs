@@ -135,6 +135,12 @@ enum Commands {
         #[command(subcommand)]
         command: PluginsCommands,
     },
+    /// Server schedules (ADR-0014): the daemon fires timed restarts,
+    /// backups, and console lines itself
+    Schedules {
+        #[command(subcommand)]
+        command: SchedulesCommands,
+    },
     /// Long-running daemon jobs: installs, backups, downloads
     Jobs {
         #[command(subcommand)]
@@ -194,6 +200,52 @@ enum PluginsCommands {
     /// Check the catalog for updates of the installed jars: the disk's
     /// bytes identify each jar, the catalog answers what it publishes
     Updates { server_id: String },
+}
+
+#[derive(Subcommand)]
+enum SchedulesCommands {
+    /// List the server's schedules and the clock's memory of each
+    List { server_id: String },
+    /// Add a schedule. The when is one of: --every SECS (a fixed
+    /// interval while the daemon runs), --at HH:MM (every day, the
+    /// daemon's local clock), or --weekdays mon,wed --at HH:MM. The
+    /// then is a restart (default), --backup, or --command "LINE".
+    Add {
+        server_id: String,
+        /// A short name shown in the panel
+        #[arg(long)]
+        name: String,
+        /// Fire every SECONDS while the daemon runs
+        #[arg(long, value_name = "SECS", conflicts_with_all = ["at", "weekdays"])]
+        every: Option<u64>,
+        /// Daily fire time, 24-hour HH:MM (the daemon's local clock)
+        #[arg(long, value_name = "HH:MM", conflicts_with = "every")]
+        at: Option<String>,
+        /// Weekly fire days with --at: mon,tue,wed,thu,fri,sat,sun
+        #[arg(long, value_name = "DAYS", requires = "at")]
+        weekdays: Option<String>,
+        /// Take a backup instead of restarting
+        #[arg(long, conflicts_with = "command")]
+        backup: bool,
+        /// Send this console line instead of restarting
+        #[arg(long, value_name = "LINE", conflicts_with = "backup")]
+        command: Option<String>,
+    },
+    /// Remove a schedule (the id comes from `schedules list`)
+    Remove {
+        server_id: String,
+        schedule_id: String,
+    },
+    /// Pause a schedule: the clock skips it entirely
+    Pause {
+        server_id: String,
+        schedule_id: String,
+    },
+    /// Resume a paused schedule
+    Resume {
+        server_id: String,
+        schedule_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -486,6 +538,45 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             JobsCommands::List => jobs_list(&cli, &client).await,
             JobsCommands::Get { job_id } => jobs_get(&cli, &client, job_id).await,
             JobsCommands::Cancel { job_id } => jobs_cancel(&cli, &client, job_id).await,
+        },
+        Commands::Schedules { command } => match command {
+            SchedulesCommands::List { server_id } => schedules_list(&cli, &client, server_id).await,
+            SchedulesCommands::Add {
+                server_id,
+                name,
+                every,
+                at,
+                weekdays,
+                backup,
+                command: command_line,
+            } => {
+                schedules_add(
+                    &cli,
+                    &client,
+                    server_id,
+                    name,
+                    SchedulesAddOpts {
+                        every: *every,
+                        at: at.clone(),
+                        weekdays: weekdays.clone(),
+                        backup: *backup,
+                        command: command_line.clone(),
+                    },
+                )
+                .await
+            }
+            SchedulesCommands::Remove {
+                server_id,
+                schedule_id,
+            } => schedules_remove(&cli, &client, server_id, schedule_id).await,
+            SchedulesCommands::Pause {
+                server_id,
+                schedule_id,
+            } => schedules_pause_resume(&cli, &client, server_id, schedule_id, false).await,
+            SchedulesCommands::Resume {
+                server_id,
+                schedule_id,
+            } => schedules_pause_resume(&cli, &client, server_id, schedule_id, true).await,
         },
     }
 }
@@ -1041,4 +1132,168 @@ fn protocol_with_usage_hint(error: ClientError) -> Failure {
             .push_str("\n  (list registered servers with `zamin list`)");
     }
     failure
+}
+
+// --- schedules (ADR-0014) ------------------------------------------------
+
+/// The add command's knobs, bundled like InstallOpts so the call site
+/// reads like the operator's sentence.
+struct SchedulesAddOpts {
+    every: Option<u64>,
+    at: Option<String>,
+    weekdays: Option<String>,
+    backup: bool,
+    command: Option<String>,
+}
+
+async fn schedules_list(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let params = zamin_protocol::schedules::SchedulesListParams {
+        server_id: server_id.to_owned(),
+    };
+    let result: zamin_protocol::schedules::SchedulesListResult = client
+        .request_typed(methods::SCHEDULES_LIST, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::schedule_table(&result);
+    Ok(())
+}
+
+async fn schedules_add(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    name: &str,
+    opts: SchedulesAddOpts,
+) -> CmdResult {
+    let SchedulesAddOpts {
+        every,
+        at,
+        weekdays,
+        backup,
+        command,
+    } = opts;
+
+    // The when: exactly one shape. clap refuses --every with --at, but a
+    // missing when is a usage error this message explains.
+    let spec = if let Some(secs) = every {
+        zamin_protocol::schedules::ScheduleSpec::Interval { every_secs: secs }
+    } else if let Some(at) = &at {
+        let weekdays = match weekdays {
+            Some(days) => {
+                let list: Vec<String> = days
+                    .split(',')
+                    .map(|day| day.trim().to_ascii_lowercase())
+                    .filter(|day| !day.is_empty())
+                    .collect();
+                if list.is_empty() {
+                    return Err(Failure::error(
+                        "--weekdays needs at least one day (mon..sun)".to_owned(),
+                    ));
+                }
+                list
+            }
+            None => Vec::new(),
+        };
+        if weekdays.is_empty() {
+            zamin_protocol::schedules::ScheduleSpec::Daily { at: at.clone() }
+        } else {
+            zamin_protocol::schedules::ScheduleSpec::Weekly {
+                weekdays,
+                at: at.clone(),
+            }
+        }
+    } else {
+        return Err(Failure::error(
+            "pick a when: --every SECS, --at HH:MM (daily), or --weekdays DAYS --at HH:MM"
+                .to_owned(),
+        ));
+    };
+
+    // The then: restart (default), backup, or a console line.
+    let action = if let Some(line) = command {
+        zamin_protocol::schedules::ScheduleAction::Command { line }
+    } else if backup {
+        zamin_protocol::schedules::ScheduleAction::Backup
+    } else {
+        zamin_protocol::schedules::ScheduleAction::Restart
+    };
+
+    let params = zamin_protocol::schedules::SchedulesCreateParams {
+        server_id: server_id.to_owned(),
+        name: name.to_owned(),
+        spec,
+        action,
+        enabled: true,
+    };
+    let result: zamin_protocol::schedules::SchedulesCreateResult = client
+        .request_typed(methods::SCHEDULES_CREATE, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!(
+        "Schedule {:?} added ({}) — the daemon fires it from its own clock.",
+        result.schedule.schedule.name,
+        render::schedule_spec_text(&result.schedule.schedule.spec),
+    );
+    println!(
+        "Pause or remove it any time: `zamin schedules pause/remove {server_id} {}`.",
+        result.schedule.schedule.id
+    );
+    Ok(())
+}
+
+async fn schedules_remove(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    schedule_id: &str,
+) -> CmdResult {
+    let params = zamin_protocol::schedules::SchedulesDeleteParams {
+        server_id: server_id.to_owned(),
+        schedule_id: schedule_id.to_owned(),
+    };
+    let _: zamin_protocol::server::EmptyResult = client
+        .request_typed(methods::SCHEDULES_DELETE, params)
+        .await?;
+    if cli.json {
+        print_json(&serde_json::json!({ "removed": schedule_id }));
+        return Ok(());
+    }
+    println!("Schedule {schedule_id} removed.");
+    Ok(())
+}
+
+async fn schedules_pause_resume(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    schedule_id: &str,
+    enabled: bool,
+) -> CmdResult {
+    let params = zamin_protocol::schedules::SchedulesUpdateParams {
+        server_id: server_id.to_owned(),
+        schedule_id: schedule_id.to_owned(),
+        name: None,
+        spec: None,
+        action: None,
+        enabled: Some(enabled),
+    };
+    let result: zamin_protocol::schedules::SchedulesUpdateResult = client
+        .request_typed(methods::SCHEDULES_UPDATE, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!(
+        "Schedule {:?} is now {}.",
+        result.schedule.schedule.name,
+        if enabled { "resumed" } else { "paused" },
+    );
+    Ok(())
 }

@@ -2130,20 +2130,27 @@ impl Engine {
         schedule: &zamin_protocol::schedules::Schedule,
         tick: &zamin_core::schedules::Tick,
     ) -> zamin_protocol::schedules::ScheduleView {
-        let next_run_ms = match zamin_core::schedules::allowed_minutes(&schedule.spec) {
-            Ok(allowed) => zamin_core::schedules::next_run_hint(
-                &zamin_core::schedules::DueContext {
-                    spec: &schedule.spec,
-                    allowed: &allowed,
-                    created_ms: schedule.created_ms,
-                    last_fired_ms: schedule.last_fired_ms,
-                    anchor_ms: self.inner.boot_ms,
-                },
-                tick,
-            ),
-            // Stored garbage (a hand-edited file): the clock refuses to
-            // fire it and the hint is honest about not knowing.
-            Err(_) => None,
+        // A paused schedule has no next run — the clock skips it entirely,
+        // and the view says so instead of hinting at a fire that cannot
+        // happen.
+        let next_run_ms = if !schedule.enabled {
+            None
+        } else {
+            match zamin_core::schedules::allowed_minutes(&schedule.spec) {
+                Ok(allowed) => zamin_core::schedules::next_run_hint(
+                    &zamin_core::schedules::DueContext {
+                        spec: &schedule.spec,
+                        allowed: &allowed,
+                        created_ms: schedule.created_ms,
+                        last_fired_ms: schedule.last_fired_ms,
+                        anchor_ms: self.inner.boot_ms,
+                    },
+                    tick,
+                ),
+                // Stored garbage (a hand-edited file): the clock refuses
+                // to fire it and the hint is honest about not knowing.
+                Err(_) => None,
+            }
         };
         zamin_protocol::schedules::ScheduleView {
             schedule: schedule.clone(),
