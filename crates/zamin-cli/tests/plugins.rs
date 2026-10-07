@@ -125,14 +125,14 @@ const SEARCH_JSON: &str = r#"{
 fn versions_json(origin: &str, sha_v1: &str, sha_v2: &str) -> String {
     format!(
         r#"[
-  {{"id": "ver9", "version_number": "2.20.0", "game_versions": ["1.21.1"],
-   "loaders": ["paper"], "date_published": "2026-09-01T10:00:00Z",
-   "files": [{{"url": "{origin}/files/v1/EssentialsX-2.20.0.jar", "filename": "EssentialsX-2.20.0.jar",
-              "size": null, "primary": true, "hashes": {{"sha1": "aa", "sha512": "{sha_v1}"}}}}]}},
   {{"id": "ver10", "version_number": "2.21.0", "game_versions": ["1.21.1"],
    "loaders": ["paper"], "date_published": "2026-10-01T10:00:00Z",
    "files": [{{"url": "{origin}/files/v2/EssentialsX-2.20.0.jar", "filename": "EssentialsX-2.20.0.jar",
               "size": null, "primary": true, "hashes": {{"sha1": "ab", "sha512": "{sha_v2}"}}}}]}},
+  {{"id": "ver9", "version_number": "2.20.0", "game_versions": ["1.21.1"],
+   "loaders": ["paper"], "date_published": "2026-09-01T10:00:00Z",
+   "files": [{{"url": "{origin}/files/v1/EssentialsX-2.20.0.jar", "filename": "EssentialsX-2.20.0.jar",
+              "size": null, "primary": true, "hashes": {{"sha1": "aa", "sha512": "{sha_v1}"}}}}]}},
   {{"id": "ver7", "version_number": "1.0-fabric", "game_versions": ["1.21"],
    "loaders": ["fabric"], "date_published": "2026-01-01T10:00:00Z",
    "files": [{{"url": "{origin}/files/fabric.jar", "filename": "fabric.jar",
@@ -148,7 +148,35 @@ fn spawn_modrinth(jar_v1: Vec<u8>, jar_v2: Vec<u8>) -> MockHttp {
     let origin_for_handler = Arc::clone(&origin);
     let sha_v1 = sha512_hex(&jar_v1);
     let sha_v2 = sha512_hex(&jar_v2);
+    let sha_v1_for_hash = sha_v1.clone();
+    let sha_v2_for_hash = sha_v2.clone();
     let mock = MockHttp::spawn(move |path| {
+        if let Some(rest) = path.strip_prefix("/v2/version_file/") {
+            // The update check's "what is this jar?" — the catalog answers
+            // per digest, 404 for bytes it never published.
+            let hash = rest.split('?').next().unwrap_or("");
+            if hash == sha_v1_for_hash {
+                return MockHttpResponse::json(format!(
+                    r#"{{"id": "ver9", "project_id": "AABBCC", "version_number": "2.20.0",
+                        "game_versions": ["1.21.1"], "loaders": ["paper"],
+                        "files": [{{"url": "http://mock/files/v1/EssentialsX-2.20.0.jar",
+                                   "filename": "EssentialsX-2.20.0.jar", "size": null,
+                                   "primary": true,
+                                   "hashes": {{"sha1": "aa", "sha512": "{sha_v1_for_hash}"}}}}]}}"#
+                ));
+            }
+            if hash == sha_v2_for_hash {
+                return MockHttpResponse::json(format!(
+                    r#"{{"id": "ver10", "project_id": "AABBCC", "version_number": "2.21.0",
+                        "game_versions": ["1.21.1"], "loaders": ["paper"],
+                        "files": [{{"url": "http://mock/files/v2/EssentialsX-2.20.0.jar",
+                                   "filename": "EssentialsX-2.20.0.jar", "size": null,
+                                   "primary": true,
+                                   "hashes": {{"sha1": "ab", "sha512": "{sha_v2_for_hash}"}}}}]}}"#
+                ));
+            }
+            return MockHttpResponse::not_found();
+        }
         if path.starts_with("/v2/search") {
             return MockHttpResponse::json(SEARCH_JSON);
         }
@@ -210,8 +238,10 @@ fn cli_drives_the_plugin_catalog_end_to_end() {
     let versions = harness.zamin_json(&["plugins", "versions", "demo", "AABBCC"]);
     let list = versions["versions"].as_array().expect("versions array");
     assert_eq!(list.len(), 2);
-    assert_eq!(list[0]["versionNumber"], "2.20.0");
-    assert_eq!(list[1]["versionNumber"], "2.21.0");
+    // Newest first, as the catalog returns them — the daemon never
+    // reorders a catalog's own ordering.
+    assert_eq!(list[0]["versionNumber"], "2.21.0");
+    assert_eq!(list[1]["versionNumber"], "2.20.0");
 
     // Install, waiting on the job: the jar lands byte-identical.
     let installed = harness.zamin_json(&["plugins", "install", "demo", "AABBCC", "--wait"]);
@@ -369,4 +399,82 @@ fn cli_updates_a_plugin_through_the_typed_replace_rule() {
     // Still exactly one jar: an update, not an accumulation.
     let inventory = harness.zamin_json(&["plugins", "installed", "demo"]);
     assert_eq!(inventory["entries"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn cli_plugins_updates_reports_verdicts_and_the_recipe_applies() {
+    let jar_v1 = b"cli updates test: version nine bytes".to_vec();
+    let jar_v2 = b"cli updates test: version ten bytes".to_vec();
+    let mock = spawn_modrinth(jar_v1.clone(), jar_v2.clone());
+
+    let harness = Harness::spawn_with(
+        &unique_endpoint_tag("cli-updates"),
+        &["--modrinth-url".to_owned(), mock.url.clone()],
+    );
+    harness.zamin_quiet(&["register", "demo", harness.root.to_str().unwrap()]);
+
+    // Nothing installed, nothing to check.
+    let empty = harness.zamin_json(&["plugins", "updates", "demo"]);
+    assert_eq!(empty["target"], "plugins");
+    assert_eq!(empty["entries"].as_array().unwrap().len(), 0);
+
+    // Install the older version, then drop a jar the catalog never
+    // carried — two of the three verdicts on one server.
+    let installed = harness.zamin_json(&[
+        "plugins",
+        "install",
+        "demo",
+        "AABBCC",
+        "--version",
+        "ver9",
+        "--wait",
+    ]);
+    assert_eq!(installed["state"], "succeeded", "install: {installed}");
+    let manual = harness.root.join("plugins").join("hand-dropped.jar");
+    std::fs::write(&manual, b"published nowhere").unwrap();
+
+    // The human table names every verdict; JSON carries the recipe.
+    let table = harness.zamin(&["plugins", "updates", "demo"]);
+    assert!(table.status.success());
+    let stdout = String::from_utf8_lossy(&table.stdout);
+    assert!(stdout.contains("UPDATE AVAILABLE"), "table: {stdout}");
+    assert!(stdout.contains("unmanaged"), "table: {stdout}");
+    assert!(stdout.contains("2.21.0"), "latest shown: {stdout}");
+
+    let updates = harness.zamin_json(&["plugins", "updates", "demo"]);
+    let entries = updates["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["fileName"], "EssentialsX-2.20.0.jar");
+    assert_eq!(entries[0]["status"], "update-available");
+    assert_eq!(entries[0]["projectId"], "AABBCC");
+    assert_eq!(entries[0]["installedVersion"], "2.20.0");
+    assert_eq!(entries[0]["latestVersion"], "2.21.0");
+    assert_eq!(entries[0]["latestVersionId"], "ver10");
+    assert_eq!(entries[1]["fileName"], "hand-dropped.jar");
+    assert_eq!(entries[1]["status"], "unmanaged");
+    assert!(entries[1].get("projectId").is_none());
+
+    // The printed recipe applies verbatim: install the pin with --replace.
+    let applied = harness.zamin(&[
+        "plugins",
+        "install",
+        "demo",
+        "AABBCC",
+        "--version",
+        "ver10",
+        "--wait",
+        "--replace",
+    ]);
+    assert!(applied.status.success(), "apply: {}", applied.status);
+
+    // The updated jar now reads up to date; the manual jar stays honest.
+    let after = harness.zamin_json(&["plugins", "updates", "demo"]);
+    let after = after["entries"].as_array().unwrap();
+    assert_eq!(after[0]["status"], "up-to-date");
+    assert_eq!(after[1]["status"], "unmanaged");
+    assert_eq!(
+        std::fs::read(harness.root.join("plugins").join("EssentialsX-2.20.0.jar")).unwrap(),
+        jar_v2
+    );
+    assert!(manual.exists(), "the unmanaged jar is never touched");
 }

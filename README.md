@@ -37,6 +37,7 @@ zamin plugins search <id> [words]   # the catalog (ADR-0012), loader-faceted
 zamin plugins versions <id> <pid>   # the pin list for one project
 zamin plugins install <id> <pid> [--version ID] [--wait]   # a job; --wait follows bytes
 zamin plugins installed <id>        # the target directory is the inventory
+zamin plugins updates <id>          # the update check: the disk's bytes vs the catalog
 zamin plugins delete <id> <file> [--yes]
 zamin jobs list                     # installs, backups, downloads — running and finished
 zamin jobs get|cancel <job-id>

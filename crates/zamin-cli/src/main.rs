@@ -185,6 +185,9 @@ enum PluginsCommands {
         #[arg(long)]
         yes: bool,
     },
+    /// Check the catalog for updates of the installed jars: the disk's
+    /// bytes identify each jar, the catalog answers what it publishes
+    Updates { server_id: String },
 }
 
 #[derive(Subcommand)]
@@ -465,6 +468,9 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 file_name,
                 yes: _,
             } => plugins_delete(&cli, &client, server_id, file_name).await,
+            PluginsCommands::Updates { server_id } => {
+                plugins_updates(&cli, &client, server_id).await
+            }
         },
         Commands::Jobs { command } => match command {
             JobsCommands::List => jobs_list(&cli, &client).await,
@@ -820,6 +826,21 @@ async fn plugins_installed(cli: &Cli, client: &Client, server_id: &str) -> CmdRe
         return Ok(());
     }
     render::installed_plugins(&result);
+    Ok(())
+}
+
+async fn plugins_updates(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let params = zamin_protocol::plugins::PluginsUpdatesParams {
+        server_id: server_id.to_owned(),
+    };
+    let result: zamin_protocol::plugins::PluginsUpdatesResult = client
+        .request_typed(methods::PLUGINS_UPDATES, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::plugin_updates(&result);
     Ok(())
 }
 

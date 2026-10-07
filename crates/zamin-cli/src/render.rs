@@ -6,7 +6,10 @@ use zamin_cli::ClientError;
 use zamin_ipc::{Endpoint, IpcError};
 use zamin_protocol::error::ProtocolError;
 use zamin_protocol::jobs::{Job, JobKind, JobState};
-use zamin_protocol::plugins::{PluginsInstalledResult, PluginsSearchResult, PluginsVersionsResult};
+use zamin_protocol::plugins::{
+    PluginUpdateStatus, PluginsInstalledResult, PluginsSearchResult, PluginsUpdatesResult,
+    PluginsVersionsResult,
+};
 use zamin_protocol::server::{ServerDetails, ServerState, ServerSummary};
 use zamin_protocol::streams::{LogLevel, LogLine};
 
@@ -263,6 +266,66 @@ pub fn installed_plugins(result: &PluginsInstalledResult) {
         );
     }
     println!("\nDelete with `zamin plugins delete <server> <file-name>`.");
+}
+
+fn update_status_text(status: &PluginUpdateStatus) -> &'static str {
+    match status {
+        PluginUpdateStatus::UpToDate => "up to date",
+        PluginUpdateStatus::UpdateAvailable => "UPDATE AVAILABLE",
+        PluginUpdateStatus::Unmanaged => "unmanaged",
+    }
+}
+
+pub fn plugin_updates(result: &PluginsUpdatesResult) {
+    if result.entries.is_empty() {
+        println!("No plugin jars in `{}` — nothing to check.", result.target);
+        return;
+    }
+    println!(
+        "Update check for the server's `{}` directory:\n",
+        result.target
+    );
+    let name_width = width_of(result.entries.iter().map(|e| e.file_name.as_str())).max(4);
+    println!(
+        "{:<name_width$}  {:<16}  {:<9}  {:<9}",
+        "FILE",
+        "STATUS",
+        "INSTALLED",
+        "LATEST",
+        name_width = name_width
+    );
+    let mut applicable = 0;
+    for entry in &result.entries {
+        let installed = entry.installed_version.as_deref().unwrap_or("-");
+        let latest = entry.latest_version.as_deref().unwrap_or("-");
+        if matches!(entry.status, PluginUpdateStatus::UpdateAvailable) {
+            applicable += 1;
+        }
+        println!(
+            "{:<name_width$}  {:<16}  {:<9}  {:<9}",
+            entry.file_name,
+            update_status_text(&entry.status),
+            installed,
+            latest,
+            name_width = name_width,
+        );
+    }
+    if applicable > 0 {
+        println!(
+            "\nApply one with `zamin plugins install <server> <project-id> \
+             --version <latest-id> --replace --wait`."
+        );
+    }
+    if result
+        .entries
+        .iter()
+        .any(|e| matches!(e.status, PluginUpdateStatus::Unmanaged))
+    {
+        println!(
+            "Unmanaged jars' bytes are not the catalog's — reinstall them from the \
+             catalog (or delete them by hand) to bring them under the update rule."
+        );
+    }
 }
 
 // --- jobs ---
