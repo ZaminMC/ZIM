@@ -1,8 +1,9 @@
 //! `zamin` — the command line client (Phase 2, ARCHITECTURE-REVIEW §23):
 //! list/status/start/stop/restart/kill/logs/attach over the Zamin
-//! Protocol, usable over SSH, with `--json` for scripting. A second client
-//! validating the protocol end to end; it knows the protocol, never the
-//! daemon's internals (ADR-0002).
+//! Protocol, usable over SSH, with `--json` for scripting. The `plugins`
+//! and `jobs` groups reach the catalog surface (ADR-0012) and the daemon's
+//! long-running jobs. A second client validating the protocol end to end;
+//! it knows the protocol, never the daemon's internals (ADR-0002).
 
 mod render;
 
@@ -14,7 +15,12 @@ use tokio::io::AsyncBufReadExt as _;
 use clap::{Parser, Subcommand};
 use zamin_cli::{Client, ClientError};
 use zamin_ipc::Endpoint;
+use zamin_protocol::jobs::{CancelJobParams, GetJobParams, Job, JobState, ListJobsResult};
 use zamin_protocol::methods;
+use zamin_protocol::plugins::{
+    PluginsDeleteParams, PluginsInstallParams, PluginsInstallResult, PluginsSearchResult,
+    PluginsVersionsResult,
+};
 use zamin_protocol::server::{
     EmptyResult, LifecycleResult, ListServersResult, RegisterServerParams, RegisterServerResult,
     RemoveServerParams, ServerDetails, ServerIdParams, StdinParams, UpdateServerParams,
@@ -123,6 +129,67 @@ enum Commands {
     },
     /// Attach to a server console: log lines in, typed lines to stdin
     Attach { server_id: String },
+    /// The plugin catalog (ADR-0012): search Modrinth, install and
+    /// delete jars; the server's own directory decides where they land
+    Plugins {
+        #[command(subcommand)]
+        command: PluginsCommands,
+    },
+    /// Long-running daemon jobs: installs, backups, downloads
+    Jobs {
+        #[command(subcommand)]
+        command: JobsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginsCommands {
+    /// Search the Modrinth catalog for the server's loader family
+    Search {
+        server_id: String,
+        /// Search words; empty lists the most downloaded
+        query: Option<String>,
+        /// Maximum hits to show
+        #[arg(long, value_name = "N", default_value_t = 10)]
+        limit: u32,
+    },
+    /// List installable versions of one project (the pin list)
+    Versions {
+        server_id: String,
+        project_id: String,
+    },
+    /// List the plugin jars in the server's target directory
+    Installed { server_id: String },
+    /// Install a plugin: latest for the loader, or a pinned version.
+    /// A cancellable job; --wait polls it to the end.
+    Install {
+        server_id: String,
+        project_id: String,
+        /// Pin an exact version id (from `zamin plugins versions`)
+        #[arg(long, value_name = "ID")]
+        version: Option<String>,
+        /// Poll the job until it finishes, printing byte progress
+        #[arg(long)]
+        wait: bool,
+    },
+    /// Delete a plugin jar from the server's target directory
+    Delete {
+        server_id: String,
+        file_name: String,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum JobsCommands {
+    /// List the daemon's recent jobs, running and finished
+    List,
+    /// Show one job's full state and progress
+    Get { job_id: String },
+    /// Ask a running job to cancel (it stops at its next check)
+    Cancel { job_id: String },
 }
 
 fn main() -> ExitCode {
@@ -276,6 +343,17 @@ async fn run(cli: Cli) -> Result<(), Failure> {
     {
         return confirm_removal(server_id);
     }
+    if let Commands::Plugins {
+        command:
+            PluginsCommands::Delete {
+                server_id: _,
+                file_name,
+                yes: false,
+            },
+    } = &cli.command
+    {
+        return confirm_delete(file_name);
+    }
 
     let client = match &cli.remote {
         Some(addr) => connect_remote(&cli, addr.clone()).await?,
@@ -335,6 +413,55 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             }
         }
         Commands::Attach { server_id } => attach(&client, server_id).await,
+        Commands::Plugins { command } => match command {
+            PluginsCommands::Search {
+                server_id,
+                query,
+                limit,
+            } => {
+                plugins_search(
+                    &cli,
+                    &client,
+                    server_id,
+                    query.clone().unwrap_or_default(),
+                    *limit,
+                )
+                .await
+            }
+            PluginsCommands::Versions {
+                server_id,
+                project_id,
+            } => plugins_versions(&cli, &client, server_id, project_id).await,
+            PluginsCommands::Installed { server_id } => {
+                plugins_installed(&cli, &client, server_id).await
+            }
+            PluginsCommands::Install {
+                server_id,
+                project_id,
+                version,
+                wait,
+            } => {
+                plugins_install(
+                    &cli,
+                    &client,
+                    server_id,
+                    project_id,
+                    version.as_deref(),
+                    *wait,
+                )
+                .await
+            }
+            PluginsCommands::Delete {
+                server_id,
+                file_name,
+                yes: _,
+            } => plugins_delete(&cli, &client, server_id, file_name).await,
+        },
+        Commands::Jobs { command } => match command {
+            JobsCommands::List => jobs_list(&cli, &client).await,
+            JobsCommands::Get { job_id } => jobs_get(&cli, &client, job_id).await,
+            JobsCommands::Cancel { job_id } => jobs_cancel(&cli, &client, job_id).await,
+        },
     }
 }
 
@@ -351,8 +478,31 @@ fn confirm_removal(server_id: &str) -> Result<(), Failure> {
     Ok(())
 }
 
+fn confirm_delete(file_name: &str) -> Result<(), Failure> {
+    eprintln!("Deleting '{file_name}' removes the jar from the server's target directory.");
+    eprint!("Type the file name to confirm: ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() || line.trim() != file_name {
+        return Err(Failure::error(format!(
+            "confirmation did not match; '{file_name}' was not deleted."
+        )));
+    }
+    Ok(())
+}
+
 fn request_id() -> uuid::Uuid {
     uuid::Uuid::now_v7()
+}
+
+/// Parses a job id argument; the message teaches the id's shape instead
+/// of dumping a UUID error.
+fn job_id_or_fail(job_id: &str) -> Result<uuid::Uuid, Failure> {
+    uuid::Uuid::parse_str(job_id).map_err(|_| {
+        Failure::error(format!(
+            "'{job_id}' is not a job id (a UUID, like the ones `zamin jobs list` prints)"
+        ))
+    })
 }
 
 async fn list(cli: &Cli, client: &Client) -> CmdResult {
@@ -601,6 +751,217 @@ fn print_notification(notification: &StreamNotification) {
         }
         StreamPayload::Event { .. } | StreamPayload::Metrics { .. } => {}
     }
+}
+
+// --- plugins (ADR-0012): the catalog over the wire ---
+
+async fn plugins_search(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    query: String,
+    limit: u32,
+) -> CmdResult {
+    let params = zamin_protocol::plugins::PluginsSearchParams {
+        server_id: server_id.to_owned(),
+        query,
+        limit: Some(limit),
+    };
+    let result: PluginsSearchResult = client
+        .request_typed(methods::PLUGINS_SEARCH, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::plugin_hits(&result);
+    Ok(())
+}
+
+async fn plugins_versions(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    project_id: &str,
+) -> CmdResult {
+    let params = zamin_protocol::plugins::PluginsVersionsParams {
+        server_id: server_id.to_owned(),
+        project_id: project_id.to_owned(),
+    };
+    let result: PluginsVersionsResult = client
+        .request_typed(methods::PLUGINS_VERSIONS, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::plugin_versions(&result);
+    Ok(())
+}
+
+async fn plugins_installed(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {
+    let params = zamin_protocol::plugins::PluginsInstalledParams {
+        server_id: server_id.to_owned(),
+    };
+    let result: zamin_protocol::plugins::PluginsInstalledResult = client
+        .request_typed(methods::PLUGINS_INSTALLED, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::installed_plugins(&result);
+    Ok(())
+}
+
+async fn plugins_install(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    project_id: &str,
+    version: Option<&str>,
+    wait: bool,
+) -> CmdResult {
+    let params = PluginsInstallParams {
+        server_id: server_id.to_owned(),
+        project_id: project_id.to_owned(),
+        version_id: version.map(str::to_owned),
+    };
+    let result: PluginsInstallResult = client
+        .request_typed(methods::PLUGINS_INSTALL, params)
+        .await?;
+
+    if !wait {
+        if cli.json {
+            print_json(&result);
+            return Ok(());
+        }
+        let job = &result.job;
+        println!(
+            "Install queued as job {} — watch with `zamin jobs get {}`.",
+            job.job_id, job.job_id
+        );
+        println!("Or re-run with --wait to follow the byte progress here.");
+        return Ok(());
+    }
+
+    // --wait: poll the job to a terminal state. In JSON mode only the
+    // finished job prints — one object, script-friendly.
+    let finished = wait_for_job(client, job_id_of(&result.job)).await?;
+    if cli.json {
+        print_json(&finished);
+        return Ok(());
+    }
+    println!(
+        "Install {} — {}.",
+        match finished.state {
+            JobState::Succeeded => "finished",
+            _ => "did not finish",
+        },
+        render::job_state_text(finished.state)
+    );
+    if finished.state != JobState::Succeeded {
+        return Err(Failure::error(format!(
+            "install job ended {}{}",
+            render::job_state_text(finished.state),
+            finished
+                .error
+                .as_ref()
+                .map(|e| format!(": {e}"))
+                .unwrap_or_default()
+        )));
+    }
+    Ok(())
+}
+
+fn job_id_of(job: &Job) -> uuid::Uuid {
+    job.job_id
+}
+
+/// Polls `jobs.get` until the job reaches a terminal state, printing each
+/// change (state or byte progress) as it happens. The last observed job
+/// is returned so callers can report the ending honestly.
+async fn wait_for_job(client: &Client, job_id: uuid::Uuid) -> Result<Job, Failure> {
+    let mut last_mark: Option<(JobState, u64)> = None;
+    loop {
+        let job: Job = client
+            .request_typed(methods::JOBS_GET, GetJobParams { job_id })
+            .await?;
+        let progress_current = job.progress.as_ref().map(|p| p.current).unwrap_or(0);
+        let mark = (job.state, progress_current);
+        if last_mark != Some(mark) {
+            eprintln!("{}", render::job_progress_line(&job));
+        }
+        last_mark = Some(mark);
+        match job.state {
+            JobState::Queued | JobState::Running => {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+            JobState::Succeeded | JobState::Failed | JobState::Cancelled => return Ok(job),
+        }
+    }
+}
+
+async fn plugins_delete(cli: &Cli, client: &Client, server_id: &str, file_name: &str) -> CmdResult {
+    let params = PluginsDeleteParams {
+        server_id: server_id.to_owned(),
+        file_name: file_name.to_owned(),
+    };
+    let _empty: EmptyResult = client
+        .request_typed(methods::PLUGINS_DELETE, params)
+        .await?;
+    if cli.json {
+        print_json(&serde_json::json!({"deleted": file_name}));
+        return Ok(());
+    }
+    println!("Deleted '{file_name}'.");
+    Ok(())
+}
+
+// --- jobs: the daemon's long-running operations, inspected ---
+
+async fn jobs_list(cli: &Cli, client: &Client) -> CmdResult {
+    let result: ListJobsResult = client
+        .request_typed(methods::JOBS_LIST, serde_json::json!({}))
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::job_table(&result.jobs);
+    Ok(())
+}
+
+async fn jobs_get(cli: &Cli, client: &Client, job_id: &str) -> CmdResult {
+    let job_id = job_id_or_fail(job_id)?;
+    let job: Job = client
+        .request_typed(methods::JOBS_GET, GetJobParams { job_id })
+        .await?;
+    if cli.json {
+        print_json(&job);
+        return Ok(());
+    }
+    render::job_details(&job);
+    Ok(())
+}
+
+async fn jobs_cancel(cli: &Cli, client: &Client, job_id: &str) -> CmdResult {
+    let job_id = job_id_or_fail(job_id)?;
+    let params = CancelJobParams {
+        request_id: request_id(),
+        job_id,
+    };
+    let job: Job = client.request_typed(methods::JOBS_CANCEL, params).await?;
+    if cli.json {
+        print_json(&job);
+        return Ok(());
+    }
+    println!(
+        "Cancel asked for job {} ({}); it stops at its next check.",
+        job.job_id,
+        render::job_state_text(job.state)
+    );
+    Ok(())
 }
 
 fn print_json<T: serde::Serialize>(value: &T) {

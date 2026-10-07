@@ -5,6 +5,8 @@ use std::fmt::Write as _;
 use zamin_cli::ClientError;
 use zamin_ipc::{Endpoint, IpcError};
 use zamin_protocol::error::ProtocolError;
+use zamin_protocol::jobs::{Job, JobKind, JobState};
+use zamin_protocol::plugins::{PluginsInstalledResult, PluginsSearchResult, PluginsVersionsResult};
 use zamin_protocol::server::{ServerDetails, ServerState, ServerSummary};
 use zamin_protocol::streams::{LogLevel, LogLine};
 
@@ -160,5 +162,280 @@ fn endpoint_text(endpoint: &Endpoint) -> String {
     match endpoint {
         Endpoint::WindowsPipe(name) => format!(r"\\.\pipe\{name}"),
         Endpoint::UnixSocket(path) => path.display().to_string(),
+    }
+}
+
+// --- plugins (ADR-0012) ---
+
+pub fn plugin_hits(result: &PluginsSearchResult) {
+    if result.hits.is_empty() {
+        println!("No hits. The catalog answers for this server's loader family only.");
+        return;
+    }
+    println!(
+        "Installs land in the server's `{}` directory.\n",
+        result.target
+    );
+    let slug_width = width_of(result.hits.iter().map(|h| h.slug.as_str())).max(5);
+    let title_width = width_of(result.hits.iter().map(|h| h.title.as_str())).max(5);
+    println!(
+        "{:<slug_width$}  {:<title_width$}  {:>10}  LOADERS  PROJECT ID",
+        "SLUG",
+        "TITLE",
+        "DOWNLOADS",
+        slug_width = slug_width,
+        title_width = title_width,
+    );
+    for hit in &result.hits {
+        println!(
+            "{:<slug_width$}  {:<title_width$}  {:>10}  {:<7}  {}",
+            hit.slug,
+            hit.title,
+            hit.downloads,
+            hit.loaders.join(","),
+            hit.project_id,
+            slug_width = slug_width,
+            title_width = title_width,
+        );
+    }
+    println!("\nInstall with `zamin plugins install <server> <project-id>`.");
+}
+
+pub fn plugin_versions(result: &PluginsVersionsResult) {
+    if result.versions.is_empty() {
+        println!("No installable versions: the project ships nothing for this loader.");
+        return;
+    }
+    println!(
+        "Versions for {} (installs land in `{}`):\n",
+        result.versions.len(),
+        result.target
+    );
+    let number_width = width_of(result.versions.iter().map(|v| v.version_number.as_str())).max(7);
+    println!(
+        "{:<number_width$}  {:<8}  GAME VERSIONS  FILE",
+        "VERSION",
+        "ID",
+        number_width = number_width,
+    );
+    for version in &result.versions {
+        println!(
+            "{:<number_width$}  {:<8}  {:<13}  {}",
+            version.version_number,
+            version.id,
+            version.game_versions.join(","),
+            version.file_name.as_deref().unwrap_or("(not installable)"),
+            number_width = number_width,
+        );
+    }
+    println!("\nPin one with `zamin plugins install <server> <project-id> --version <id>`.");
+}
+
+pub fn installed_plugins(result: &PluginsInstalledResult) {
+    if result.entries.is_empty() {
+        println!(
+            "No plugin jars in `{}` yet. Install one with `zamin plugins search <server>`.",
+            result.target
+        );
+        return;
+    }
+    println!("The server's `{}` directory:\n", result.target);
+    let name_width = width_of(result.entries.iter().map(|e| e.file_name.as_str())).max(4);
+    println!(
+        "{:<name_width$}  {:>9}  MODIFIED",
+        "FILE",
+        "SIZE",
+        name_width = name_width
+    );
+    for entry in &result.entries {
+        let note = if entry.symlink_outside {
+            "  (symlink out of the server root — not deletable here)"
+        } else {
+            ""
+        };
+        println!(
+            "{:<name_width$}  {:>9}  {}{}",
+            entry.file_name,
+            bytes_text(entry.size_bytes),
+            utc_date_text(entry.modified_ms),
+            note,
+            name_width = name_width,
+        );
+    }
+    println!("\nDelete with `zamin plugins delete <server> <file-name>`.");
+}
+
+// --- jobs ---
+
+pub fn job_state_text(state: JobState) -> &'static str {
+    match state {
+        JobState::Queued => "queued",
+        JobState::Running => "running",
+        JobState::Succeeded => "succeeded",
+        JobState::Failed => "failed",
+        JobState::Cancelled => "cancelled",
+    }
+}
+
+pub fn kind_text(kind: JobKind) -> &'static str {
+    match kind {
+        JobKind::ServerCreate => "server.create",
+        JobKind::BackupCreate => "backup.create",
+        JobKind::BackupRestore => "backup.restore",
+        JobKind::ArchiveExtract => "archive.extract",
+        JobKind::JavaInstall => "java.install",
+        JobKind::PluginInstall => "plugins.install",
+    }
+}
+
+/// A one-line live view of a job, for `install --wait` polling.
+pub fn job_progress_line(job: &Job) -> String {
+    let state = job_state_text(job.state);
+    match &job.progress {
+        Some(progress) => match (progress.total, progress.unit.as_deref()) {
+            (Some(total), Some(unit)) => {
+                format!("  [{}] {}/{} {unit}", state, progress.current, total)
+            }
+            (Some(total), None) => format!(
+                "  [{}] {}/{} ({:.0}%)",
+                state,
+                progress.current,
+                total,
+                if total == 0 {
+                    0.0
+                } else {
+                    progress.current as f64 * 100.0 / total as f64
+                }
+            ),
+            (None, _) => format!("  [{}] {}", state, progress.current),
+        },
+        None => format!("  [{state}]"),
+    }
+}
+
+pub fn job_table(jobs: &[Job]) {
+    if jobs.is_empty() {
+        println!("No jobs yet. Installs, backups and downloads appear here.");
+        return;
+    }
+    println!(
+        "{:<38}  {:<16}  {:<8}  {:<10}  PROGRESS",
+        "JOB", "KIND", "SERVER", "STATE"
+    );
+    for job in jobs {
+        let server = job.server_id.as_deref().unwrap_or("-");
+        println!(
+            "{:<38}  {:<16}  {:<8}  {:<10}  {}",
+            job.job_id,
+            kind_text(job.kind),
+            server,
+            job_state_text(job.state),
+            job_progress_line(job).trim_start(),
+        );
+    }
+}
+
+pub fn job_details(job: &Job) {
+    println!("job:      {}", job.job_id);
+    println!("kind:     {}", kind_text(job.kind));
+    if let Some(server) = &job.server_id {
+        println!("server:   {server}");
+    }
+    println!("state:    {}", job_state_text(job.state));
+    if let Some(progress) = &job.progress {
+        print!("progress: {}", job_progress_line(job).trim_start());
+        if let Some(message) = &progress.message {
+            print!(" — {message}");
+        }
+        println!();
+    }
+    if let Some(error) = &job.error {
+        println!("error:    {error}");
+    }
+    println!("created:  {}", utc_date_text(job.created_at_ms));
+    if let Some(started) = job.started_at_ms {
+        println!("started:  {}", utc_date_text(started));
+    }
+    if let Some(ended) = job.ended_at_ms {
+        println!("ended:    {}", utc_date_text(ended));
+    }
+}
+
+/// Human byte size: bytes stay exact, larger units take one decimal.
+pub fn bytes_text(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let value = bytes as f64;
+    if value >= GB {
+        format!("{:.1} GB", value / GB)
+    } else if value >= MB {
+        format!("{:.1} MB", value / MB)
+    } else if value >= KB {
+        format!("{:.1} KB", value / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Epoch milliseconds as a UTC date, no time-zone theater: the daemon's
+/// timestamps are instants, the panel renders local time nicely.
+pub fn utc_date_text(ms: i64) -> String {
+    let days = ms.div_euclid(86_400_000);
+    let secs_of_day = ms.rem_euclid(86_400_000) / 1000;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC",
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60
+    )
+}
+
+/// Howard Hinnant's civil_from_days: days since 1970-01-01 to a
+/// (year, month, day) triple in the proleptic Gregorian calendar.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
+fn width_of<'a>(values: impl Iterator<Item = &'a str>) -> usize {
+    values.map(|value| value.len()).max().unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_sizes_stay_human() {
+        assert_eq!(bytes_text(0), "0 B");
+        assert_eq!(bytes_text(512), "512 B");
+        assert_eq!(bytes_text(2048), "2.0 KB");
+        assert_eq!(bytes_text(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(bytes_text(3 * 1024 * 1024 * 1024), "3.0 GB");
+    }
+
+    #[test]
+    fn utc_dates_render_from_epoch_millis() {
+        assert_eq!(utc_date_text(0), "1970-01-01 00:00:00 UTC");
+        // 2026-09-01T10:00:00Z — the ADR-0012 mock's published date.
+        assert_eq!(utc_date_text(1_788_256_800_000), "2026-09-01 10:00:00 UTC");
+        assert_eq!(utc_date_text(1_788_256_800_123), "2026-09-01 10:00:00 UTC");
+    }
+
+    #[test]
+    fn civil_dates_cross_leap_years() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // leap year boundary
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }
 }
