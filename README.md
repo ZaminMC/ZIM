@@ -51,6 +51,10 @@ zamin publish config <id> --include "folder:plugins" --title "Demo"   # rules: f
 zamin publish review <id> <file> <kind>   # record a false positive (--unreview clears)
 zamin publish run <id>              # package + upload as a job (--confirm-unsafe overrides the gate)
 zamin publish state <id>            # the last publication and its receipt
+zamin config show <id>              # the effective settings, provenance per field (ADR-0019)
+zamin config set <id> --port 25565 --max-memory-mb 4096 --jvm-arg=-XX:+UseG1GC
+zamin config set <id> --clear-port  # tri-state: absent keeps, --clear-<field> drops the override
+zamin network status <id>           # desired port vs server.properties, a live probe, conflicts
 zamin jobs list                     # installs, backups, downloads — running and finished
 zamin jobs get|cancel <job-id>
 ```
@@ -133,6 +137,25 @@ arrive as new providers, nothing is hardcoded. Credentials ride the
 environment channel only — the daemon has nowhere to store them, so it
 never does (§47). The §43 AI changelog room is named and disabled: a
 room, not a fake.
+
+## Configuration surfaces
+
+The server page's Startup, Network, and Settings sections are the layered
+config model on a screen ([ADR-0019](docs/adr/0019-configuration-surfaces.md),
+the founder's §37–39). ADR-0007's layering is visible: every row wears its
+provenance — `global` (inherited from the defaults file) or `custom` (this
+server's own override) — and a custom row can be dropped back to the global
+default with one click. The patch is tri-state on the wire: absent keeps,
+`null` clears, a value sets. Startup always shows the composed command the
+daemon will actually run, so the JVM line is visible without being a
+prerequisite. Network pairs the desired port (the config model) with what
+`server.properties` names (the boot authority, read but never written behind
+the server), a moment-in-time bind-test, and the other managed servers that
+desire the same port — the §37 pre-start conflict check. Overrides are read
+at spawn time, so a running server is never interrupted from these pages;
+the copy says "the next time the server starts" and means it. Rooms the
+model does not have yet (icon, restart/crash policy, log retention) are
+stated as reserved, not faked (§82).
 
 ## Players
 

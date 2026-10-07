@@ -53,6 +53,16 @@ The daemon's catalog base URLs are flags: `--catalog-url` (PaperMC Fill API v3),
 - JDK fetch: Adoptium asset + checksum-link parsing · extraction safety for both archive formats (regular files/directories only, no absolute/`..`/backslash names, one common top-level directory, entry/size caps, tar headers crafted byte-level exactly as a hostile producer would) · the fetched `bin/java` is inspected, never trusted by name; uninspectable runtimes are removed, not left to poison discovery · idempotent reinstall · managed runtimes appear in `java.list` (`managed: true`) and are considered by auto-selection AFTER system candidates · the auto-selection is requirement-aware (`JAVA_INCOMPATIBLE` when all candidates are too old, `JAVA_NOT_FOUND` on a bare machine).
 - Zip fixtures are built with the same crate the extractor reads, so the Windows format is exercised on every platform; the inspect loop is `#[cfg(unix)]` because the fake `java` is a shell script.
 
+## Configuration surfaces (required coverage)
+
+The founder's §37–39 over the layered config model (ADR-0019). Required, at four layers:
+
+- Protocol codec (`crates/zamin-protocol/src/config.rs`): the tri-state patch distinguishes absent (keep) / `null` (clear) / value (set) — serde's plain `Option<Option<T>>` collapses a JSON `null` into absence, so the deserializer is the test's reason to exist · provenance reads back kebab-case · the conformance fixture pins the `config.get` shape with optional fields honestly absent.
+- Core validation (`crates/zamin-core/src/config`): field bounds named in the error (port 1024–65534, memory 16 MiB–1 TiB, timeouts ≤ 24 h, retention ≤ 1000, Java major 8–100) · clearing is always legal · the min ≤ max pair rule.
+- Daemon e2e (`crates/zamind/tests/config.rs`): defaults + provenance on a fresh server · the tri-state journey (value sets, absent keeps, `null` clears to the global default) · the empty-patch refusal · nonsense refused with the field named, file untouched · the jar escape refusal · the blank-name refusal · the rename visible in one registry · `network.status`'s desired/properties/bind trio, a REAL bind-test against a held listener, and cross-server conflicts in both directions · no port anywhere → no probe, honestly `null`.
+- CLI e2e (`crates/zamin-cli/tests/config.rs`): `config show` with provenance words and the composed command · set/keep/clear round trip · the empty set refused with a teaching error · `network status` with the probe flipping honestly after the listener drops · `--json` scripting output.
+- Panel (`src/app/{StartupView,NetworkView,SettingsView}.test.tsx`): provenance words and the composed command visible · the save diffs against the rendered baseline (an untouched inherited value must NOT become an override — the regression test for the quiet-override bug) · clearing dispatches the tri-state `null` · local refusals without a request (fractional memory, blank name, nonsense retention) · the probe's three honest states (available / in use / nothing to probe) · the re-probe · the conflict list · the rename refreshing the server record through the ordinary read path · the four reserved rooms stated, not faked (§82).
+
 ## Publish (required coverage)
 
 The founder's §40–47 sixth slice (ADR-0017). Required, at three layers:
