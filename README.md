@@ -13,7 +13,7 @@ A polished desktop and CLI workspace for running, managing, and developing Minec
 | `crates/zamin-cli` | `zamin` — the command line client (second protocol client, Phase 2). |
 | `crates/zamin-agent` | `zaminagent` — the remote bridge (ADR-0011): TLS + token auth for remote protocol clients, relaying to the local daemon. |
 | `crates/zamin-bridge` | The panel host's forwarder: frame coalescing (~50 ms batches), down signals. Testable without a webview. |
-| `apps/panel` | The desktop UI (Phase 3): TypeScript protocol client + design system, Tauri 2 host. Develops in a plain browser against `apps/panel/dev-bridge.mjs`. |
+| `apps/panel` | The desktop UI (Phase 3): a browser for Minecraft servers (ADR-0015) — tabs, the address bar, typed destinations — TypeScript protocol client + design system, Tauri 2 host. Develops in a plain browser against `apps/panel/dev-bridge.mjs`. |
 | `crates/testing/fake-mc-server` | Deterministic Paper mimic used by the whole test matrix — no Java needed. |
 
 ## The zamin CLI
@@ -120,6 +120,31 @@ lands in the log, and events, jobs, and the audit tell the same story
 they tell for a typed command. The composer guards the vanilla username
 charset, verbs disable while the server is not running, and the notes
 never claim an outcome they cannot know.
+
+## The browser shell
+
+ZaminPanel is a browser for Minecraft servers
+([ADR-0015](docs/adr/0015-browser-shell.md), the
+[founder vision](docs/founder-vision.md) made real). The sidebar is gone:
+a tab strip wears every open destination — a server tab's favicon is its
+state dot, live from the event stream — and a tool bar carries back,
+forward, reload, and the address bar. Destinations are a closed type,
+never strings: `zaminpanel://servers/` (the fleet), `zaminpanel://new`
+(discovery), `zaminpanel://settings/`, and one tab per server. Identity
+discipline holds everywhere: navigating to an open destination focuses
+its tab, never duplicates it.
+
+The address bar speaks three dialects: internal `zaminpanel://` URLs (an
+unknown page renders an honest "No such page"), join addresses resolved
+by port with host agreement — `localhost:25565`, `0:25565`,
+`box.example.com:25565`; a miss says so and navigates nowhere — and free
+text, which is a discovery query over the registry, executed live on the
+new tab. Back/forward ride per-tab destination history; reload rebuilds
+the view (state, subscriptions) and never touches the server process.
+The keyboard is browser-honest: Ctrl+T/W/L/R, Alt+arrows, Ctrl+Tab, F6,
+and Ctrl+K keeps the command palette. Dutchmen — the AI part of the
+vision — is a documented reservation: the new tab's room is reserved,
+the dialect will grow, nothing pretends.
 
 ## Development loop
 
