@@ -104,6 +104,7 @@ them with `--ignored`). Each assertion gates a published number:
 - Five servers streaming 1k lines/s each with an active subscriber: daemon RSS < 150 MiB.
 - Terminal input echo, round trip via the daemon (stdin request → the server's reply line on the logs stream): p99 < 50 ms over 100 samples — the test that forced the pump's flush tick from 50 ms to 10 ms.
 - Panel bundle budgets (`apps/panel/perf/budgets.mjs`, run after the panel build): entry chunk ≤ 90 KB gzip, any single chunk ≤ 90 KB, total JS ≤ 170 KB, total CSS ≤ 12 KB — the guard that keeps the cold-start payload honest after the xterm/modals code split.
+- Deferred list (`apps/panel/src/ui/deferred.test.tsx`): a 2,000-entry collection commits its 120-row window synchronously, catches up 240 rows per idle frame, resets for free on fresh data (asserted mid-stream — no frame carries the full old window), keeps the grown window across no-new-data re-renders, and "Show all" is one explicit commit.
 
 ## Fixtures
 

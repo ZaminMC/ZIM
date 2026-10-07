@@ -15,9 +15,14 @@ import {
 import type { FilesEntry, FilesListResult } from "../protocol/types";
 import { describeError } from "../state/errors";
 import { Button } from "../ui/Button";
+import { useDeferredWindow } from "../ui/deferred";
 import styles from "./FilesView.module.css";
 
 const EDIT_LIMIT_BYTES = 1024 * 1024; // the editor is for text files
+
+// The deferred window resets on array identity; a fresh [] per render
+// would reset it every time, so the empty fallback is a constant.
+const NO_ENTRIES: FilesEntry[] = [];
 
 function formatSize(bytes?: number): string {
   if (bytes === undefined) return "";
@@ -179,6 +184,12 @@ export function FilesView({ serverId }: { serverId: string }) {
 
   const dirty = draft !== saved;
 
+  // The listing renders in slices: the first commit paints the window,
+  // the rest lands over idle frames (see ui/deferred.ts). A refreshed
+  // listing (new directory, post-action refresh) resets it for free.
+  const entries = listing?.entries ?? NO_ENTRIES;
+  const deferred = useDeferredWindow(entries, dir);
+
   return (
     <section className={styles.files} aria-label="Server files">
       <nav className={styles.crumbs} aria-label="Path">
@@ -272,7 +283,7 @@ export function FilesView({ serverId }: { serverId: string }) {
                   <td colSpan={4}>Loading…</td>
                 </tr>
               ) : (
-                listing?.entries.map((entry) => {
+                deferred.visible.map((entry) => {
                   const path = join(dir, entry.name);
                   return (
                     <tr key={entry.name} className={entry.symlinkOutside ? styles.denied : undefined}>
@@ -335,6 +346,15 @@ export function FilesView({ serverId }: { serverId: string }) {
             </tbody>
             </table>
           </div>
+          {!loading && !deferred.done ? (
+            <p className={styles.moreNote}>
+              Showing {deferred.visible.length} of {deferred.total} — the rest render as the
+              browser breathes.{" "}
+              <button className={styles.noteButton} onClick={deferred.showAll}>
+                Show all now
+              </button>
+            </p>
+          ) : null}
           {listing && listing.total > listing.entries.length ? (
             <p className={styles.moreNote}>
               {listing.total - listing.entries.length} more entries — open subdirectories to

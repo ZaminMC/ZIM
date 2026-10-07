@@ -142,6 +142,21 @@
   margin: 0;
 }
 
+.noteButton {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.noteButton:hover {
+  color: var(--text);
+}
+
 .alert {
   display: flex;
   gap: var(--space-3);

@@ -33,6 +33,7 @@
 | UI under load | no dropped frames with a background server streaming 1k lines/s |
 | xterm.js scrollback | capped at 5k lines in view; full history belongs to the log viewer, not terminal memory |
 | Stream delivery to webview | batched by the daemon's log pump — 10 ms flush tick with a 256-line cap (see Verifications); never one message per line under load |
+| Long-list first paint (files table, player roster) | ≤ 120 rows committed with the listing (`ui/deferred.ts` window); a 2,000-entry directory costs the same interaction latency as a 100-item one; the remainder lands over idle frames and never blocks interaction |
 
 ## Verifications
 
@@ -64,6 +65,15 @@ honest. Server-switch and interaction budgets are covered structurally:
 the workspace's live header chips subscribe to the metrics store alone, so
 a 1 Hz flood re-renders two chips and never the console — asserted by a
 render-count test in `ServerView.test.tsx`.
+
+Long-list rendering is enforced by `apps/panel/src/ui/deferred.test.tsx`:
+a 2,000-entry collection commits its 120-row window synchronously (the
+frame the listing pays for), grows 240 rows per idle frame until done,
+and resets for free when a fresh listing arrives — the reset happens
+during render, so no frame ever carries the full old window over the new
+rows. "Show all" is the one explicit full commit, on demand. The files
+table (daemon-capped at 2,000 entries) and the player roster use the
+window; the paint cost tracks the window, not the directory size.
 
 Negotiations and hardware notes, in writing per the rules:
 

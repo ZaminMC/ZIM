@@ -5,13 +5,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { listPlayers } from "../state/actions";
-import type { PlayersListResult } from "../protocol/types";
+import type { PlayerSample, PlayersListResult } from "../protocol/types";
 import { describeError } from "../state/errors";
 import { Button } from "../ui/Button";
+import { useDeferredWindow } from "../ui/deferred";
 import { StatusDot } from "../ui/StatusDot";
 import styles from "./PlayersView.module.css";
 
 const REFRESH_MS = 10_000;
+
+// The deferred window resets on array identity; a fresh [] per render
+// would reset it every time, so the empty fallback is a constant.
+const NO_PLAYERS: PlayerSample[] = [];
 
 export function PlayersView({ serverId }: { serverId: string }) {
   const [result, setResult] = useState<PlayersListResult | null>(null);
@@ -38,6 +43,9 @@ export function PlayersView({ serverId }: { serverId: string }) {
   }, [refresh]);
 
   const online = result?.online ?? null;
+  // A busy server's log-derived roster can run long; it renders in slices
+  // like the files table (see ui/deferred.ts). A fresh poll resets for free.
+  const roster = useDeferredWindow(result?.roster ?? NO_PLAYERS, serverId);
 
   return (
     <section className={styles.players} aria-label="Players">
@@ -69,11 +77,19 @@ export function PlayersView({ serverId }: { serverId: string }) {
         <div className={styles.rosterBlock}>
           <span className={styles.rosterLabel}>On right now — live from the log</span>
           <ul className={styles.names}>
-            {result.roster.map((player) => (
+            {roster.visible.map((player) => (
               <li key={`roster-${player.name}`} className={styles.player}>
                 {player.name}
               </li>
             ))}
+            {!roster.done ? (
+              <li className={styles.more}>
+                +{roster.pending} more rendering…{" "}
+                <button className={styles.moreButton} onClick={roster.showAll}>
+                  Show all
+                </button>
+              </li>
+            ) : null}
           </ul>
         </div>
       ) : null}

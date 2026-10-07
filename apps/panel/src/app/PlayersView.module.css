@@ -71,6 +71,21 @@
   align-self: center;
 }
 
+.moreButton {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.moreButton:hover {
+  color: var(--text);
+}
+
 .rosterBlock {
   display: flex;
   flex-direction: column;
