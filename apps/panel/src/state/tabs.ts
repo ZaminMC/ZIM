@@ -1,7 +1,7 @@
-// Tabs (ADR-0015, ADR-0016): ordered browser tabs of typed destinations,
-// per-tab destination history (§59), a reload token (§60), and singleton
-// NAVIGATION identity (§61: opening a resting destination focuses it).
-// Tab state is PANEL-LOCAL storage, never daemon state.
+// Tabs (ADR-0015, ADR-0016, ADR-0018): ordered browser tabs of typed
+// destinations, per-tab destination history (§59), a reload token (§60),
+// and singleton NAVIGATION identity (§61: opening a resting destination
+// focuses it). Tab state is PANEL-LOCAL storage, never daemon state.
 //
 // ADR-0016 adds the operator's tab machinery (§48–52, §90): each tab now
 // carries a stable id, so DUPLICATE (§48) can clone the VIEW — a second
@@ -12,12 +12,24 @@
 // reopened (§90). Navigation still never duplicates identity: it focuses
 // the resting tab, preferring the active one when it already rests there.
 //
-// Invariant: pinned tabs always sit at the head of the strip (§52), each
-// block in stable order; every mutation re-normalizes.
+// ADR-0018 completes the machinery: DRAG REORDER (tabs are operators —
+// the pinned head is clamped, dragging out of a group leaves it) and the
+// §50 WINDOW MACHINERY. Moving a tab to a new window writes a handoff
+// slot and the opener opens a second ZaminPanel context that claims the
+// slot by hash at boot. The tab is not closed (no recently-closed entry)
+// and the server behind it is never touched — the UI window is only a
+// client; the process stays daemon-owned. Windows own their strips: the
+// persistence is keyed per browsing context, so two windows coexist
+// without clobbering each other's localStorage.
+//
+// Invariants: pinned tabs always sit at the head of the strip (§52),
+// each block in stable order; a group's members sit together (§49);
+// every mutation re-normalizes.
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { tabKey, type Destination, type TabKey } from "./destinations";
+import { currentWindowId } from "./windowIdentity";
 
 export type TabId = string;
 export type GroupId = string;
@@ -93,6 +105,75 @@ const MAX_RECENTLY_CLOSED = 25;
 const MAX_GROUP_LABEL = 24;
 export const DEFAULT_GROUP_LABEL = "New group";
 
+// --- per-window storage (ADR-0018, §50) ---------------------------------------
+
+/** The pre-ADR-0018 shared strip key. Adopted once by the first fresh
+ *  window, then retired so the next window is born fresh, not a thief. */
+export const LEGACY_TABS_KEY = "zamin-panel.tabs";
+/** Strips are private per browsing context. The `@` keeps them distinct
+ *  from the legacy exact key while sharing its namespace. */
+const STRIP_PREFIX = "zamin-panel.tabs@";
+const REGISTRY_KEY = "zamin-panel.windows";
+export const HANDOFF_PREFIX = "zamin-panel.tab-handoff:";
+/** A handoff is claimed by a window opening NOW, not by one opened later. */
+export const HANDOFF_TTL_MS = 60_000;
+/** Stale windows' strips are pruned after two idle weeks. */
+const REGISTRY_PRUNE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+
+export const stripKeyFor = (windowId: string): string => `${STRIP_PREFIX}${windowId}`;
+export const stripKey = (): string => stripKeyFor(currentWindowId());
+
+/** The handoff payload the origin writes and the child claims. The tab
+ *  travels without its id (the child mints one) and without its group
+ *  (groups are strip-local; membership cannot travel). */
+export interface TabHandoff {
+  version: 1;
+  handoffId: string;
+  issuedAt: number;
+  history: Destination[];
+  historyIndex: number;
+  pinned: boolean;
+}
+
+function isHandoff(value: unknown): value is TabHandoff {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    v.version === 1 &&
+    typeof v.handoffId === "string" &&
+    v.handoffId !== "" &&
+    typeof v.issuedAt === "number" &&
+    Number.isFinite(v.issuedAt) &&
+    Array.isArray(v.history) &&
+    v.history.length > 0 &&
+    typeof v.historyIndex === "number" &&
+    Number.isInteger(v.historyIndex) &&
+    typeof v.pinned === "boolean"
+  );
+}
+
+const perWindowStorage = {
+  getItem: (_name: string): string | null => {
+    const own = localStorage.getItem(stripKey());
+    if (own !== null) return own;
+    // One-time adoption: the first fresh window inherits the shared
+    // pre-window strip and retires it, so the second window is born
+    // fresh instead of stealing the same tabs.
+    const legacy = localStorage.getItem(LEGACY_TABS_KEY);
+    if (legacy !== null) {
+      localStorage.removeItem(LEGACY_TABS_KEY);
+      return legacy;
+    }
+    return null;
+  },
+  setItem: (_name: string, value: string): void => {
+    localStorage.setItem(stripKey(), value);
+  },
+  removeItem: (_name: string): void => {
+    localStorage.removeItem(stripKey());
+  },
+};
+
 interface TabsState {
   tabs: Tab[];
   activeId: TabId | null;
@@ -131,6 +212,19 @@ interface TabsState {
   removeFromGroup: (id: TabId) => void;
   toggleGroupCollapse: (groupId: GroupId) => void;
   renameGroup: (groupId: GroupId, label: string) => void;
+  /** §90's drag reorder: `insertion` is the visual slot in the current
+   *  strip (0..tabs.length). §52 clamps: a pinned tab drags within the
+   *  pinned block, a free tab never lands before it. Dragging out of a
+   *  group's reach leaves the group; a drop never GAINS membership. */
+  reorder: (id: TabId, insertion: number) => void;
+  /** §50: hand the tab to a new ZaminPanel window. Writes the handoff
+   *  slot and removes the tab here (a move is not a close — no
+   *  recently-closed entry). Returns the handoff id for the opener, or
+   *  null when refused (the last tab cannot leave; denied storage). */
+  moveToNewWindow: (id: TabId) => string | null;
+  /** The undo of a blocked move: the popup never opened, the tab comes
+   *  home. Group membership survives only if the group still does. */
+  restoreMoved: (tab: Tab, index: number, focus: boolean) => void;
 }
 
 /** The active tab, or the first tab when the stored id went stale. */
@@ -274,7 +368,7 @@ function sanitizeGroups(raw: unknown): Record<GroupId, TabGroup> {
 
 export const useTabs = create<TabsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       tabs: defaultTabs(),
       activeId: null,
       discoveryQuery: null,
@@ -541,10 +635,94 @@ export const useTabs = create<TabsState>()(
           if (!clean) return state;
           return { groups: { ...state.groups, [groupId]: { ...group, label: clean } } };
         }),
+
+      reorder: (id, insertion) =>
+        set((state) => {
+          const from = state.tabs.findIndex((t) => t.id === id);
+          if (from === -1) return state;
+          const slot = Math.max(0, Math.min(Math.floor(insertion), state.tabs.length));
+          if (slot === from || slot === from + 1) return state; // dropped on itself
+          const moving = state.tabs[from];
+          if (!moving) return state;
+          const without = state.tabs.filter((t) => t.id !== id);
+          let at = slot > from ? slot - 1 : slot;
+          // §52: the pinned block owns the head. A pinned tab drags
+          // within the block (0..pinnedCount — the others' block plus its
+          // tail); a free tab never lands before the block.
+          const pinnedCount = without.filter((t) => t.pinned).length;
+          at = moving.pinned
+            ? Math.min(at, pinnedCount)
+            : Math.max(at, pinnedCount);
+          const left = at > 0 ? without[at - 1] : undefined;
+          const right = without[at];
+          let groupId = moving.groupId;
+          if (groupId !== undefined) {
+            const stays = left?.groupId === groupId || right?.groupId === groupId;
+            if (!stays) groupId = undefined; // dragged out of the group's reach
+          }
+          const moved: Tab = { ...moving, groupId };
+          const tabs = normalize([...without.slice(0, at), moved, ...without.slice(at)]);
+          return {
+            tabs,
+            groups:
+              moving.groupId !== undefined && groupId === undefined
+                ? tidyGroups(tabs, state.groups)
+                : state.groups,
+          };
+        }),
+
+      moveToNewWindow: (id) => {
+        const state = get();
+        const index = state.tabs.findIndex((t) => t.id === id);
+        const victim = index === -1 ? undefined : state.tabs[index];
+        if (!victim || state.tabs.length === 1) return null; // the last tab cannot leave
+        const handoffId = `h${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const handoff: TabHandoff = {
+          version: 1,
+          handoffId,
+          issuedAt: Date.now(),
+          history: victim.history,
+          historyIndex: victim.historyIndex,
+          pinned: victim.pinned === true,
+        };
+        try {
+          localStorage.setItem(`${HANDOFF_PREFIX}${handoffId}`, JSON.stringify(handoff));
+        } catch {
+          return null; // denied storage cannot hand anything over
+        }
+        // The move is not a close (§50): the tab still exists, in the
+        // window that is about to open — it enters no close memory.
+        const tabs = state.tabs.filter((t) => t.id !== id);
+        const focusMoves = state.activeId === id;
+        const next = focusMoves ? (tabs[index] ?? tabs[tabs.length - 1]) : undefined;
+        set({
+          tabs,
+          ...(focusMoves ? { activeId: next ? next.id : null } : {}),
+          groups: tidyGroups(tabs, state.groups),
+        });
+        return handoffId;
+      },
+
+      restoreMoved: (tab, index, focus) => {
+        set((state) => {
+          if (state.tabs.some((t) => t.id === tab.id)) return state; // never duplicate
+          const groupId =
+            tab.groupId !== undefined && state.groups[tab.groupId] ? tab.groupId : undefined;
+          const restored: Tab = { ...tab, groupId };
+          const at = Math.max(0, Math.min(index, state.tabs.length));
+          const tabs = normalize([...state.tabs.slice(0, at), restored, ...state.tabs.slice(at)]);
+          return {
+            tabs,
+            ...(focus ? { activeId: restored.id } : {}),
+            groups: tidyGroups(tabs, state.groups),
+          };
+        });
+      },
     }),
     {
-      name: "zamin-panel.tabs",
-      version: 2,
+      name: LEGACY_TABS_KEY,
+      version: 3,
+      storage: createJSONStorage(() => perWindowStorage),
       partialize: (state) => ({
         tabs: state.tabs,
         activeId: state.activeId,
@@ -553,7 +731,9 @@ export const useTabs = create<TabsState>()(
       migrate: (persisted) => {
         // v1 stored destination-keyed tabs without ids. Every tab gets a
         // fresh id; the stored activeKey (a destination key) maps to the
-        // first tab resting there.
+        // first tab resting there. v2/v3 carry ids and an activeId; the
+        // shapes are identical from here on (v3 only moved the storage
+        // key per window — the payload did not change).
         const raw = (persisted ?? {}) as Record<string, unknown>;
         const tabs = sanitizeTabs(raw.tabs);
         if (!tabs) return { tabs: [], activeId: null, groups: {} };
@@ -593,3 +773,116 @@ export const useTabs = create<TabsState>()(
     },
   ),
 );
+
+// --- boot: the §50 handoff and the window registry -----------------------------
+
+/** The child side of the §50 move. A context born with `#handoff=<id>` in
+ *  its URL claims the slot that carries that exact id: the moved tab
+ *  becomes this window's whole strip (active, pinned state preserved —
+ *  group membership cannot travel). The slot is consumed in the same
+ *  breath; a torn, foreign, or stale slot is refused, never half-claimed.
+ *  Returns whether a tab was claimed. */
+export function claimHandoff(hash: string | null | undefined): boolean {
+  const match = typeof hash === "string" ? hash.match(/handoff=([A-Za-z0-9-]+)/) : null;
+  const handoffId = match?.[1];
+  if (!handoffId) return false;
+  const key = `${HANDOFF_PREFIX}${handoffId}`;
+  let slot: TabHandoff | null = null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw !== null) localStorage.removeItem(key); // a slot is claimed once
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (isHandoff(parsed)) slot = parsed;
+    }
+  } catch {
+    return false; // a torn slot is refused, not half-claimed
+  }
+  if (!slot || slot.handoffId !== handoffId) return false;
+  if (Date.now() - slot.issuedAt > HANDOFF_TTL_MS) return false; // stale hand, no tab
+  const history: Destination[] = [];
+  for (const entry of slot.history) {
+    const dest = sanitizeDestination(entry);
+    if (!dest) return false;
+    history.push(dest);
+  }
+  if (history.length === 0) return false;
+  const index = Math.max(0, Math.min(Math.floor(slot.historyIndex), history.length - 1));
+  const tab: Tab = {
+    id: newTabId(),
+    history,
+    historyIndex: index,
+    reloadToken: 0,
+    pinned: slot.pinned || undefined,
+  };
+  useTabs.setState({ tabs: [tab], activeId: tab.id, groups: {}, discoveryQuery: null });
+  return true;
+}
+
+/** Sweep handoff slots nobody claimed — a blocked popup, a crashed child.
+ *  Bounded housekeeping, run once per boot. */
+function sweepStaleHandoffs(): void {
+  const now = Date.now();
+  const doomed: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key !== null && key.startsWith(HANDOFF_PREFIX)) doomed.push(key);
+  }
+  for (const key of doomed) {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed: unknown = raw === null ? null : JSON.parse(raw);
+      if (!isHandoff(parsed) || now - parsed.issuedAt > HANDOFF_TTL_MS) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      localStorage.removeItem(key); // torn slots have no claim on memory
+    }
+  }
+}
+
+/** Boot housekeeping for THIS window: touch the registry, prune windows
+ *  idle past the horizon (their strips go with them), sweep stale
+ *  handoffs, and force one persist write so a window that boots and
+ *  reloads without touching anything still finds its own strip. */
+export function bootWindow(): void {
+  const id = currentWindowId();
+  let registry: Record<string, unknown> = {};
+  let usable = true;
+  try {
+    const raw = localStorage.getItem(REGISTRY_KEY);
+    if (raw !== null) {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        registry = parsed as Record<string, unknown>;
+      } else {
+        usable = false; // a torn registry is rebuilt; strips are not nuked
+      }
+    }
+  } catch {
+    usable = false;
+  }
+  if (usable) {
+    const now = Date.now();
+    for (const [wid, last] of Object.entries(registry)) {
+      if (typeof last === "number" && now - last > REGISTRY_PRUNE_AFTER_MS) {
+        delete registry[wid];
+        try {
+          localStorage.removeItem(stripKeyFor(wid));
+        } catch {
+          // Denied storage: the registry entry still goes.
+        }
+      }
+    }
+  } else {
+    registry = {};
+  }
+  registry[id] = Date.now();
+  try {
+    localStorage.setItem(REGISTRY_KEY, JSON.stringify(registry));
+    sweepStaleHandoffs();
+  } catch {
+    // Denied storage: this window still works, its strip just stays private.
+  }
+  useTabs.setState({}); // one touch → the strip persists under this window's key
+}

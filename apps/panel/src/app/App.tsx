@@ -9,7 +9,7 @@
 import { Suspense, lazy, useEffect, useMemo } from "react";
 import type { Destination } from "../state/destinations";
 import { sortedServers, useServers } from "../state/servers";
-import { tabDestination, tabKeyOf, useTabs } from "../state/tabs";
+import { bootWindow, tabDestination, tabKeyOf, useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
 import { ServerView } from "./ServerView";
@@ -59,6 +59,10 @@ function DestinationView({ destination }: { destination: Destination }) {
 
 export function App() {
   useEffect(() => {
+    // Window housekeeping (ADR-0018) before the wire: the registry touch,
+    // the prune of idle windows, and the one persist write that pins this
+    // window's strip under its own key.
+    bootWindow();
     startWire();
   }, []);
 
