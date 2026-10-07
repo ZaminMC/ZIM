@@ -39,6 +39,11 @@ import type {
   PluginsInstalledResult,
   PluginsInstallResult,
   PluginsUpdatesResult,
+  SchedulesCreateResult,
+  SchedulesUpdateResult,
+  SchedulesListResult,
+  ScheduleAction,
+  ScheduleSpec,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -380,4 +385,49 @@ export async function pluginsInstall(
 
 export async function pluginsDelete(serverId: string, fileName: string): Promise<void> {
   await client.request("plugins.delete", { serverId, fileName });
+}
+
+// --- schedules (§7e, ADR-0014): the daemon runs the clock ----------------
+
+export async function listSchedules(serverId: string): Promise<SchedulesListResult> {
+  return client.request<SchedulesListResult>("schedules.list", { serverId });
+}
+
+export interface ScheduleDraft {
+  name: string;
+  spec: ScheduleSpec;
+  action: ScheduleAction;
+  enabled: boolean;
+}
+
+export async function createSchedule(
+  serverId: string,
+  draft: ScheduleDraft,
+): Promise<SchedulesCreateResult> {
+  return client.request<SchedulesCreateResult>("schedules.create", {
+    requestId: newRequestId(),
+    serverId,
+    ...draft,
+  });
+}
+
+export async function updateSchedule(
+  serverId: string,
+  scheduleId: string,
+  patch: { name?: string; spec?: ScheduleSpec; action?: ScheduleAction; enabled?: boolean },
+): Promise<SchedulesUpdateResult> {
+  return client.request<SchedulesUpdateResult>("schedules.update", {
+    requestId: newRequestId(),
+    serverId,
+    scheduleId,
+    ...patch,
+  });
+}
+
+export async function deleteSchedule(serverId: string, scheduleId: string): Promise<void> {
+  await client.request("schedules.delete", {
+    requestId: newRequestId(),
+    serverId,
+    scheduleId,
+  });
 }

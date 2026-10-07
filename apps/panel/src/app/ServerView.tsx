@@ -1,6 +1,6 @@
 // One open server: header (identity + lifecycle actions) + error surface
 // + crash card + an icon tab row over the workspace surfaces (console,
-// logs, files, players, backups). All outcomes arrive as events
+// logs, files, players, schedules, backups). All outcomes arrive as events
 // (ADR-0005); buttons only dispatch and wait, they never guess the
 // resulting state.
 
@@ -24,6 +24,7 @@ import {
   IconActivity,
   IconBackups,
   IconBolt,
+  IconClock,
   IconFolder,
   IconLogs,
   IconPlayers,
@@ -36,6 +37,7 @@ import { LogViewer } from "./LogViewer";
 import { MetricsView } from "./MetricsView";
 import { PlayersView } from "./PlayersView";
 import { PluginsView } from "./PluginsView";
+import { SchedulesView } from "./SchedulesView";
 import { BackupsView } from "./BackupsView";
 import styles from "./ServerView.module.css";
 
@@ -76,6 +78,7 @@ const LOWER_VIEWS = [
   { id: "files", label: "Files", icon: IconFolder },
   { id: "players", label: "Players", icon: IconPlayers },
   { id: "plugins", label: "Plugins", icon: IconPuzzle },
+  { id: "schedules", label: "Schedules", icon: IconClock },
   { id: "backups", label: "Backups", icon: IconBackups },
 ] as const;
 
@@ -283,6 +286,8 @@ export function ServerView({ serverId }: { serverId: string }) {
             <PlayersView serverId={serverId} />
           ) : lowerView === "plugins" ? (
             <PluginsView serverId={serverId} />
+          ) : lowerView === "schedules" ? (
+            <SchedulesView serverId={serverId} />
           ) : (
             <BackupsView serverId={serverId} running={server.state === "running"} />
           )}

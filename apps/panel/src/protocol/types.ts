@@ -539,3 +539,43 @@ export interface PluginsInstallResult {
   kind: JobKind;
   job: Job;
 }
+
+// --- schedules (§7e, ADR-0014) -------------------------------------------
+
+export type ScheduleSpec =
+  | { kind: "interval"; everySecs: number }
+  | { kind: "daily"; at: string }
+  | { kind: "weekly"; weekdays: string[]; at: string };
+
+export type ScheduleAction =
+  | { kind: "restart" }
+  | { kind: "backup" }
+  | { kind: "command"; line: string };
+
+export interface Schedule {
+  id: string;
+  name: string;
+  spec: ScheduleSpec;
+  action: ScheduleAction;
+  enabled: boolean;
+  createdMs: number;
+  lastFiredMs?: number;
+}
+
+/** The stored record plus the daemon's computed next-run hint. */
+export type ScheduleView = Schedule & { nextRunMs?: number };
+
+export interface SchedulesListResult {
+  serverId: string;
+  schedules: ScheduleView[];
+}
+
+export interface SchedulesCreateResult {
+  serverId: string;
+  schedule: ScheduleView;
+}
+
+export interface SchedulesUpdateResult {
+  serverId: string;
+  schedule: ScheduleView;
+}

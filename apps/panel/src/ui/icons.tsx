@@ -100,6 +100,15 @@ export function IconBackups(p: IconProps) {
   );
 }
 
+export function IconClock(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2.5" />
+    </svg>
+  );
+}
+
 export function IconSparkles(p: IconProps) {
   return (
     <svg {...base(p.size, p.className, p.style)}>
