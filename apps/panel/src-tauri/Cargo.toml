@@ -18,10 +18,13 @@ tauri = { version = "2", features = [] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 
-# The bridge logic (framing, coalescing, down signals) is tested in the
-# workspace crate; this host only wires it to the webview channels.
+# The bridge logic (framing, coalescing, down signals, the remote
+# resolver) is tested in the workspace crate; this host only wires it to
+# the webview channels.
 zamin-bridge = { path = "../../../crates/zamin-bridge" }
+zamin-agent = { path = "../../../crates/zamin-agent" }
 zamin-ipc = { path = "../../../crates/zamin-ipc" }
+tracing = "0.1"
 
 # Desktop notifications (freedesktop / Windows toast): the webview decides
 # the taxonomy, this plugin performs the OS call.

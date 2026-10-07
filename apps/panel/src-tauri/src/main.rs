@@ -11,6 +11,13 @@
 //! "double-clicking ZaminPanel must never show a daemon error"
 //! (ARCH-REVIEW §1.2) a host responsibility, and the autostart commands
 //! are the OS-integration seam the webview cannot reach (§12.1).
+//!
+//! Phase 8 widens the wire, not the boundary (ADR-0011): the same three
+//! duties now cover the remote case — the host may open the TLS relay to
+//! a zaminagent (fingerprint pinned by the webview's connection profile)
+//! instead of the local socket. Frame handling is identical; the agent is
+//! just another transport. A remote profile's daemon is never spawned
+//! here — the webview only asks `daemon_ensure` for local wires.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -55,17 +62,45 @@ impl HostState {
 #[tauri::command]
 async fn daemon_connect(
     endpoint: Option<String>,
+    remote_addr: Option<String>,
+    remote_token: Option<String>,
+    remote_fingerprint: Option<String>,
     frames: Channel<String>,
     down: Channel<()>,
     state: State<'_, HostState>,
 ) -> Result<String, String> {
-    let resolved = match endpoint {
-        Some(value) => Endpoint::from_daemon_arg(&value),
-        None => Endpoint::default_endpoint(),
+    // The active connection profile decides the wire (ADR-0011): with an
+    // agent address the host relays over TLS to the remote box, pinning
+    // its certificate fingerprint; without one it is the per-user local
+    // socket. The resolver's errors are the honest, pre-network ones.
+    let connection = match zamin_bridge::remote::resolve_remote(
+        remote_addr,
+        remote_token,
+        remote_fingerprint,
+    )? {
+        Some(cfg) => {
+            if cfg.trust == zamin_agent::client::Trust::InsecureSkipVerify {
+                tracing::warn!(
+                    "connecting to {} WITHOUT a pinned fingerprint: the agent's \
+                     certificate is not verified, so this connection proves no \
+                     server identity",
+                    cfg.addr
+                );
+            }
+            zamin_agent::client::connect(&cfg)
+                .await
+                .map_err(|error| format!("could not reach the agent at {}: {error}", cfg.addr))?
+        }
+        None => {
+            let resolved = match endpoint {
+                Some(value) => Endpoint::from_daemon_arg(&value),
+                None => Endpoint::default_endpoint(),
+            };
+            zamin_ipc::connect(resolved)
+                .await
+                .map_err(|error| format!("could not connect to the daemon: {error}"))?
+        }
     };
-    let connection = zamin_ipc::connect(resolved)
-        .await
-        .map_err(|error| format!("could not connect to the daemon: {error}"))?;
     let (mut write_half, read_half) = connection.split();
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<String>(256);
