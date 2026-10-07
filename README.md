@@ -32,6 +32,14 @@ zamin start|stop|restart|kill <id>  # lifecycle verbs (protocol §5)
 zamin logs <id> [--lines N]         # tail of logs/latest.log (file-backed)
 zamin logs <id> -f                  # follow: recent buffer, then live
 zamin attach <id>                   # console: logs in, lines to stdin; /quit detaches
+
+zamin plugins search <id> [words]   # the catalog (ADR-0012), loader-faceted
+zamin plugins versions <id> <pid>   # the pin list for one project
+zamin plugins install <id> <pid> [--version ID] [--wait]   # a job; --wait follows bytes
+zamin plugins installed <id>        # the target directory is the inventory
+zamin plugins delete <id> <file> [--yes]
+zamin jobs list                     # installs, backups, downloads — running and finished
+zamin jobs get|cancel <job-id>
 ```
 
 Global flags: `--endpoint <socket|pipe>` (default: the per-user endpoint),
@@ -50,7 +58,9 @@ Fabric/Quilt/NeoForge/Forge family, everything else is Bukkit-family
 job, verify the published sha512, and land atomically in the target
 directory; the directory is the inventory. The catalog base URL is a
 daemon flag (`--modrinth-url`), so mirrors and air-gapped installs work
-exactly like the software catalog's `--catalog-url`.
+exactly like the software catalog's `--catalog-url`. The CLI reaches the
+same surface over SSH — `zamin plugins search/versions/install/installed/
+delete` plus `zamin jobs` for the long-running operations.
 
 ## Development loop
 
@@ -72,7 +82,7 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0011
+- [ADRs](docs/adr/) — accepted decisions 0001–0012
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
 
 ## Install (Phase 7)
