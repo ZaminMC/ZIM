@@ -44,6 +44,11 @@ import type {
   SchedulesListResult,
   ScheduleAction,
   ScheduleSpec,
+  PublishConfig,
+  PublishExecuteResult,
+  PublishPreviewResult,
+  PublishStateResult,
+  ProvidersListResult,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -429,5 +434,59 @@ export async function deleteSchedule(serverId: string, scheduleId: string): Prom
     requestId: newRequestId(),
     serverId,
     scheduleId,
+  });
+}
+// --- publish (§7f, ADR-0017) ---------------------------------------------
+
+export async function listPublishProviders(): Promise<ProvidersListResult> {
+  return client.request<ProvidersListResult>("publish.providers.list", {});
+}
+
+export async function getPublishConfig(serverId: string): Promise<PublishConfig> {
+  return client.request<PublishConfig>("publish.config.get", { serverId });
+}
+
+export async function setPublishConfig(
+  serverId: string,
+  config: PublishConfig,
+): Promise<PublishConfig> {
+  return client.request<PublishConfig>("publish.config.set", {
+    requestId: newRequestId(),
+    serverId,
+    config,
+  });
+}
+
+export async function previewPublish(serverId: string): Promise<PublishPreviewResult> {
+  return client.request<PublishPreviewResult>("publish.preview", { serverId });
+}
+
+export async function executePublish(
+  serverId: string,
+  confirmUnsafe: boolean,
+): Promise<PublishExecuteResult> {
+  return client.request<PublishExecuteResult>("publish.execute", {
+    requestId: newRequestId(),
+    serverId,
+    confirmUnsafe,
+  });
+}
+
+export async function getPublishState(serverId: string): Promise<PublishStateResult> {
+  return client.request<PublishStateResult>("publish.state", { serverId });
+}
+
+export async function setPublishReview(
+  serverId: string,
+  file: string,
+  kind: string,
+  reviewed: boolean,
+): Promise<PublishPreviewResult> {
+  return client.request<PublishPreviewResult>("publish.review.set", {
+    requestId: newRequestId(),
+    serverId,
+    file,
+    kind,
+    reviewed,
   });
 }

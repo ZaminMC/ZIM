@@ -37,6 +37,7 @@ import { LogViewer } from "./LogViewer";
 import { MetricsView } from "./MetricsView";
 import { PlayersView } from "./PlayersView";
 import { PluginsView } from "./PluginsView";
+import { PublishModal } from "./PublishModal";
 import { SchedulesView } from "./SchedulesView";
 import { BackupsView } from "./BackupsView";
 import styles from "./ServerView.module.css";
@@ -115,6 +116,10 @@ export function ServerView({ serverId }: { serverId: string }) {
   // Which lower surface the tab shows: the interactive console, the paged
   // log viewer, or the file browser. Panel-local, not persisted.
   const [lowerView, setLowerView] = useState<LowerView>("console");
+  // The §24 publish affordance lives in the header's toolbar; the state
+  // belongs to the whole server page, so it is declared with the page's
+  // other hooks — before the unknown-server early return.
+  const [publishOpen, setPublishOpen] = useState(false);
 
   // Details (software/version/port) arrive via server.get; refresh when the
   // server boots, since software identity is only knowable then.
@@ -198,6 +203,16 @@ export function ServerView({ serverId }: { serverId: string }) {
               </Button>
             );
           })}
+          {/* §24 reserves this slot: the primary publish action, always
+              reachable — the workspace opens over the server page. */}
+          <Button
+            variant="default"
+            data-testid="publish-open"
+            onClick={() => setPublishOpen(true)}
+            title="Package and publish a selection of this server's files"
+          >
+            Publish
+          </Button>
         </div>
       </header>
 
@@ -293,6 +308,14 @@ export function ServerView({ serverId }: { serverId: string }) {
           )}
         </Suspense>
       </div>
+
+      {publishOpen ? (
+        <PublishModal
+          serverId={serverId}
+          serverName={server.displayName}
+          onClose={() => setPublishOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

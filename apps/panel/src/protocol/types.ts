@@ -144,7 +144,8 @@ export type JobKind =
   | "backup.restore"
   | "archive.extract"
   | "java.install"
-  | "plugins.install";
+  | "plugins.install"
+  | "publish.execute";
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type JobOutcome = "succeeded" | "failed" | "cancelled";
 export type BackupTaken = "live" | "cold";
@@ -578,4 +579,125 @@ export interface SchedulesCreateResult {
 export interface SchedulesUpdateResult {
   serverId: string;
   schedule: ScheduleView;
+}
+
+// --- publish (§7f, ADR-0017) ---------------------------------------------
+// The founder's §40-47 publish: a §41 selection of files, a §42 diff
+// against the last publication, the §44/§46 security scan, and a §40
+// provider interface. The §43 Dutchmen changelog room stays OFF this
+// wire by standing scope — the changelog is an operator-edited string.
+
+export type SelectionRule =
+  | { kind: "folder"; path: string }
+  | { kind: "file"; path: string }
+  | { kind: "glob"; pattern: string };
+
+export interface PublishSelection {
+  includes: SelectionRule[];
+  excludes: SelectionRule[];
+}
+
+export interface PublishConfig {
+  selection: PublishSelection;
+  providerId: string;
+  providerSettings: Record<string, string>;
+  title: string;
+  description: string;
+  version: string;
+  changelog: string;
+}
+
+export type FileDiffStatus = "added" | "modified" | "removed" | "unchanged";
+
+export interface FileDiffEntry {
+  path: string;
+  status: FileDiffStatus;
+  /** Current size; for removed rows the size it had when published. */
+  size?: number;
+  sha512?: string;
+}
+
+export interface DiffCounts {
+  added: number;
+  modified: number;
+  removed: number;
+  unchanged: number;
+  /** added + modified + removed — the number the Publish button wears. */
+  changed: number;
+}
+
+export type SecretSeverity = "critical" | "high" | "medium" | "low";
+
+export interface SecretFinding {
+  file: string;
+  /** 1-based; 0 marks a file-level finding. */
+  line: number;
+  kind: string;
+  severity: SecretSeverity;
+  /** Redacted: a key name or a masked token preview, never the secret. */
+  excerpt: string;
+  detector: string;
+  reviewed: boolean;
+}
+
+export interface ScanReport {
+  findings: SecretFinding[];
+  filesScanned: number;
+  filesSkipped: number;
+}
+
+export interface PublicationSummary {
+  publishedAtMs: number;
+  version?: string;
+  providerId: string;
+  packageSha512: string;
+  packageBytes: number;
+  fileCount: number;
+}
+
+export interface UploadReceipt {
+  providerId: string;
+  reference: string;
+  detail?: string;
+  atMs: number;
+}
+
+export interface ProviderSettingInfo {
+  key: string;
+  description: string;
+}
+
+export interface ProviderInfo {
+  id: string;
+  displayName: string;
+  needsCredential: boolean;
+  credentialEnvVar?: string;
+  settings: ProviderSettingInfo[];
+}
+
+export interface ProvidersListResult {
+  providers: ProviderInfo[];
+}
+
+export interface PublishPreviewResult {
+  serverId: string;
+  config: PublishConfig;
+  files: FileDiffEntry[];
+  counts: DiffCounts;
+  scan: ScanReport;
+  blockingCount: number;
+  selectedFiles: number;
+  selectedBytes: number;
+  lastPublication?: PublicationSummary;
+}
+
+export interface PublishExecuteResult {
+  job: Job;
+}
+
+export interface PublishStateResult {
+  serverId: string;
+  lastPublication?: PublicationSummary;
+  receipt?: UploadReceipt;
+  packagePresent: boolean;
 }

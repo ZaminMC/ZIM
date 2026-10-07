@@ -1,0 +1,240 @@
+/* The publish workspace: compact, dark, honest — the §45 security check
+   reads as a warning surface, the §42 chip as a live counter. */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: min(72vh, 720px);
+  overflow-y: auto;
+  min-width: min(78vw, 640px);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.changedQuiet {
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.changedEmph {
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diffTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.diffTable th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diffTable td {
+  padding: 2px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.mark {
+  width: 1.6em;
+  font-weight: 700;
+}
+
+.added .mark {
+  color: var(--success);
+}
+
+.modified .mark {
+  color: var(--warning);
+}
+
+.removed .mark {
+  color: var(--danger);
+}
+
+.findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.findings li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.findings li.critical {
+  border-left-color: var(--danger);
+}
+
+.findings li.high {
+  border-left-color: var(--danger);
+}
+
+.findings li.medium {
+  border-left-color: var(--warning);
+}
+
+.findings li.low {
+  border-left-color: var(--text-muted);
+}
+
+.findingHead {
+  font-weight: 600;
+}
+
+.findingWhere {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.findingExcerpt {
+  color: var(--text-muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.findingActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.blocking {
+  margin: 0;
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.ruleRows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ruleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ruleRow code {
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.ruleAdd {
+  display: flex;
+  gap: 6px;
+}
+
+.ruleInput {
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.security {
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+}
+
+.securityActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.notice {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.quiet {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
