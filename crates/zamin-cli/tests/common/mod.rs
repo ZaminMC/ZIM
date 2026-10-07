@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -192,6 +193,25 @@ impl Harness {
             String::from_utf8_lossy(&output.stderr),
         );
         serde_json::from_slice(&output.stdout).expect("zamin prints JSON")
+    }
+
+    /// Run `zamin` feeding `input` on stdin (the confirmation prompts);
+    /// captures everything and asserts success.
+    pub fn zamin_confirm(&self, args: &[&str], input: &str) -> std::process::Output {
+        let mut child = Command::new(&self.zamin)
+            .arg("--endpoint")
+            .arg(&self.endpoint)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("zamin spawns");
+        let mut stdin = child.stdin.take().expect("piped stdin");
+        stdin.write_all(input.as_bytes()).expect("confirm written");
+        stdin.flush().expect("confirm flushed");
+        drop(stdin);
+        child.wait_with_output().expect("zamin exits")
     }
 }
 

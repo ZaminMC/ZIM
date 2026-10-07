@@ -335,13 +335,15 @@ fn connect_failure(error: ClientError, endpoint_arg: &Option<String>) -> Failure
 }
 
 async fn run(cli: Cli) -> Result<(), Failure> {
-    // Commands that never need a connection.
+    // Confirmations never need a connection, so they happen first: a
+    // mismatched answer ends the run here, a match falls through to the
+    // command itself.
     if let Commands::Remove {
         server_id,
         yes: false,
     } = &cli.command
     {
-        return confirm_removal(server_id);
+        confirm_removal(server_id)?;
     }
     if let Commands::Plugins {
         command:
@@ -352,7 +354,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             },
     } = &cli.command
     {
-        return confirm_delete(file_name);
+        confirm_delete(file_name)?;
     }
 
     let client = match &cli.remote {

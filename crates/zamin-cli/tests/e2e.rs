@@ -57,6 +57,25 @@ fn cli_registers_and_manages_the_lifecycle() {
     let list = harness.zamin_json(&["list"]);
     assert_eq!(list["servers"][0]["state"], "stopped");
     assert_eq!(list["servers"][0]["displayName"], "Demo Server");
+
+    // Remove, with the typed confirmation: a match must actually remove
+    // (the prompt falls through to the command), a mismatch must not.
+    let refused = harness.zamin_confirm(&["remove", "demo"], "wrong\n");
+    assert!(!refused.status.success(), "a mismatched confirm refuses");
+    assert_eq!(
+        harness.zamin_json(&["list"])["servers"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    let confirmed = harness.zamin_confirm(&["remove", "demo"], "demo\n");
+    assert!(confirmed.status.success(), "the matching confirm removes");
+    assert_eq!(
+        harness.zamin_json(&["list"])["servers"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
 }
 
 #[test]
