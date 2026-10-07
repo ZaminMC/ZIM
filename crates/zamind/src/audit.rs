@@ -16,6 +16,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
+use zamin_protocol::audit::{AuditEntry, AuditListResult};
 
 /// Methods that change server state, files, or jobs. Everything else is
 /// observation and stays out of the log (ADR-0011: mutations only).
@@ -52,6 +53,12 @@ pub struct Audit {
     /// wedge a long-lived handle, and O_APPEND keeps every entry whole.
     lock: std::sync::Arc<Mutex<()>>,
 }
+
+/// The read side's default page and its hard cap. Mutations-only means
+/// the file grows slowly; 200 rows answers "what happened lately" and
+/// the cap keeps one request from ever reading a huge file whole.
+pub const AUDIT_DEFAULT_LIMIT: u32 = 200;
+pub const AUDIT_MAX_LIMIT: u32 = 1_000;
 
 impl Audit {
     pub fn new(data_dir: &Path) -> Audit {
@@ -95,6 +102,72 @@ impl Audit {
             tracing::warn!("audit append to {:?} failed: {error}", self.path);
         }
     }
+
+    /// The read side (ADR-0011): newest-first, paged by `offset` counted
+    /// back from the newest. The file is the schema — the reader parses
+    /// what the writer appended; a line that does not parse is counted in
+    /// `malformed` and stays on disk untouched (the audit is evidence;
+    /// a read never rewrites it). An absent file is an empty audit, the
+    /// registry rule. The read takes the append lock, so a page is a
+    /// consistent snapshot rather than a race with a live append.
+    pub fn read(&self, limit: Option<u32>, offset: Option<u32>) -> AuditListResult {
+        let limit = limit
+            .unwrap_or(AUDIT_DEFAULT_LIMIT)
+            .clamp(1, AUDIT_MAX_LIMIT);
+        let offset = offset.unwrap_or(0);
+
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let content = match std::fs::read_to_string(&self.path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return AuditListResult {
+                    entries: Vec::new(),
+                    has_more: false,
+                    malformed: 0,
+                };
+            }
+            Err(error) => {
+                // Same discipline as a failed append: evidence is served
+                // best-effort; the warning names the failure honestly.
+                tracing::warn!("audit read from {:?} failed: {error}", self.path);
+                return AuditListResult {
+                    entries: Vec::new(),
+                    has_more: false,
+                    malformed: 0,
+                };
+            }
+        };
+        drop(_guard);
+
+        let mut malformed: u32 = 0;
+        let mut entries: Vec<AuditEntry> = Vec::new();
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<AuditEntry>(line) {
+                Ok(entry) => entries.push(entry),
+                Err(_) => malformed += 1,
+            }
+        }
+        // Newest first: the file appends chronologically, so the read
+        // reverses; offset then counts back from the newest.
+        entries.reverse();
+        let has_more = (offset as usize + limit as usize) < entries.len();
+        let entries = entries
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect();
+        AuditListResult {
+            entries,
+            has_more,
+            malformed,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +175,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use zamin_protocol::audit::AuditClient;
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -170,5 +244,89 @@ mod tests {
         let audit = Audit::new(&dir.join("never-created"));
         // Must not panic; the warning is tracing's to carry.
         audit.record("server.start", Some("x"), "ok", None);
+    }
+
+    #[test]
+    fn read_returns_newest_first_with_paging() {
+        let dir = temp_dir("read");
+        let audit = Audit::new(&dir);
+        audit.record("daemon.hello", None, "ok", None);
+        audit.record(
+            "server.register",
+            Some("a"),
+            "ok",
+            Some(("zamin-cli", "0.1.0")),
+        );
+        audit.record(
+            "server.start",
+            Some("a"),
+            "ok",
+            Some(("zamin-cli", "0.1.0")),
+        );
+        audit.record("server.stop", Some("a"), "ok", Some(("zamin-cli", "0.1.0")));
+
+        let page = audit.read(None, None);
+        assert_eq!(page.entries.len(), 4);
+        assert!(!page.has_more);
+        assert_eq!(page.malformed, 0);
+        // Newest first: the last append answers first.
+        assert_eq!(page.entries[0].method, "server.stop");
+        assert_eq!(page.entries[3].method, "daemon.hello");
+        // The round trip keeps the writer's shape honest.
+        assert_eq!(page.entries[1].server_id.as_deref(), Some("a"));
+        assert_eq!(
+            page.entries[1].client,
+            Some(AuditClient {
+                name: "zamin-cli".into(),
+                version: "0.1.0".into()
+            })
+        );
+
+        // Offset counts back from the newest; the page is a slice.
+        let page = audit.read(Some(2), Some(1));
+        assert_eq!(page.entries.len(), 2);
+        assert_eq!(page.entries[0].method, "server.start");
+        assert_eq!(page.entries[1].method, "server.register");
+        assert!(page.has_more, "older entries exist beyond the page");
+
+        // Past the end: an honest empty page.
+        let page = audit.read(Some(2), Some(9));
+        assert!(page.entries.is_empty());
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn read_counts_malformed_lines_without_serving_or_erasing_them() {
+        let dir = temp_dir("malformed");
+        let audit = Audit::new(&dir);
+        audit.record("server.start", Some("a"), "ok", None);
+        // A torn/garbage line lands on disk the way a broken rotation
+        // could leave one: the reader must name it, never drop it silent.
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(dir.join("audit.log"))
+                .unwrap();
+            writeln!(file, "{{\"tsMs\": not json at all").unwrap();
+        }
+        audit.record("server.stop", Some("a"), "ok", None);
+
+        let page = audit.read(None, None);
+        assert_eq!(page.entries.len(), 2, "the two real lines are served");
+        assert_eq!(page.entries[0].method, "server.stop");
+        assert_eq!(page.malformed, 1, "the garbage line is counted");
+        // The evidence stays on disk.
+        let content = std::fs::read_to_string(dir.join("audit.log")).unwrap();
+        assert_eq!(content.lines().count(), 3, "nothing was rewritten");
+    }
+
+    #[test]
+    fn read_on_an_absent_file_is_an_empty_audit() {
+        let dir = temp_dir("absent");
+        let audit = Audit::new(&dir);
+        let page = audit.read(None, None);
+        assert!(page.entries.is_empty());
+        assert!(!page.has_more);
+        assert_eq!(page.malformed, 0);
     }
 }

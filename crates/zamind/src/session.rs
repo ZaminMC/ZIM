@@ -192,7 +192,7 @@ async fn session_loop(
             }
         }
 
-        let response = dispatch(&request, engine).await;
+        let response = dispatch(&request, engine, audit).await;
         if AUDITED_METHODS.contains(&request.method.as_str()) {
             let outcome = match &response.error {
                 Some(error) => error.code.as_str(),
@@ -367,7 +367,7 @@ async fn handle_subscribe(
 }
 
 #[allow(clippy::result_large_err)] // response envelopes are written once, to the wire
-async fn dispatch(request: &Request, engine: &Engine) -> Response {
+async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response {
     let id = request.id.clone();
     match request.method.as_str() {
         methods::DAEMON_STATUS => Response::ok(id, engine.daemon_status().await),
@@ -582,6 +582,17 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 },
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
+        }
+        methods::AUDIT_LIST => {
+            // The audit's read side (ADR-0011): newest-first, paged, and
+            // like every read it is not itself audited — a listing floods
+            // the file without making the system safer.
+            let params: zamin_protocol::audit::AuditListParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            let read = audit.read(params.limit, params.offset);
+            json_ok(id, read)
         }
         methods::CATALOG_LIST => json_ok(id, engine.catalog_list().await),
         methods::CATALOG_VERSIONS => {

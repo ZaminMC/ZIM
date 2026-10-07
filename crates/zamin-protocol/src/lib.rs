@@ -11,8 +11,8 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-pub mod backups;
 pub mod audit;
+pub mod backups;
 pub mod envelope;
 pub mod error;
 pub mod files;
