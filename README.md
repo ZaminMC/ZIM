@@ -48,6 +48,21 @@ error object and exit 1), `--timeout <secs>`.
 
 Exit codes: `0` success, `1` operation/protocol failure, `2` usage error.
 
+## Software catalog
+
+New Server installs from the catalog with zero manual JAR handling. Two
+upstream families speak today ([ADR-0013](docs/adr/0013-software-catalog-second-family-fabric.md)):
+Paper, Purpur and Folia through the PaperMC Fill API (builds with
+published sha256 digests), and Fabric through the FabricMC meta API
+(version lists plus a ready-to-run launcher jar). Catalog entries carry
+their `source`, so clients know which dialect applies — a numeric build
+or a loader pin. Fabric publishes no checksums; the daemon records the
+sha256 of what arrived instead of pretending a published digest was
+verified. Forge waits for an installer-job decision of its own. Every
+base URL is a daemon flag (`--catalog-url`, `--fabric-url`), so mirrors
+and air-gapped installs work exactly like the plugin catalog's
+`--modrinth-url`.
+
 ## Plugin catalog
 
 The panel's Plugins tab installs from Modrinth
@@ -86,7 +101,7 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0012
+- [ADRs](docs/adr/) — accepted decisions 0001–0013
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
 
 ## Install (Phase 7)
