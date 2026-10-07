@@ -32,6 +32,95 @@
   transition: background var(--speed-fast) var(--ease), color var(--speed-fast) var(--ease);
 }
 
+/* §52: the pinned tab is the favicon alone. */
+.tabPinned {
+  min-width: 34px;
+  max-width: 34px;
+  padding: 6px 8px;
+  justify-content: center;
+}
+
+/* §49: the strip is presentation; a group's members travel together and
+   wear the group's color as a leading edge. */
+.groupWrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.groupMember {
+  box-shadow: inset 2px 0 0 var(--group);
+}
+
+.groupChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  margin-bottom: 8px;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--group) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--group) 16%, var(--surface));
+  color: var(--group);
+  font-family: var(--font-ui);
+  font-size: var(--text-s);
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.groupLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.groupCount {
+  font-size: var(--text-xs, 10px);
+  opacity: 0.8;
+}
+
+.groupChevron {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.renameInput {
+  align-self: center;
+  margin-bottom: 8px;
+  width: 110px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-s);
+}
+
+/* The founder's group palette — reads on the dark surface. */
+.group_sky {
+  --group: #58a6ff;
+}
+.group_grass {
+  --group: #3fb950;
+}
+.group_amber {
+  --group: #d29922;
+}
+.group_rose {
+  --group: #f778ba;
+}
+.group_violet {
+  --group: #bc8cff;
+}
+.group_slate {
+  --group: #9aa4b2;
+}
+
 .tab:hover {
   background: color-mix(in srgb, var(--surface) 80%, var(--text) 6%);
   color: var(--text);
@@ -120,6 +209,11 @@
 .menuItemReserved {
   color: var(--text-faint);
   cursor: default;
+}
+
+.menuItemSub {
+  padding-left: 22px;
+  color: var(--group);
 }
 
 .divider {
