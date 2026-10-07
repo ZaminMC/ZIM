@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   pluginsInstalled: vi.fn(),
   pluginsInstall: vi.fn(),
   pluginsDelete: vi.fn(),
+  pluginsUpdates: vi.fn(),
 }));
 
 vi.mock("../state/actions", () => ({
@@ -22,6 +23,7 @@ vi.mock("../state/actions", () => ({
   pluginsInstalled: mocks.pluginsInstalled,
   pluginsInstall: mocks.pluginsInstall,
   pluginsDelete: mocks.pluginsDelete,
+  pluginsUpdates: mocks.pluginsUpdates,
 }));
 
 beforeEach(() => {
@@ -33,6 +35,7 @@ beforeEach(() => {
   });
   mocks.pluginsInstall.mockReset();
   mocks.pluginsDelete.mockReset();
+  mocks.pluginsUpdates.mockReset();
 });
 
 afterEach(cleanup);
@@ -276,5 +279,83 @@ describe("PluginsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
     expect(mocks.pluginsInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("the update check rides verdict chips on the installed rows", async () => {
+    mocks.pluginsInstalled.mockResolvedValue({
+      target: "plugins",
+      entries: [
+        { fileName: "EssentialsX-2.19.0.jar", sizeBytes: 10, modifiedMs: 0, symlinkOutside: false },
+        { fileName: "hand-dropped.jar", sizeBytes: 10, modifiedMs: 0, symlinkOutside: false },
+      ],
+    });
+    mocks.pluginsUpdates.mockResolvedValue({
+      target: "plugins",
+      entries: [
+        {
+          fileName: "EssentialsX-2.19.0.jar",
+          status: "update-available",
+          projectId: "AABBCC",
+          installedVersion: "2.19.0",
+          latestVersion: "2.20.0",
+          latestVersionId: "ver9",
+        },
+        { fileName: "hand-dropped.jar", status: "unmanaged" },
+      ],
+    });
+
+    // The recipe's install hands off to the jobs store like any other.
+    mocks.pluginsInstall.mockResolvedValue({});
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check updates" }));
+
+    // The verdicts land as chips on the rows they describe, with the
+    // newest version named where one exists.
+    expect(
+      await screen.findByText("update: 2.20.0"),
+    ).toBeTruthy();
+    expect(screen.getByText("unmanaged")).toBeTruthy();
+
+    // The update button is the recipe applied: same server, the pin,
+    // and the explicit replace the rule requires.
+    fireEvent.click(screen.getByRole("button", { name: "update" }));
+    await waitFor(() =>
+      expect(mocks.pluginsInstall).toHaveBeenCalledWith(
+        "alpha",
+        "AABBCC",
+        "ver9",
+        true,
+      ),
+    );
+  });
+
+  it("an up-to-date verdict shows without an update button", async () => {
+    mocks.pluginsInstalled.mockResolvedValue({
+      target: "plugins",
+      entries: [
+        { fileName: "EssentialsX-2.20.0.jar", sizeBytes: 10, modifiedMs: 0, symlinkOutside: false },
+      ],
+    });
+    mocks.pluginsUpdates.mockResolvedValue({
+      target: "plugins",
+      entries: [
+        {
+          fileName: "EssentialsX-2.20.0.jar",
+          status: "up-to-date",
+          projectId: "AABBCC",
+          installedVersion: "2.20.0",
+          latestVersion: "2.20.0",
+          latestVersionId: "ver9",
+        },
+      ],
+    });
+
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Check updates" }));
+
+    expect(await screen.findByText("up to date")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "update" })).toBeNull();
+    // The plain remove still works — the row keeps its own affordance.
+    expect(screen.getByRole("button", { name: "remove" })).toBeTruthy();
   });
 });

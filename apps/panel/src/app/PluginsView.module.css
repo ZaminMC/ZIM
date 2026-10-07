@@ -194,3 +194,27 @@
 .remove:hover {
   color: var(--text);
 }
+
+/* The update check's verdict chips (ADR-0012, read side): quiet for
+   "up to date", a pointed accent when the catalog has newer bytes,
+   faint for jars the catalog cannot manage. */
+.updateChip {
+  font-size: var(--text-xs);
+  border-radius: 999px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+}
+
+.upToDate {
+  color: var(--text-faint);
+}
+
+.updateAvailable {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.unmanaged {
+  color: var(--text-faint);
+  border-style: dashed;
+}

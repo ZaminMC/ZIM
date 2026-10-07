@@ -4,14 +4,19 @@
 // honest answer (plugins/ or mods/, from the server's own layout); the
 // installed list is the directory itself, never a shadow record.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   pluginsDelete,
   pluginsInstall,
   pluginsInstalled,
   pluginsSearch,
+  pluginsUpdates,
 } from "../state/actions";
-import type { PluginsInstalledResult, PluginsSearchResult } from "../protocol/types";
+import type {
+  PluginsInstalledResult,
+  PluginsSearchResult,
+  PluginsUpdatesResult,
+} from "../protocol/types";
 import { describeError } from "../state/errors";
 import { runningJob, useJobs } from "../state/jobs";
 import { formatBytes } from "../state/metrics";
@@ -24,6 +29,11 @@ export function PluginsView({ serverId }: { serverId: string }) {
   const [result, setResult] = useState<PluginsSearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [installed, setInstalled] = useState<PluginsInstalledResult | null>(null);
+  // The update check (ADR-0012's read side): the operator asks once, the
+  // disk's bytes answer — chips ride the installed rows, never a second
+  // list to keep in sync.
+  const [updates, setUpdates] = useState<PluginsUpdatesResult | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installingProject, setInstallingProject] = useState<string | null>(null);
   // The typed update rule (ADR-0012): PLUGIN_EXISTS offers the explicit
@@ -46,17 +56,49 @@ export function PluginsView({ serverId }: { serverId: string }) {
 
   useEffect(() => {
     refreshInstalled();
+    updatesLoaded.current = false;
+    setUpdates(null);
   }, [refreshInstalled]);
+
+  // Whether a report is on screen — a ref, so the quiet refresh after a
+  // job can consult it without re-firing on every report change.
+  const updatesLoaded = useRef(false);
+
+  const checkUpdates = useCallback(() => {
+    setCheckingUpdates(true);
+    setError(null);
+    void pluginsUpdates(serverId)
+      .then((report) => {
+        updatesLoaded.current = true;
+        setUpdates(report);
+      })
+      .catch((cause: unknown) => setError(describeError(cause).title))
+      .finally(() => setCheckingUpdates(false));
+  }, [serverId]);
+
+  // Re-run the check quietly after a job lands — only when a report is
+  // already on screen; the button stays the explicit entry point. A
+  // failed quiet refresh keeps the old report; the next explicit check
+  // replaces it.
+  const refreshUpdatesIfLoaded = useCallback(() => {
+    if (!updatesLoaded.current) return;
+    void pluginsUpdates(serverId)
+      .then(setUpdates)
+      .catch(() => {});
+  }, [serverId]);
 
   // When the install job completes (or before it starts), the busy flag
   // releases and the inventory refreshes for free — the jobs store is
-  // the single source of "is something landing right now".
+  // the single source of "is something landing right now". A loaded
+  // update report refreshes too: the verdicts are the disk's bytes, and
+  // those just changed.
   useEffect(() => {
     if (installJob === undefined) {
       setInstallingProject(null);
       refreshInstalled();
+      refreshUpdatesIfLoaded();
     }
-  }, [installJob, refreshInstalled]);
+  }, [installJob, refreshInstalled, refreshUpdatesIfLoaded]);
 
   const runSearch = useCallback(
     (query: string) => {
@@ -71,11 +113,11 @@ export function PluginsView({ serverId }: { serverId: string }) {
   );
 
   const install = useCallback(
-    (projectId: string, replace = false) => {
+    (projectId: string, replace = false, versionId?: string) => {
       setInstallingProject(projectId);
       setError(null);
       setPendingReplace(null);
-      void pluginsInstall(serverId, projectId, undefined, replace)
+      void pluginsInstall(serverId, projectId, versionId, replace)
         .then(() => {
           // The job store owns the rest; the progress chip shows itself.
         })
@@ -105,6 +147,12 @@ export function PluginsView({ serverId }: { serverId: string }) {
         .catch((cause: unknown) => setError(describeError(cause).title));
     },
     [serverId, refreshInstalled],
+  );
+
+  // The verdicts ride the installed rows — one map lookup, no second
+  // list to keep in sync.
+  const updatesByFile = new Map(
+    (updates?.entries ?? []).map((entry) => [entry.fileName, entry]),
   );
 
   return (
@@ -138,6 +186,9 @@ export function PluginsView({ serverId }: { serverId: string }) {
           </Button>
         </form>
         <Button onClick={refreshInstalled}>Refresh</Button>
+        <Button onClick={checkUpdates} disabled={checkingUpdates || busy}>
+          {checkingUpdates ? "Checking…" : "Check updates"}
+        </Button>
       </div>
 
       {installJob ? (
@@ -222,25 +273,58 @@ export function PluginsView({ serverId }: { serverId: string }) {
             Installed — {installed.target}/
           </span>
           <ul className={styles.installedList}>
-            {installed.entries.map((entry) => (
-              <li key={entry.fileName} className={styles.installed}>
-                <span className={styles.installedName}>{entry.fileName}</span>
-                <span className={styles.installedMeta}>
-                  {formatBytes(entry.sizeBytes)}
-                </span>
-                {entry.symlinkOutside ? (
-                  <span className={styles.badge}>outside root</span>
-                ) : (
-                  <button
-                    className={styles.remove}
-                    disabled={busy}
-                    onClick={() => remove(entry.fileName)}
-                  >
-                    remove
-                  </button>
-                )}
-              </li>
-            ))}
+            {installed.entries.map((entry) => {
+              const verdict = updatesByFile.get(entry.fileName);
+              return (
+                <li key={entry.fileName} className={styles.installed}>
+                  <span className={styles.installedName}>{entry.fileName}</span>
+                  <span className={styles.installedMeta}>
+                    {formatBytes(entry.sizeBytes)}
+                  </span>
+                  {verdict ? (
+                    <span
+                      className={`${styles.updateChip} ${styles[verdict.status]}`}
+                      title={
+                        verdict.status === "update-available"
+                          ? `${verdict.installedVersion ?? "installed"} → ${verdict.latestVersion ?? "newer"}`
+                          : verdict.status === "unmanaged"
+                            ? "These bytes are not the catalog's — the update flow cannot manage this jar."
+                            : "The newest installable version is what this file already is."
+                      }
+                    >
+                      {verdict.status === "update-available"
+                        ? `update: ${verdict.latestVersion ?? "newer"}`
+                        : verdict.status === "up-to-date"
+                          ? "up to date"
+                          : "unmanaged"}
+                    </span>
+                  ) : null}
+                  {verdict?.status === "update-available" &&
+                  verdict.projectId &&
+                  verdict.latestVersionId ? (
+                    <button
+                      className={styles.remove}
+                      disabled={busy}
+                      onClick={() =>
+                        install(verdict.projectId ?? "", true, verdict.latestVersionId)
+                      }
+                    >
+                      update
+                    </button>
+                  ) : entry.symlinkOutside ? (
+                    <span className={styles.badge}>outside root</span>
+                  ) : (
+                    <button
+                      className={styles.remove}
+                      disabled={busy}
+                      onClick={() => remove(entry.fileName)}
+                    >
+                      remove
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

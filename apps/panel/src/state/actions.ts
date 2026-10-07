@@ -38,6 +38,7 @@ import type {
   PluginsVersionsResult,
   PluginsInstalledResult,
   PluginsInstallResult,
+  PluginsUpdatesResult,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -350,6 +351,10 @@ export async function pluginsVersions(
 
 export async function pluginsInstalled(serverId: string): Promise<PluginsInstalledResult> {
   return client.request<PluginsInstalledResult>("plugins.installed", { serverId });
+}
+
+export async function pluginsUpdates(serverId: string): Promise<PluginsUpdatesResult> {
+  return client.request<PluginsUpdatesResult>("plugins.updates", { serverId });
 }
 
 export async function pluginsInstall(

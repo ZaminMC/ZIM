@@ -516,6 +516,25 @@ export interface PluginsInstalledResult {
   entries: InstalledPlugin[];
 }
 
+export type PluginUpdateStatus = "up-to-date" | "update-available" | "unmanaged";
+
+export interface PluginUpdateEntry {
+  fileName: string;
+  status: PluginUpdateStatus;
+  /** Present when the catalog recognized the file's bytes. */
+  projectId?: string;
+  installedVersion?: string;
+  latestVersion?: string;
+  /** The pin that applies the update via plugins.install + replace. */
+  latestVersionId?: string;
+}
+
+export interface PluginsUpdatesResult {
+  /** The directory that was checked ("plugins" or "mods"). */
+  target: string;
+  entries: PluginUpdateEntry[];
+}
+
 export interface PluginsInstallResult {
   kind: JobKind;
   job: Job;
