@@ -17,6 +17,7 @@
 }
 
 .tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -30,6 +31,27 @@
   cursor: pointer;
   user-select: none;
   transition: background var(--speed-fast) var(--ease), color var(--speed-fast) var(--ease);
+}
+
+/* Drag feedback (ADR-0018): the strip shows the insertion edge —
+   an accent bar on the side the tab will land. */
+.dropBefore::before,
+.dropAfter::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.dropBefore::before {
+  left: 0;
+}
+
+.dropAfter::after {
+  right: 0;
 }
 
 /* §52: the pinned tab is the favicon alone. */

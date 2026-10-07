@@ -1,13 +1,18 @@
-// The tab strip (ADR-0015, ADR-0016): every tab is a typed destination; a
-// server tab wears its state as the favicon wears a color. Pinned tabs
-// (§52) sit compact at the head, guarded from accidental closure. Groups
-// (§49) render as collapsible browser-style chips — never folders. The
-// context menu carries the §48 verbs that have real machinery; the
+// The tab strip (ADR-0015, ADR-0016, ADR-0018): every tab is a typed
+// destination; a server tab wears its state as the favicon wears a color.
+// Pinned tabs (§52) sit compact at the head, guarded from accidental
+// closure. Groups (§49) render as collapsible browser-style chips — never
+// folders. Tabs drag (§90's operator machinery): the strip shows the
+// insertion edge, the pinned head clamps, and dragging out of a group
+// leaves it. "Move tab to new window" (§50) is live machinery now: the
+// store hands the tab over, the opener opens a second ZaminPanel window
+// that claims it by hash, and a blocked popup brings the tab home. The
 // founder's remaining entries stay honest reserved rooms, not fakes.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useServers, type ServerEntry } from "../../state/servers";
 import {
+  HANDOFF_PREFIX,
   tabDestination,
   useTabs,
   type GroupId,
@@ -67,6 +72,14 @@ interface TabMenu {
   y: number;
 }
 
+/** Which side of a tab a drop would land on — the pointer against the
+ *  tab's own midpoint. Used by dragover (the indicator) and drop (the
+ *  math), so the two can never disagree. */
+function sideOf(el: HTMLElement, clientX: number): "before" | "after" {
+  const rect = el.getBoundingClientRect();
+  return clientX < rect.left + rect.width / 2 ? "before" : "after";
+}
+
 export function TabStrip() {
   const tabs = useTabs((s) => s.tabs);
   const activeId = useTabs((s) => s.activeId);
@@ -86,12 +99,20 @@ export function TabStrip() {
   const removeFromGroup = useTabs((s) => s.removeFromGroup);
   const toggleGroupCollapse = useTabs((s) => s.toggleGroupCollapse);
   const renameGroup = useTabs((s) => s.renameGroup);
+  const reorder = useTabs((s) => s.reorder);
+  const moveToNewWindow = useTabs((s) => s.moveToNewWindow);
+  const restoreMoved = useTabs((s) => s.restoreMoved);
   const serverMap = useServers((s) => s.servers);
   const entries = Object.values(serverMap);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   const [renaming, setRenaming] = useState<GroupId | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  // The dragged tab id rides a ref, not state: dragover may not read the
+  // payload, and a ref survives re-renders without re-rendering the strip
+  // by itself. Only the insertion hint is state — it is visual.
+  const dragIdRef = useRef<TabId | null>(null);
+  const [dropHint, setDropHint] = useState<{ id: TabId; side: "before" | "after" } | null>(null);
 
   // The context menu dismisses on any click outside itself or on Escape.
   useEffect(() => {
@@ -193,7 +214,14 @@ export function TabStrip() {
                 title={tabTitle(tab, entries)}
                 className={`${styles.tab} ${active ? styles.tabActive : ""} ${
                   tab.pinned ? styles.tabPinned : ""
-                } ${group ? `${styles.groupMember} ${styles[`group_${group.color}`]}` : ""}`}
+                } ${group ? `${styles.groupMember} ${styles[`group_${group.color}`]}` : ""} ${
+                  dropHint?.id === tab.id
+                    ? dropHint.side === "before"
+                      ? styles.dropBefore
+                      : styles.dropAfter
+                    : ""
+                }`}
+                draggable
                 onClick={() => setActive(tab.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -212,6 +240,39 @@ export function TabStrip() {
                 onContextMenu={(e) => {
                   e.preventDefault();
                   openMenu(tab.id, e.clientX, e.clientY);
+                }}
+                onDragStart={(e) => {
+                  // Firefox refuses a payload-less drag; the id also rides
+                  // the ref because dragover cannot read the payload.
+                  e.dataTransfer.setData("text/plain", tab.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  dragIdRef.current = tab.id;
+                }}
+                onDragOver={(e) => {
+                  const dragId = dragIdRef.current;
+                  if (dragId === null || dragId === tab.id) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const side = sideOf(e.currentTarget, e.clientX);
+                  setDropHint((prev) =>
+                    prev?.id === tab.id && prev.side === side ? prev : { id: tab.id, side },
+                  );
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const dragId = dragIdRef.current;
+                  const base = tabs.findIndex((t) => t.id === tab.id);
+                  if (dragId !== null && dragId !== tab.id && base !== -1) {
+                    const insertion =
+                      sideOf(e.currentTarget, e.clientX) === "after" ? base + 1 : base;
+                    reorder(dragId, insertion);
+                  }
+                  dragIdRef.current = null;
+                  setDropHint(null);
+                }}
+                onDragEnd={() => {
+                  dragIdRef.current = null;
+                  setDropHint(null);
                 }}
               >
                 <span className={styles.icon} aria-hidden>
@@ -374,9 +435,36 @@ export function TabStrip() {
           )}
           <button
             role="menuitem"
-            className={`${styles.menuItem} ${styles.menuItemReserved}`}
-            disabled
-            title="Planned — move to window lands with its real machinery"
+            className={styles.menuItem}
+            disabled={tabs.length <= 1}
+            title={
+              tabs.length <= 1
+                ? "The last tab cannot move — this window keeps one tab"
+                : "Opens this tab in a new ZaminPanel window"
+            }
+            onClick={() => {
+              const id = menu.id;
+              const index = tabs.findIndex((t) => t.id === id);
+              const moved = index === -1 ? undefined : tabs[index];
+              const wasActive = activeId === id;
+              const handoff = moveToNewWindow(id);
+              setMenu(null);
+              if (handoff === null || !moved) return;
+              const opened = window.open(
+                `${window.location.pathname}#handoff=${handoff}`,
+                "_blank",
+              );
+              if (opened === null) {
+                // A blocked popup must not swallow the tab: the slot dies
+                // unclaimed and the tab comes home to its old place.
+                try {
+                  localStorage.removeItem(`${HANDOFF_PREFIX}${handoff}`);
+                } catch {
+                  // Denied storage: the restore itself still stands.
+                }
+                restoreMoved(moved, index, wasActive);
+              }
+            }}
           >
             Move tab to new window
           </button>
