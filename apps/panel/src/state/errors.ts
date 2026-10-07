@@ -7,6 +7,8 @@ export interface DescribedError {
   title: string;
   code?: string;
   remediation: string[];
+  /** The typed error's structured context (e.g. PLUGIN_EXISTS's file). */
+  context?: Record<string, unknown>;
 }
 
 export function describeError(error: unknown): DescribedError {
@@ -15,6 +17,7 @@ export function describeError(error: unknown): DescribedError {
       title: error.error.message,
       code: error.error.code,
       remediation: error.error.remediation ?? [],
+      context: error.error.context,
     };
   }
   if (error instanceof Error) {

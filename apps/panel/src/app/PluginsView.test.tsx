@@ -7,6 +7,7 @@
 import { fireEvent, render, screen, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginsView } from "./PluginsView";
+import { ProtocolRequestError } from "../protocol/client";
 import { useJobs } from "../state/jobs";
 
 const mocks = vi.hoisted(() => ({
@@ -104,7 +105,9 @@ describe("PluginsView", () => {
     fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Install" }));
 
-    await waitFor(() => expect(mocks.pluginsInstall).toHaveBeenCalledWith("alpha", "AABBCC"));
+    await waitFor(() =>
+      expect(mocks.pluginsInstall).toHaveBeenCalledWith("alpha", "AABBCC", undefined, false),
+    );
     expect(mocks.pluginsInstall).toHaveBeenCalledTimes(1);
 
     // The daemon broadcasts job events on the wire; the store is the
@@ -175,5 +178,103 @@ describe("PluginsView", () => {
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Install" }).disabled,
     ).toBe(false);
+  });
+
+  it("a PLUGIN_EXISTS rejection offers the explicit replace", async () => {
+    mocks.pluginsSearch.mockResolvedValue({
+      target: "plugins",
+      hits: [
+        {
+          projectId: "AABBCC",
+          slug: "essentialsx",
+          title: "EssentialsX",
+          description: "Suite.",
+          downloads: 1,
+          loaders: ["paper"],
+        },
+      ],
+    });
+    mocks.pluginsInstall
+      .mockRejectedValueOnce(
+        new ProtocolRequestError({
+          code: "PLUGIN_EXISTS",
+          message:
+            "The file \"EssentialsX-2.20.0.jar\" is already installed with different content; an update must replace it explicitly.",
+          context: { file: "EssentialsX-2.20.0.jar" },
+        }),
+      )
+      .mockResolvedValue({
+        kind: "plugins.install",
+        job: {
+          jobId: "job-9",
+          kind: "plugins.install",
+          serverId: "alpha",
+          state: "running",
+          createdAtMs: 1,
+        },
+      });
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.change(screen.getByLabelText(/Search the plugin catalog/), {
+      target: { value: "essentials" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    // The typed refusal becomes the operator's decision, with the file named.
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(
+      screen.getByText(/EssentialsX-2\.20\.0\.jar is already installed with different/),
+    ).toBeTruthy();
+
+    // Replace retries the install with the explicit overwrite.
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await waitFor(() =>
+      expect(mocks.pluginsInstall).toHaveBeenCalledWith("alpha", "AABBCC", undefined, true),
+    );
+
+    // The retried install hands its job to the store like any other.
+    useJobs.getState().started({
+      jobId: "job-9",
+      kind: "plugins.install",
+      serverId: "alpha",
+      state: "running",
+      createdAtMs: 1,
+      progress: { current: 10, total: 100, unit: "bytes", message: "installing EssentialsX-2.20.0.jar" },
+    });
+    expect(await screen.findByRole("status")).toBeTruthy();
+  });
+
+  it("dismiss the replace offer and nothing is overwritten", async () => {
+    mocks.pluginsSearch.mockResolvedValue({
+      target: "plugins",
+      hits: [
+        {
+          projectId: "AABBCC",
+          slug: "essentialsx",
+          title: "EssentialsX",
+          description: "Suite.",
+          downloads: 1,
+          loaders: ["paper"],
+        },
+      ],
+    });
+    mocks.pluginsInstall.mockRejectedValueOnce(
+      new ProtocolRequestError({
+        code: "PLUGIN_EXISTS",
+        message: "already installed with different content",
+        context: { file: "EssentialsX-2.20.0.jar" },
+      }),
+    );
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.change(screen.getByLabelText(/Search the plugin catalog/), {
+      target: { value: "essentials" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
+    expect(mocks.pluginsInstall).toHaveBeenCalledTimes(1);
   });
 });

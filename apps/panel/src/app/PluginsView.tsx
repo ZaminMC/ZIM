@@ -26,6 +26,12 @@ export function PluginsView({ serverId }: { serverId: string }) {
   const [installed, setInstalled] = useState<PluginsInstalledResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [installingProject, setInstallingProject] = useState<string | null>(null);
+  // The typed update rule (ADR-0012): PLUGIN_EXISTS offers the explicit
+  // overwrite — the operator's decision, surfaced once, never silently.
+  const [pendingReplace, setPendingReplace] = useState<{
+    projectId: string;
+    file: string;
+  } | null>(null);
 
   // The live install job (if any) — progress chips come from the
   // reconciled jobs store, the same as backups and server creation.
@@ -65,15 +71,25 @@ export function PluginsView({ serverId }: { serverId: string }) {
   );
 
   const install = useCallback(
-    (projectId: string) => {
+    (projectId: string, replace = false) => {
       setInstallingProject(projectId);
       setError(null);
-      void pluginsInstall(serverId, projectId)
+      setPendingReplace(null);
+      void pluginsInstall(serverId, projectId, undefined, replace)
         .then(() => {
           // The job store owns the rest; the progress chip shows itself.
         })
         .catch((cause: unknown) => {
-          setError(describeError(cause).title);
+          const described = describeError(cause);
+          if (described.code === "PLUGIN_EXISTS") {
+            const file = described.context?.file;
+            setPendingReplace({
+              projectId,
+              file: typeof file === "string" ? file : "a file by this name",
+            });
+          } else {
+            setError(described.title);
+          }
           setInstallingProject(null);
         });
     },
@@ -140,6 +156,23 @@ export function PluginsView({ serverId }: { serverId: string }) {
           <span className={styles.jobText}>
             {installJob.progress?.message ?? "installing…"}
           </span>
+        </div>
+      ) : null}
+
+      {pendingReplace ? (
+        <div className={styles.alert} role="alert">
+          <span>
+            {pendingReplace.file} is already installed with different
+            content. Replace it with the published file?
+          </span>
+          <Button
+            variant="primary"
+            disabled={busy}
+            onClick={() => install(pendingReplace.projectId, true)}
+          >
+            Replace
+          </Button>
+          <Button onClick={() => setPendingReplace(null)}>Dismiss</Button>
         </div>
       ) : null}
 

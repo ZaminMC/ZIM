@@ -356,11 +356,15 @@ export async function pluginsInstall(
   serverId: string,
   projectId: string,
   versionId?: string,
+  replace?: boolean,
 ): Promise<PluginsInstallResult> {
   return client.request<PluginsInstallResult>("plugins.install", {
     serverId,
     projectId,
     ...(versionId === undefined ? {} : { versionId }),
+    // The update rule (ADR-0012): the daemon refuses a differing file with
+    // PLUGIN_EXISTS; `replace` is the operator's explicit overwrite.
+    ...(replace ? { replace: true } : {}),
   });
 }
 
