@@ -238,6 +238,82 @@ fn check_version(found: &u32, path: &Path) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Sanity bounds for the layered settings a client may write (ADR-0019).
+/// The spawner will obey whatever lands in the files, so nonsense is
+/// refused at the write, with the field named — not discovered at the
+/// next boot as a baffling preflight failure.
+pub const PORT_MIN: u16 = 1024;
+pub const PORT_MAX: u16 = u16::MAX - 1; // 65535 is legal but reserved for ephemeral ranges on common OSes
+pub const MEMORY_MIN_MB: u32 = 16;
+pub const MEMORY_MAX_MB: u32 = 1_048_576; // 1 TiB
+pub const TIMEOUT_MAX_SECS: u32 = 86_400; // a day; anything longer is a mistake
+pub const BACKUP_KEEP_MAX: u32 = 1_000;
+pub const JAVA_MAJOR_MIN: u32 = 8;
+pub const JAVA_MAJOR_MAX: u32 = 100;
+
+/// Validate one override set before it is written. Every rule states the
+/// field it names, so the error can travel to the UI verbatim.
+pub fn validate_field(field: &str, value: Option<u32>) -> Result<(), CoreError> {
+    let Some(value) = value else {
+        return Ok(()); // clearing an override is always legal
+    };
+    let check = |ok: bool, reason: &str| -> Result<(), CoreError> {
+        if ok {
+            Ok(())
+        } else {
+            Err(CoreError::ConfigInvalid {
+                field: field.to_owned(),
+                reason: reason.to_owned(),
+            })
+        }
+    };
+    match field {
+        "port" => {
+            let port = u16::try_from(value).map_err(|_| CoreError::ConfigInvalid {
+                field: field.to_owned(),
+                reason: "port must fit in 16 bits".to_owned(),
+            })?;
+            check(
+                (PORT_MIN..=PORT_MAX).contains(&port),
+                &format!("the port must be between {PORT_MIN} and {PORT_MAX}"),
+            )
+        }
+        "minMemoryMb" | "maxMemoryMb" => check(
+            (MEMORY_MIN_MB..=MEMORY_MAX_MB).contains(&value),
+            &format!("memory must be between {MEMORY_MIN_MB} and {MEMORY_MAX_MB} MiB"),
+        ),
+        "stopTimeoutSecs" | "startupTimeoutSecs" => check(
+            (1..=TIMEOUT_MAX_SECS).contains(&value),
+            &format!("the timeout must be between 1 and {TIMEOUT_MAX_SECS} seconds"),
+        ),
+        "backupKeep" => check(
+            (1..=BACKUP_KEEP_MAX).contains(&value),
+            &format!("backup retention must be between 1 and {BACKUP_KEEP_MAX}"),
+        ),
+        "javaMajorRequired" => check(
+            (JAVA_MAJOR_MIN..=JAVA_MAJOR_MAX).contains(&value),
+            &format!("the Java major must be between {JAVA_MAJOR_MIN} and {JAVA_MAJOR_MAX}"),
+        ),
+        _ => Ok(()), // unknown fields are the caller's business
+    }
+}
+
+/// Validate the min/max pairing that only makes sense together.
+pub fn validate_memory_pair(
+    min_memory_mb: Option<u32>,
+    max_memory_mb: Option<u32>,
+) -> Result<(), CoreError> {
+    if let (Some(min), Some(max)) = (min_memory_mb, max_memory_mb) {
+        if min > max {
+            return Err(CoreError::ConfigInvalid {
+                field: "minMemoryMb".to_owned(),
+                reason: format!("the minimum ({min} MiB) must not exceed the maximum ({max} MiB)"),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +394,34 @@ mod tests {
             load_global(&path),
             Err(CoreError::SchemaVersion { .. })
         ));
+    }
+
+    #[test]
+    fn field_validation_names_the_field() {
+        // Port bounds.
+        assert!(validate_field("port", Some(25_565)).is_ok());
+        assert!(validate_field("port", Some(80)).is_err());
+        assert!(validate_field("port", Some(0)).is_err());
+        // Memory bounds and the pairing.
+        assert!(validate_field("minMemoryMb", Some(512)).is_ok());
+        assert!(validate_field("maxMemoryMb", Some(8)).is_err());
+        assert!(validate_memory_pair(Some(512), Some(1024)).is_ok());
+        assert!(validate_memory_pair(Some(2048), Some(1024)).is_err());
+        // Timeouts, retention, java major.
+        assert!(validate_field("stopTimeoutSecs", Some(60)).is_ok());
+        assert!(validate_field("stopTimeoutSecs", Some(0)).is_err());
+        assert!(validate_field("startupTimeoutSecs", Some(86_401)).is_err());
+        assert!(validate_field("backupKeep", Some(0)).is_err());
+        assert!(validate_field("javaMajorRequired", Some(21)).is_ok());
+        assert!(validate_field("javaMajorRequired", Some(4)).is_err());
+        // Clearing is always legal; unknown fields are the caller's.
+        assert!(validate_field("port", None).is_ok());
+        assert!(validate_field("somethingElse", Some(1)).is_ok());
+
+        let err = validate_field("port", Some(80)).unwrap_err();
+        assert!(
+            err.to_string().contains("port"),
+            "the field is named: {err}"
+        );
     }
 }

@@ -76,6 +76,9 @@ pub enum CoreError {
     #[error("port {port} is already in use")]
     PortInUse { port: u16 },
 
+    #[error("setting {field:?} is invalid: {reason}")]
+    ConfigInvalid { field: String, reason: String },
+
     #[error("archive entry {entry:?} is unsafe: {reason}")]
     ArchiveUnsafeEntry { entry: String, reason: String },
 

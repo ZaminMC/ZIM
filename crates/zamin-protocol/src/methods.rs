@@ -73,6 +73,14 @@ pub const SCHEDULES_DELETE: &str = "schedules.delete";
 // system safer).
 pub const AUDIT_LIST: &str = "audit.list";
 
+// Server configuration surfaces (founder vision §37–39, ADR-0019):
+// Startup, Network, and Settings read and write the layered config model
+// (ADR-0007); the patch is tri-state so clearing an override back to the
+// global default is expressible on the wire.
+pub const CONFIG_GET: &str = "config.get";
+pub const CONFIG_SET: &str = "config.set";
+pub const NETWORK_STATUS: &str = "network.status";
+
 // Publish (founder vision §40–47, §74, ADR-0017): the creator packages a
 // chosen selection of a server's files and hands it to a provider. The
 // AI changelog room (§43) is deliberately absent from this surface —

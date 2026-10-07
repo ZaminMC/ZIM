@@ -1246,6 +1246,12 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
         )
         .with_context("port", *port as u64)
         .with_remediation(&["choose_another_port", "stop_managed_server"]),
+        E::ConfigInvalid { field, reason } => ProtocolError::new(
+            ErrorCode::ConfigInvalid,
+            format!("The {field} setting is invalid: {reason}."),
+        )
+        .with_context("field", field.clone())
+        .with_remediation(&["fix_the_value", "clear_to_inherit"]),
         E::ArchiveUnsafeEntry { entry, reason } => ProtocolError::new(
             ErrorCode::ArchiveUnsafeEntry,
             format!("Archive entry {entry:?} is unsafe: {reason}."),

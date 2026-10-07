@@ -13,6 +13,7 @@
 
 pub mod audit;
 pub mod backups;
+pub mod config;
 pub mod envelope;
 pub mod error;
 pub mod files;

@@ -1,0 +1,31 @@
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "result": {
+    "serverId": "demo",
+    "displayName": "Box Demo",
+    "jar": "fabric/server.jar",
+    "effective": {
+      "stopTimeoutSecs": 45,
+      "startupTimeoutSecs": 120,
+      "port": 25566,
+      "minMemoryMb": 512,
+      "maxMemoryMb": 8192,
+      "extraJvmArgs": ["-XX:+UseG1GC"],
+      "mcVersion": "1.21.1",
+      "backupKeep": 5
+    },
+    "provenance": {
+      "stopTimeoutSecs": "global",
+      "startupTimeoutSecs": "global",
+      "port": "custom",
+      "minMemoryMb": "custom",
+      "maxMemoryMb": "custom",
+      "extraJvmArgs": "custom",
+      "javaPath": "global",
+      "mcVersion": "custom",
+      "javaMajorRequired": "global",
+      "backupKeep": "custom"
+    }
+  }
+}

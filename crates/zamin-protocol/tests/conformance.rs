@@ -544,3 +544,44 @@ fn publish_preview_response_parses_with_reserved_rooms_absent() {
         .expect("the fixture has a last publication");
     assert_eq!(last.version.as_deref(), Some("1.4.1"));
 }
+
+#[test]
+fn config_get_response_parses_with_provenance_and_tri_state_jar() {
+    // ADR-0019: the config.get answer carries the layered effective view
+    // plus per-field provenance (ADR-0007 on the wire). Fields the server
+    // does not override are honestly absent from `effective` (no javaPath
+    // here); provenance still answers for every field.
+    let original = fixture("config-get-response");
+    let msg = parse("config-get-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::config::ConfigGetResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.server_id, "demo");
+    assert_eq!(result.display_name, "Box Demo");
+    assert_eq!(result.jar.as_deref(), Some("fabric/server.jar"));
+    assert_eq!(result.effective.port, Some(25566));
+    assert_eq!(result.effective.max_memory_mb, Some(8192));
+    assert_eq!(
+        result.effective.extra_jvm_args,
+        vec!["-XX:+UseG1GC".to_owned()]
+    );
+    assert!(result.effective.java_path.is_none());
+    assert_eq!(result.effective.backup_keep, 5);
+
+    assert_eq!(
+        result.provenance.port,
+        zamin_protocol::config::FieldProvenance::Custom
+    );
+    assert_eq!(
+        result.provenance.stop_timeout_secs,
+        zamin_protocol::config::FieldProvenance::Global
+    );
+    assert_eq!(
+        result.provenance.java_path,
+        zamin_protocol::config::FieldProvenance::Global
+    );
+}
