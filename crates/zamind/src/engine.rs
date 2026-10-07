@@ -1198,7 +1198,7 @@ impl Engine {
                         Some("bytes"),
                         Some(&format!(
                             "verified {name} (sha256 {}…)",
-                            &outcome.sha256[..8]
+                            &outcome.digest[..8]
                         )),
                     ),
                     Err(zamin_core::error::CoreError::Cancelled) => {

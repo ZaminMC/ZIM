@@ -13,7 +13,10 @@ mod download;
 mod fill;
 mod templates;
 
-pub use download::{download_to_dir, DownloadOptions, DownloadOutcome, DownloadProgress};
+pub use download::{
+    download_to_dir, download_verified, DownloadOptions, DownloadOutcome, DownloadProgress,
+    Verified,
+};
 pub use fill::FillClient;
 pub use templates::{stamp_template, template, templates, Template, DEFAULT_TEMPLATE_ID};
 

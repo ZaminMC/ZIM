@@ -17,6 +17,7 @@ pub mod logparse;
 pub mod net;
 pub mod ping;
 pub mod platform;
+pub mod plugins;
 pub mod server;
 pub mod software;
 pub mod supervisor;

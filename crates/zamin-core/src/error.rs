@@ -103,9 +103,10 @@ pub enum CoreError {
     #[error("the request to {url} failed: {message}")]
     HttpTransport { url: String, message: String },
 
-    #[error("downloaded file {path:?} does not match its published checksum (expected sha256 {expected}, computed {actual})")]
+    #[error("downloaded file {path:?} does not match its published checksum (expected {algorithm} {expected}, computed {actual})")]
     ChecksumMismatch {
         path: PathBuf,
+        algorithm: &'static str,
         expected: String,
         actual: String,
     },

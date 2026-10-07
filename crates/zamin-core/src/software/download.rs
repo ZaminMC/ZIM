@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 
 use crate::error::CoreError;
 
@@ -61,8 +61,25 @@ pub struct DownloadOutcome {
     /// The final, verified path.
     pub path: PathBuf,
     pub size: u64,
-    /// Lowercase hex sha256 of the content.
-    pub sha256: String,
+    /// Lowercase hex digest of the verified algorithm (sha256 when the
+    /// download carried no published checksum to compare against).
+    pub digest: String,
+}
+
+/// The published checksum a download must match, algorithm included
+/// (ADR-0012: Modrinth publishes sha512; PaperMC publishes sha256).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Verified<'a> {
+    Sha256(&'a str),
+    Sha512(&'a str),
+}
+
+impl Verified<'_> {
+    fn expected(self) -> String {
+        match self {
+            Verified::Sha256(s) | Verified::Sha512(s) => s.to_ascii_lowercase(),
+        }
+    }
 }
 
 /// Download `url` into `dir` as `file_name`, verifying the published
@@ -74,6 +91,31 @@ pub fn download_to_dir(
     dir: &Path,
     file_name: &str,
     expected_sha256: Option<&str>,
+    options: &DownloadOptions,
+) -> Result<DownloadOutcome, CoreError> {
+    let expected = expected_sha256.map(Verified::Sha256);
+    download_streamed(url, dir, file_name, expected, options)
+}
+
+/// Same discipline, with the checksum algorithm chosen by the caller
+/// (sha512 for Modrinth publishes). Still refuses an existing target.
+pub fn download_verified(
+    url: &str,
+    dir: &Path,
+    file_name: &str,
+    expected: Verified<'_>,
+    options: &DownloadOptions,
+) -> Result<DownloadOutcome, CoreError> {
+    download_streamed(url, dir, file_name, Some(expected), options)
+}
+
+/// The one body both entry points share: refuse an existing destination,
+/// stage, stream, fsync, rename atomically.
+fn download_streamed(
+    url: &str,
+    dir: &Path,
+    file_name: &str,
+    expected: Option<Verified<'_>>,
     options: &DownloadOptions,
 ) -> Result<DownloadOutcome, CoreError> {
     std::fs::create_dir_all(dir).map_err(|source| CoreError::Io {
@@ -94,7 +136,7 @@ pub fn download_to_dir(
     // so the final rename is atomic (ADR-0009 discipline).
     let staging = dir.join(format!(".zamin-staging-{}.part", std::process::id()));
 
-    let result = stream_to(url, &staging, expected_sha256, options);
+    let result = stream_to(url, &staging, expected, options);
 
     match result {
         Ok(outcome) => {
@@ -108,7 +150,7 @@ pub fn download_to_dir(
             Ok(DownloadOutcome {
                 path: dest,
                 size: outcome.size,
-                sha256: outcome.sha256,
+                digest: outcome.digest,
             })
         }
         Err(error) => {
@@ -119,10 +161,41 @@ pub fn download_to_dir(
     }
 }
 
+/// The two hash algorithms a published checksum can name. An enum, not
+/// a trait object: `Digest` is not dyn-compatible, and two arms are
+/// cheaper than boxing indirection.
+enum StreamHasher {
+    Sha256(Sha256),
+    Sha512(Sha512),
+}
+
+impl StreamHasher {
+    fn for_expected(expected: Option<&Verified<'_>>) -> StreamHasher {
+        match expected {
+            Some(Verified::Sha512(_)) => StreamHasher::Sha512(Sha512::new()),
+            _ => StreamHasher::Sha256(Sha256::new()),
+        }
+    }
+
+    fn update(&mut self, chunk: &[u8]) {
+        match self {
+            StreamHasher::Sha256(h) => h.update(chunk),
+            StreamHasher::Sha512(h) => h.update(chunk),
+        }
+    }
+
+    fn hex_digest(self) -> String {
+        match self {
+            StreamHasher::Sha256(h) => hex(&h.finalize()),
+            StreamHasher::Sha512(h) => hex(&h.finalize()),
+        }
+    }
+}
+
 fn stream_to(
     url: &str,
     staging: &Path,
-    expected_sha256: Option<&str>,
+    expected: Option<Verified<'_>>,
     options: &DownloadOptions,
 ) -> Result<DownloadOutcome, CoreError> {
     let agent = ureq::AgentBuilder::new()
@@ -149,7 +222,9 @@ fn stream_to(
         source,
     })?;
     let mut reader = response.into_reader();
-    let mut hasher = Sha256::new();
+    // The verified algorithm hashes the stream; an unchecked download
+    // still reports its sha256 (the create flow's progress message).
+    let mut hasher = StreamHasher::for_expected(expected.as_ref());
     let mut bytes_done: u64 = 0;
     let mut chunk = [0u8; CHUNK];
 
@@ -179,12 +254,13 @@ fn stream_to(
         .map_err(|source| write_error(staging, source))?;
     drop(file);
 
-    let actual = hex(&hasher.finalize());
-    if let Some(expected) = expected_sha256 {
-        let expected = expected.to_ascii_lowercase();
+    let actual = hasher.hex_digest();
+    if let Some(expected) = expected {
+        let expected = expected.expected();
         if actual != expected {
             return Err(CoreError::ChecksumMismatch {
                 path: staging.to_path_buf(),
+                algorithm: expected_algorithm_name(&expected),
                 expected,
                 actual,
             });
@@ -194,8 +270,19 @@ fn stream_to(
     Ok(DownloadOutcome {
         path: staging.to_path_buf(),
         size: bytes_done,
-        sha256: actual,
+        digest: actual,
     })
+}
+
+/// The algorithm an expected digest string belongs to — sha512 digests
+/// are 128 hex chars, sha256 are 64. (The parameter itself is the truth;
+/// this only keeps the typed error's message honest.)
+fn expected_algorithm_name(expected: &str) -> &'static str {
+    if expected.len() == 128 {
+        "sha512"
+    } else {
+        "sha256"
+    }
 }
 
 fn write_error(path: &Path, source: std::io::Error) -> CoreError {

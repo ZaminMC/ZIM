@@ -345,7 +345,7 @@ fn download_lands_verified_with_no_staging_left() {
     )
     .expect("download");
     assert_eq!(outcome.size, 512 * 1024);
-    assert_eq!(outcome.sha256, sha);
+    assert_eq!(outcome.digest, sha);
     assert!(dir.join("server.jar").is_file());
     let leftovers: Vec<_> = std::fs::read_dir(&dir)
         .expect("dir")
