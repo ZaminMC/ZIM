@@ -594,6 +594,51 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
             let read = audit.read(params.limit, params.offset);
             json_ok(id, read)
         }
+        // Server configuration surfaces (founder §37–39, ADR-0019). The
+        // write (config.set) is audited like every mutation; the reads
+        // (config.get, network.status) are observation.
+        methods::CONFIG_GET => {
+            let params: zamin_protocol::config::ConfigGetParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.config_get(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::CONFIG_SET => {
+            let params: zamin_protocol::config::ConfigSetParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine
+                    .config_set(&server_id, params.display_name, params.jar, params.settings)
+                    .await
+                {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::NETWORK_STATUS => {
+            let params: zamin_protocol::config::NetworkStatusParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.network_status(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         // Publish (founder §40–47, §74, ADR-0017). Mutations ride the
         // AUDITED_METHODS list; the reads (config.get, preview, state,
         // providers.list) are observation like every other read.

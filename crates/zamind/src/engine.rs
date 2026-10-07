@@ -11,6 +11,10 @@ use tokio::sync::{mpsc, oneshot};
 use zamin_core::server::marker;
 use zamin_core::server::registry::Registry;
 use zamin_core::server::ServerId;
+use zamin_protocol::config::{
+    ConfigGetResult, EffectiveSettingsView, NetworkStatusResult, ProvenanceView,
+    ServerSettingsPatch,
+};
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::publish::PublishConfig;
 use zamin_protocol::server::{LifecycleResult, ServerDetails, ServerState, ServerSummary};
@@ -50,6 +54,9 @@ struct Inner {
     /// tiny and the operations rare; one daemon-wide lock keeps each
     /// whole (no await is ever held across it).
     schedules_io: Mutex<()>,
+    /// Same story for the per-server config.toml read-modify-write
+    /// (ADR-0019's config.set) and the global defaults file.
+    config_io: Mutex<()>,
     /// Same story for the publish dir's JSON stores (config, reviews).
     publish_io: Mutex<()>,
     /// The daemon's boot instant: interval schedules re-anchor here, so
@@ -75,6 +82,14 @@ pub enum EngineError {
 
 fn server_dir(data_dir: &Path, id: &str) -> PathBuf {
     data_dir.join("servers").join(id)
+}
+
+/// A provenance slot from the core's fixed-order array → the wire view.
+fn field_prov(p: zamin_core::config::Provenance) -> zamin_protocol::config::FieldProvenance {
+    match p {
+        zamin_core::config::Provenance::Global => zamin_protocol::config::FieldProvenance::Global,
+        zamin_core::config::Provenance::Custom => zamin_protocol::config::FieldProvenance::Custom,
+    }
 }
 
 impl Engine {
@@ -105,6 +120,7 @@ impl Engine {
                 fabric_url,
                 java_cache: Mutex::new(HashMap::new()),
                 schedules_io: Mutex::new(()),
+                config_io: Mutex::new(()),
                 publish_io: Mutex::new(()),
                 boot_ms: now_ms_unix(),
             }),
@@ -326,6 +342,308 @@ impl Engine {
             .rename(server_id, display_name.clone())
             .map_err(|e| to_protocol(&e))?;
         self.get_server(server_id).await
+    }
+
+    // --- server configuration surfaces (founder §37–39, ADR-0019) ------
+
+    fn config_io_lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .config_io
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn server_config_path_for(&self, server_id: &ServerId) -> PathBuf {
+        server_dir(&self.inner.data_dir, server_id.as_str()).join("config.toml")
+    }
+
+    /// Load everything `config.get` answers: the registry name, the
+    /// per-server file (jar + overrides), the global defaults, and the
+    /// layered effective view with provenance. File I/O stays in
+    /// spawn_blocking; the files are tiny.
+    async fn config_view(&self, server_id: &ServerId) -> Result<ConfigGetResult, EngineError> {
+        let display_name = self
+            .registry_lock()
+            .get(server_id)
+            .map(|e| e.display_name.clone())
+            .ok_or_else(|| not_found(server_id))?;
+        let data_dir = self.inner.data_dir.clone();
+        let id = server_id.to_string();
+        // A corrupt config file is a loud typed error, never a silent
+        // reset to defaults — the effective view must not lie (ADR-0007).
+        // Missing files are the normal first-run shape and read as
+        // defaults; only unreadable CONTENT is an error.
+        let (jar, effective, provenance) = tokio::task::spawn_blocking(move || {
+            let global = zamin_core::config::load_global(&data_dir.join("config.toml"))
+                .map_err(|e| to_protocol(&e))?;
+            let per = zamin_core::config::load_server(
+                &data_dir.join("servers").join(&id).join("config.toml"),
+            )
+            .map_err(|e| to_protocol(&e))?;
+            let effective = zamin_core::config::layer(&global.defaults, &per.settings);
+            let provenance =
+                zamin_core::config::EffectiveSettings::provenance(&global.defaults, &per.settings);
+            Ok::<_, ProtocolError>((per.jar, effective, provenance))
+        })
+        .await
+        .map_err(|e| EngineError::Internal(format!("config task failed: {e}")))?
+        .map_err(EngineError::Protocol)?;
+
+        let [stop_timeout_secs, startup_timeout_secs, port, min_memory_mb, max_memory_mb, extra_jvm_args, java_path, mc_version, java_major_required, backup_keep] =
+            provenance;
+        let provenance = ProvenanceView {
+            stop_timeout_secs: field_prov(stop_timeout_secs),
+            startup_timeout_secs: field_prov(startup_timeout_secs),
+            port: field_prov(port),
+            min_memory_mb: field_prov(min_memory_mb),
+            max_memory_mb: field_prov(max_memory_mb),
+            extra_jvm_args: field_prov(extra_jvm_args),
+            java_path: field_prov(java_path),
+            mc_version: field_prov(mc_version),
+            java_major_required: field_prov(java_major_required),
+            backup_keep: field_prov(backup_keep),
+        };
+        Ok(ConfigGetResult {
+            server_id: server_id.to_string(),
+            display_name,
+            jar,
+            effective: EffectiveSettingsView {
+                stop_timeout_secs: effective.stop_timeout_secs,
+                startup_timeout_secs: effective.startup_timeout_secs,
+                port: effective.port,
+                min_memory_mb: effective.min_memory_mb,
+                max_memory_mb: effective.max_memory_mb,
+                extra_jvm_args: effective.extra_jvm_args,
+                java_path: effective
+                    .java_path
+                    .map(|p| p.to_string_lossy().into_owned()),
+                mc_version: effective.mc_version,
+                java_major_required: effective.java_major_required,
+                backup_keep: effective.backup_keep,
+            },
+            provenance,
+        })
+    }
+
+    pub async fn config_get(&self, server_id: &ServerId) -> Result<ConfigGetResult, EngineError> {
+        self.config_view(server_id).await
+    }
+
+    /// Apply a tri-state patch to the per-server file and answer with the
+    /// fresh effective view. Validation happens before anything touches
+    /// disk; the write is one atomic replace under the config lock. A
+    /// running server is not interrupted — overrides are read at spawn
+    /// time, so the founder's §60 rule (reload must not restart Minecraft)
+    /// holds by construction, and the UI labels the timing honestly.
+    pub async fn config_set(
+        &self,
+        server_id: &ServerId,
+        display_name: Option<String>,
+        jar: Option<Option<String>>,
+        patch: ServerSettingsPatch,
+    ) -> Result<ConfigGetResult, EngineError> {
+        self.registry_lock()
+            .get(server_id)
+            .ok_or_else(|| not_found(server_id))?;
+
+        if display_name.is_none() && jar.is_none() && patch.is_empty() {
+            return Err(EngineError::Protocol(ProtocolError::new(
+                ErrorCode::ProtocolInvalidRequest,
+                "config.set carried no changes — name a field to set or clear.",
+            )));
+        }
+
+        // The jar override obeys the same relative-path rule the spawner
+        // and the publish selection both enforce.
+        if let Some(Some(jar_path)) = &jar {
+            if let Err(e) = zamin_core::publish::selection::validate_relative_path(jar_path) {
+                return Err(EngineError::Protocol(
+                    ProtocolError::new(
+                        ErrorCode::ConfigInvalid,
+                        format!(
+                            "The server JAR path is invalid: {e}. Use a server-root relative \
+                         path like `server.jar`."
+                        ),
+                    )
+                    .with_context("field", "jar"),
+                ));
+            }
+        }
+
+        // Every numeric override is bounds-checked, field named, before
+        // the file is opened for writing.
+        let named = [
+            ("stopTimeoutSecs", patch.stop_timeout_secs.flatten()),
+            ("startupTimeoutSecs", patch.startup_timeout_secs.flatten()),
+            ("backupKeep", patch.backup_keep.flatten()),
+            ("javaMajorRequired", patch.java_major_required.flatten()),
+            ("minMemoryMb", patch.min_memory_mb.flatten()),
+        ];
+        for (field, value) in &named {
+            zamin_core::config::validate_field(field, *value).map_err(|e| to_protocol(&e))?;
+        }
+        if let Some(port) = patch.port.flatten() {
+            zamin_core::config::validate_field("port", Some(u32::from(port)))
+                .map_err(|e| to_protocol(&e))?;
+        }
+        if let Some(max) = patch.max_memory_mb.flatten() {
+            zamin_core::config::validate_field("maxMemoryMb", Some(max))
+                .map_err(|e| to_protocol(&e))?;
+        }
+
+        // The name has no "clear" state: a server always has a name.
+        if let Some(name) = &display_name {
+            if name.trim().is_empty() {
+                return Err(EngineError::Protocol(
+                    ProtocolError::new(
+                        ErrorCode::ConfigInvalid,
+                        "The server name must not be empty.",
+                    )
+                    .with_context("field", "displayName"),
+                ));
+            }
+            self.registry_lock()
+                .rename(server_id, name.clone())
+                .map_err(|e| to_protocol(&e))?;
+        }
+
+        let path = self.server_config_path_for(server_id);
+        {
+            let _io = self.config_io_lock();
+            let mut file = zamin_core::config::load_server(&path).map_err(|e| to_protocol(&e))?;
+            let s = &mut file.settings;
+            if let Some(v) = patch.stop_timeout_secs {
+                s.stop_timeout_secs = v;
+            }
+            if let Some(v) = patch.startup_timeout_secs {
+                s.startup_timeout_secs = v;
+            }
+            if let Some(v) = patch.port {
+                s.port = v;
+            }
+            if let Some(v) = patch.min_memory_mb {
+                s.min_memory_mb = v;
+            }
+            if let Some(v) = patch.max_memory_mb {
+                s.max_memory_mb = v;
+            }
+            if let Some(v) = patch.extra_jvm_args {
+                s.extra_jvm_args = v;
+            }
+            if let Some(v) = patch.java_path {
+                s.java_path = v.map(PathBuf::from);
+            }
+            if let Some(v) = patch.mc_version {
+                s.mc_version = v;
+            }
+            if let Some(v) = patch.java_major_required {
+                s.java_major_required = v;
+            }
+            if let Some(v) = patch.backup_keep {
+                s.backup_keep = v;
+            }
+            if let Some(v) = jar {
+                file.jar = v;
+            }
+            // The pair rule sees the post-patch file, so a set that lands
+            // min above max is refused as a whole.
+            zamin_core::config::validate_memory_pair(s.min_memory_mb, s.max_memory_mb)
+                .map_err(|e| to_protocol(&e))?;
+            zamin_core::config::save_server(&path, &file).map_err(|e| to_protocol(&e))?;
+        }
+
+        self.config_view(server_id).await
+    }
+
+    /// `network.status`: the desired port, the server.properties
+    /// authority, a live bind-test, and which other managed servers claim
+    /// the same desired port (founder §37's pre-start conflict check).
+    pub async fn network_status(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<NetworkStatusResult, EngineError> {
+        let (root, other_ids) = {
+            let registry = self.registry_lock();
+            let entry = registry
+                .get(server_id)
+                .ok_or_else(|| not_found(server_id))?;
+            let others = registry
+                .all()
+                .filter(|e| e.server_id != *server_id)
+                .map(|e| e.server_id.to_string())
+                .collect::<Vec<_>>();
+            (entry.root.clone(), others)
+        };
+        let data_dir = self.inner.data_dir.clone();
+        let id = server_id.to_string();
+        let (desired_port, properties, conflicts) = tokio::task::spawn_blocking(move || {
+            let global =
+                zamin_core::config::load_global(&data_dir.join("config.toml")).unwrap_or_default();
+            let per = zamin_core::config::load_server(
+                &data_dir.join("servers").join(&id).join("config.toml"),
+            )
+            .unwrap_or_default();
+            let desired = zamin_core::config::layer(&global.defaults, &per.settings).port;
+
+            // server.properties is Minecraft's file (ADR-0007); the
+            // daemon reads the boot authority and never writes it behind
+            // the server's back.
+            let properties = std::fs::read_to_string(root.join("server.properties"))
+                .ok()
+                .map(|content| {
+                    let mut port = None;
+                    let mut bind = None;
+                    for line in content.lines() {
+                        if let Some(v) = line.trim().strip_prefix("server-port=") {
+                            port = v.trim().parse::<u16>().ok();
+                        } else if let Some(v) = line.trim().strip_prefix("server-ip=") {
+                            bind = Some(v.trim().to_owned());
+                        }
+                    }
+                    (port, bind)
+                })
+                .unwrap_or((None, None));
+
+            // Other registered servers claiming the same desired port.
+            let mut conflicts = Vec::new();
+            if desired.is_some() {
+                for other_id in &other_ids {
+                    let other_config = data_dir.join("servers").join(other_id).join("config.toml");
+                    let other_per =
+                        zamin_core::config::load_server(&other_config).unwrap_or_default();
+                    let other_desired =
+                        zamin_core::config::layer(&global.defaults, &other_per.settings).port;
+                    if other_desired == desired {
+                        conflicts.push(other_id.clone());
+                    }
+                }
+            }
+            (desired, properties, conflicts)
+        })
+        .await
+        .map_err(|e| EngineError::Internal(format!("network task failed: {e}")))?;
+
+        let (properties_port, bind_address) = properties;
+        let probe_port = desired_port.or(properties_port);
+        let port_available = match probe_port {
+            Some(port) => {
+                let available =
+                    tokio::task::spawn_blocking(move || zamin_core::net::is_port_available(port))
+                        .await
+                        .map_err(|e| EngineError::Internal(format!("probe task failed: {e}")))?;
+                Some(available)
+            }
+            None => None,
+        };
+
+        Ok(NetworkStatusResult {
+            server_id: server_id.to_string(),
+            desired_port,
+            properties_port,
+            bind_address,
+            port_available,
+            conflicts,
+        })
     }
 
     pub async fn remove_server(&self, server_id: &ServerId) -> Result<(), EngineError> {
