@@ -374,3 +374,93 @@ fn install_verifies_against_sha512_even_when_a_sha256_is_passed() {
     );
     assert!(result.is_ok());
 }
+
+// --- the update rule (ADR-0012) ----------------------------------------------
+
+#[test]
+fn reinstall_of_identical_bytes_short_circuits_without_a_download() {
+    // The URL points at a dead port on purpose: the only way this install
+    // can succeed is the idempotent short-circuit over the existing file.
+    let jar = b"PK\x03\x04 same bytes";
+    let guard = tempdir::scoped("plugin-reinstall");
+    let target = guard.path.join("plugins");
+    let file = super::VersionFile {
+        url: "http://127.0.0.1:1/files/EssentialsX-2.20.0.jar".to_owned(),
+        filename: "EssentialsX-2.20.0.jar".to_owned(),
+        sha512: sha512_hex(jar),
+        size: Some(jar.len() as u64),
+    };
+    // First install has nowhere to land from: a refused download would
+    // prove nothing, so land the file directly under the sanitized name.
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("EssentialsX-2.20.0.jar"), jar).unwrap();
+
+    let outcome = install_file(&target, &file, &DownloadOptions::new()).expect("reinstall lands");
+    assert_eq!(outcome.path, target.join("EssentialsX-2.20.0.jar"));
+    assert_eq!(outcome.digest, sha512_hex(jar));
+    assert_eq!(std::fs::read(&outcome.path).unwrap(), jar);
+}
+
+#[test]
+fn existing_file_with_different_content_is_the_typed_refusal() {
+    let jar_v1 = b"version one bytes";
+    let jar_v2 = b"version two bytes, different";
+    let server = MockServer::spawn(move |path| match path {
+        "/files/EssentialsX-2.20.0.jar" => MockResponse::bytes(jar_v2.to_vec()),
+        _ => MockResponse::not_found(),
+    });
+    let guard = tempdir::scoped("plugin-exists");
+    let target = guard.path.join("plugins");
+    let file = super::VersionFile {
+        url: format!("{}/files/EssentialsX-2.20.0.jar", server.url),
+        filename: "EssentialsX-2.20.0.jar".to_owned(),
+        sha512: sha512_hex(jar_v2),
+        size: Some(jar_v2.len() as u64),
+    };
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("EssentialsX-2.20.0.jar"), jar_v1).unwrap();
+
+    match install_file(&target, &file, &DownloadOptions::new()) {
+        Err(CoreError::PluginExists { file }) => {
+            assert_eq!(file, "EssentialsX-2.20.0.jar");
+        }
+        other => panic!("expected PluginExists, got {other:?}"),
+    }
+    // The installed bytes were never touched.
+    assert_eq!(
+        std::fs::read(target.join("EssentialsX-2.20.0.jar")).unwrap(),
+        jar_v1
+    );
+}
+
+#[test]
+fn replace_lands_the_new_bytes_over_the_old_file() {
+    let jar_v1 = b"version one bytes";
+    let jar_v2 = b"version two bytes, different";
+    let server = MockServer::spawn(move |path| match path {
+        "/files/EssentialsX-2.20.0.jar" => MockResponse::bytes(jar_v2.to_vec()),
+        _ => MockResponse::not_found(),
+    });
+    let guard = tempdir::scoped("plugin-replace");
+    let target = guard.path.join("plugins");
+    let file = super::VersionFile {
+        url: format!("{}/files/EssentialsX-2.20.0.jar", server.url),
+        filename: "EssentialsX-2.20.0.jar".to_owned(),
+        sha512: sha512_hex(jar_v2),
+        size: Some(jar_v2.len() as u64),
+    };
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("EssentialsX-2.20.0.jar"), jar_v1).unwrap();
+
+    let options = DownloadOptions {
+        replace: true,
+        ..DownloadOptions::new()
+    };
+    let outcome = install_file(&target, &file, &options).expect("replace lands");
+    assert_eq!(outcome.digest, sha512_hex(jar_v2));
+    assert_eq!(std::fs::read(&outcome.path).unwrap(), jar_v2);
+    assert!(
+        std::fs::read_dir(&target).unwrap().count() == 1,
+        "no residue"
+    );
+}

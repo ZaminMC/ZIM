@@ -235,6 +235,9 @@ pub fn install_jdk(
                     total: p.total,
                 });
             })),
+            // The JDK fetch keeps the downloader's original discipline:
+            // a fresh runtime directory, never an overwrite.
+            replace: false,
         },
     );
     let download = match download {

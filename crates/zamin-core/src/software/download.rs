@@ -33,6 +33,11 @@ pub struct DownloadOptions {
     pub cancel: Arc<AtomicBool>,
     /// Byte progress, called at chunk granularity.
     pub progress: Option<ProgressFn>,
+    /// Overwrite an existing destination (ADR-0012's update rule). The
+    /// default refuses an existing target — the jar-install discipline —
+    /// and only the plugin update flow opts in, with the fresh bytes
+    /// verified before the final rename replaces the old file atomically.
+    pub replace: bool,
 }
 
 impl DownloadOptions {
@@ -40,6 +45,7 @@ impl DownloadOptions {
         DownloadOptions {
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
+            replace: false,
         }
     }
 }
@@ -123,7 +129,7 @@ fn download_streamed(
         source,
     })?;
     let dest = dir.join(file_name);
-    if dest.exists() {
+    if dest.exists() && !options.replace {
         return Err(CoreError::Io {
             path: dest,
             source: std::io::Error::new(
@@ -147,6 +153,9 @@ fn download_streamed(
                 path: dest.clone(),
                 source,
             })?;
+            // With `replace` the rename replaces the old file: atomic on
+            // Unix by rename(2), and MoveFileExW(REPLACE_EXISTING) on
+            // Windows — either way the old bytes never half-vanish.
             Ok(DownloadOutcome {
                 path: dest,
                 size: outcome.size,

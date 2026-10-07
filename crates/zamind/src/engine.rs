@@ -1182,6 +1182,8 @@ impl Engine {
                             progress_ctl.progress(p.bytes_done, p.total, Some("bytes"), None);
                         },
                     )),
+                    // A server jar never overwrites; fresh downloads only.
+                    replace: false,
                 };
                 let outcome = tokio::task::spawn_blocking(move || {
                     zamin_core::software::download_to_dir(
@@ -1582,6 +1584,7 @@ impl Engine {
         server_id: &ServerId,
         project_id: &str,
         version_id: Option<String>,
+        replace: bool,
     ) -> Result<zamin_protocol::plugins::PluginsInstallResult, EngineError> {
         let (target, target_dir) = self.plugin_target(server_id)?;
         let client = self.modrinth_client();
@@ -1623,6 +1626,36 @@ impl Engine {
             }
         };
 
+        // The update rule resolves up front (the java.install convention):
+        // an overwrite of different bytes is a typed refusal here, before
+        // any job exists — the operator's decision, never a failed job.
+        // A same-content re-install passes through (the core short-circuits).
+        let name =
+            zamin_core::plugins::safe_file_name(&file.filename).map_err(|e| to_protocol(&e))?;
+        let dest = target_dir.join(&name);
+        if dest.exists() && !replace {
+            let dest_for_task = dest.clone();
+            let published = file.sha512.clone();
+            let differs = tokio::task::spawn_blocking(move || {
+                zamin_core::plugins::file_sha512_matches(&dest_for_task, &published)
+            })
+            .await
+            .map_err(|e| internal(&format!("plugin exists task failed: {e}")))?
+            .map_err(|e| to_protocol(&e))?;
+            if !differs {
+                return Err(EngineError::Protocol(
+                    ProtocolError::new(
+                        ErrorCode::PluginExists,
+                        format!(
+                            "The file {name:?} is already installed with different content; \
+                             an update must replace it explicitly."
+                        ),
+                    )
+                    .with_context("file", name.clone()),
+                ));
+            }
+        }
+
         let name = file.filename.clone();
         let total = file.size;
         let job = self.inner.jobs.spawn(
@@ -1651,6 +1684,7 @@ impl Engine {
                                     );
                                 },
                             )),
+                            replace,
                         },
                     )
                 })

@@ -1293,6 +1293,14 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             format!("The software catalog is unreachable ({url}): {message}."),
         )
         .with_remediation(&["check_connection", "retry_later"]),
+        E::PluginExists { file } => ProtocolError::new(
+            ErrorCode::PluginExists,
+            format!(
+                "The file {file:?} is already installed with different content; \
+                 an update must replace it explicitly."
+            ),
+        )
+        .with_context("file", file.clone()),
         E::ChecksumMismatch {
             path,
             algorithm,

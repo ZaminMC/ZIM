@@ -112,6 +112,12 @@ pub struct PluginsInstallParams {
     pub project_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_id: Option<String>,
+    /// Overwrite an installed file whose content differs from the
+    /// published bytes (ADR-0012's update rule). The default refuses
+    /// with `PLUGIN_EXISTS`; a re-install of the identical file is
+    /// always allowed and short-circuits without a download.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub replace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

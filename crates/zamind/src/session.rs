@@ -645,7 +645,12 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
             };
             match ServerId::parse(&params.server_id) {
                 Ok(server_id) => match engine
-                    .plugins_install(&server_id, &params.project_id, params.version_id)
+                    .plugins_install(
+                        &server_id,
+                        &params.project_id,
+                        params.version_id,
+                        params.replace,
+                    )
                     .await
                 {
                     Ok(result) => json_ok(id, result),

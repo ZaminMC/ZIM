@@ -41,6 +41,7 @@ pub enum ErrorCode {
     JobNotCancellable,
     CatalogUnavailable,
     CatalogNotFound,
+    PluginExists,
     ChecksumMismatch,
     InternalError,
 }
@@ -78,6 +79,7 @@ impl ErrorCode {
             ErrorCode::JobNotCancellable => "JOB_NOT_CANCELLABLE",
             ErrorCode::CatalogUnavailable => "CATALOG_UNAVAILABLE",
             ErrorCode::CatalogNotFound => "CATALOG_NOT_FOUND",
+            ErrorCode::PluginExists => "PLUGIN_EXISTS",
             ErrorCode::ChecksumMismatch => "CHECKSUM_MISMATCH",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }

@@ -111,6 +111,9 @@ pub enum CoreError {
         actual: String,
     },
 
+    #[error("the plugin file {file:?} is already installed with different content; replace it explicitly to update")]
+    PluginExists { file: String },
+
     #[error("restore failed mid-commit ({reason}); the previous server files were rolled back — nothing was lost")]
     RestoreRolledBack { reason: String },
 
