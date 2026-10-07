@@ -9,6 +9,7 @@ mod engine;
 mod files;
 mod hub;
 mod jobs;
+mod scheduler;
 mod session;
 
 use std::path::PathBuf;
@@ -162,6 +163,11 @@ async fn run(config: DaemonConfig) {
     // `adopting` and are verified against their recorded process identity
     // (ADR-0005). No process is ever killed here.
     engine.adopt_existing_servers().await;
+
+    // The clock starts with the daemon (ADR-0014): schedules fire only
+    // while it runs, intervals re-anchor at this instant, and nothing
+    // missed while it was down is replayed.
+    scheduler::spawn(engine.clone());
 
     tracing::info!(
         "daemon {:?} listening (protocol {}, data dir {:?})",

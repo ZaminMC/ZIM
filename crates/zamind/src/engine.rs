@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, oneshot};
 use zamin_core::server::marker;
@@ -44,6 +45,13 @@ struct Inner {
     /// JVM is asked once per unchanged file, never on UI refresh
     /// (ARCH-REVIEW §18.6).
     java_cache: Mutex<HashMap<PathBuf, (u64, u64, zamin_core::java::JavaInfo)>>,
+    /// Serializes schedules.json read-modify-write cycles. The files are
+    /// tiny and the operations rare; one daemon-wide lock keeps each
+    /// whole (no await is ever held across it).
+    schedules_io: Mutex<()>,
+    /// The daemon's boot instant: interval schedules re-anchor here, so
+    /// downtime never stacks up firings (ADR-0014).
+    boot_ms: i64,
 }
 
 /// After `save-all`, a server needs a moment to actually finish writing
@@ -93,6 +101,8 @@ impl Engine {
                 modrinth_url,
                 fabric_url,
                 java_cache: Mutex::new(HashMap::new()),
+                schedules_io: Mutex::new(()),
+                boot_ms: now_ms_unix(),
             }),
         }
     }
@@ -225,7 +235,7 @@ impl Engine {
         out
     }
 
-    async fn describe_state(&self, server_id: &ServerId) -> ServerState {
+    pub(crate) async fn describe_state(&self, server_id: &ServerId) -> ServerState {
         let actors = self.inner.actors.lock().await;
         match actors.get(server_id.as_str()) {
             Some(tx) => {
@@ -1971,6 +1981,248 @@ impl Engine {
         Ok(())
     }
 
+    // ─── Schedules (ADR-0014): the daemon runs the clock ───
+
+    /// The server's schedule records, each with its next-run hint.
+    pub async fn schedules_list(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<zamin_protocol::schedules::SchedulesListResult, EngineError> {
+        let schedules = self.schedules_load(server_id)?;
+        let tick = self.clock_tick();
+        let views = schedules
+            .iter()
+            .map(|schedule| self.schedule_view(schedule, &tick))
+            .collect();
+        Ok(zamin_protocol::schedules::SchedulesListResult {
+            server_id: server_id.to_string(),
+            schedules: views,
+        })
+    }
+
+    /// Author a schedule. Validation happens here, at the edge, so
+    /// garbage never reaches the store (the clock refuses to learn).
+    pub async fn schedules_create(
+        &self,
+        server_id: &ServerId,
+        params: &zamin_protocol::schedules::SchedulesCreateParams,
+    ) -> Result<zamin_protocol::schedules::SchedulesCreateResult, EngineError> {
+        let name = zamin_core::schedules::validate_name(&params.name)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let allowed = zamin_core::schedules::allowed_minutes(&params.spec)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let action = zamin_core::schedules::validate_action(&params.action)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let _ = allowed; // computed for validation; firing recomputes per tick
+
+        let schedule = zamin_protocol::schedules::Schedule {
+            id: uuid::Uuid::now_v7().to_string(),
+            name,
+            spec: params.spec.clone(),
+            action,
+            enabled: params.enabled,
+            created_ms: now_ms_unix(),
+            last_fired_ms: None,
+        };
+
+        let tick = self.clock_tick();
+        let view = self.schedule_view(&schedule, &tick);
+        self.schedules_mutate(server_id, |list| {
+            list.push(schedule.clone());
+            Ok((true, ()))
+        })?;
+        Ok(zamin_protocol::schedules::SchedulesCreateResult {
+            server_id: server_id.to_string(),
+            schedule: view,
+        })
+    }
+
+    /// Amend a schedule: absent fields keep their stored values. The
+    /// clock re-reads the spec every tick, so an update lands on the
+    /// very next tick — no restart, no cached timers. An unknown id is
+    /// a typed refusal (a typo must not silently "update nothing").
+    pub async fn schedules_update(
+        &self,
+        server_id: &ServerId,
+        params: &zamin_protocol::schedules::SchedulesUpdateParams,
+    ) -> Result<zamin_protocol::schedules::SchedulesUpdateResult, EngineError> {
+        let name = match &params.name {
+            Some(name) => Some(
+                zamin_core::schedules::validate_name(name)
+                    .map_err(|e| EngineError::Protocol(to_protocol(&e)))?,
+            ),
+            None => None,
+        };
+        if let Some(spec) = &params.spec {
+            zamin_core::schedules::allowed_minutes(spec)
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        }
+        let action = match &params.action {
+            Some(action) => Some(
+                zamin_core::schedules::validate_action(action)
+                    .map_err(|e| EngineError::Protocol(to_protocol(&e)))?,
+            ),
+            None => None,
+        };
+
+        let schedule_id = params.schedule_id.clone();
+        let view = self.schedules_mutate(server_id, |list| {
+            let Some(schedule) = list.iter_mut().find(|s| s.id == schedule_id) else {
+                return Err(schedule_not_found(&schedule_id));
+            };
+            if let Some(name) = &name {
+                schedule.name = name.clone();
+            }
+            if let Some(spec) = &params.spec {
+                schedule.spec = spec.clone();
+            }
+            if let Some(action) = &action {
+                schedule.action = action.clone();
+            }
+            if let Some(enabled) = params.enabled {
+                schedule.enabled = enabled;
+            }
+            let tick = self.clock_tick();
+            Ok((true, self.schedule_view(schedule, &tick)))
+        })?;
+        Ok(zamin_protocol::schedules::SchedulesUpdateResult {
+            server_id: server_id.to_string(),
+            schedule: view,
+        })
+    }
+
+    /// Remove a schedule. An unknown id is a typed refusal — deleting a
+    /// typo must not look like success (plugins.delete's rule).
+    pub async fn schedules_delete(
+        &self,
+        server_id: &ServerId,
+        schedule_id: &str,
+    ) -> Result<(), EngineError> {
+        let schedule_id = schedule_id.to_string();
+        let id_for_list = schedule_id.clone();
+        let removed = self.schedules_mutate(server_id, move |list| {
+            let before = list.len();
+            list.retain(|s| s.id != id_for_list);
+            let removed = list.len() != before;
+            Ok((removed, removed))
+        })?;
+        if !removed {
+            return Err(EngineError::Protocol(schedule_not_found(&schedule_id)));
+        }
+        Ok(())
+    }
+
+    /// The tick the clock runs on: now, in the daemon's local zone.
+    pub(crate) fn clock_tick(&self) -> zamin_core::schedules::Tick {
+        let now_ms = now_ms_unix();
+        let offset_secs = local_offset_secs();
+        zamin_core::schedules::Tick::at(now_ms, offset_secs)
+    }
+
+    /// The daemon's boot instant (interval schedules re-anchor here).
+    pub(crate) fn boot_ms(&self) -> i64 {
+        self.inner.boot_ms
+    }
+
+    /// A record as clients see it: stored fields plus the next-run hint.
+    fn schedule_view(
+        &self,
+        schedule: &zamin_protocol::schedules::Schedule,
+        tick: &zamin_core::schedules::Tick,
+    ) -> zamin_protocol::schedules::ScheduleView {
+        let next_run_ms = match zamin_core::schedules::allowed_minutes(&schedule.spec) {
+            Ok(allowed) => zamin_core::schedules::next_run_hint(
+                &zamin_core::schedules::DueContext {
+                    spec: &schedule.spec,
+                    allowed: &allowed,
+                    created_ms: schedule.created_ms,
+                    last_fired_ms: schedule.last_fired_ms,
+                    anchor_ms: self.inner.boot_ms,
+                },
+                tick,
+            ),
+            // Stored garbage (a hand-edited file): the clock refuses to
+            // fire it and the hint is honest about not knowing.
+            Err(_) => None,
+        };
+        zamin_protocol::schedules::ScheduleView {
+            schedule: schedule.clone(),
+            next_run_ms,
+        }
+    }
+
+    /// Load a server's schedules, refusing unregistered servers (the
+    /// registry owns identity) and surfacing corrupt stores loudly.
+    pub(crate) fn schedules_load(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<Vec<zamin_protocol::schedules::Schedule>, EngineError> {
+        if self.registry_lock().get(server_id).is_none() {
+            return Err(EngineError::Protocol(not_found(server_id)));
+        }
+        let path = zamin_core::schedules::schedules_path(&self.inner.data_dir, server_id.as_str());
+        let _io = self.schedules_io_lock();
+        zamin_core::schedules::load_schedules(&path)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))
+    }
+
+    /// Read-modify-write a server's store under the daemon-wide io lock.
+    /// The closure mutates in place and answers (found, payload) where
+    /// `found` says whether it touched an existing record.
+    pub(crate) fn schedules_mutate<T>(
+        &self,
+        server_id: &ServerId,
+        f: impl FnOnce(
+            &mut Vec<zamin_protocol::schedules::Schedule>,
+        ) -> Result<(bool, T), ProtocolError>,
+    ) -> Result<T, EngineError> {
+        if self.registry_lock().get(server_id).is_none() {
+            return Err(EngineError::Protocol(not_found(server_id)));
+        }
+        let path = zamin_core::schedules::schedules_path(&self.inner.data_dir, server_id.as_str());
+        let _io = self.schedules_io_lock();
+        let mut list = zamin_core::schedules::load_schedules(&path)
+            .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        let (found, payload) = f(&mut list).map_err(EngineError::Protocol)?;
+        if found {
+            zamin_core::schedules::save_schedules(&path, &list)
+                .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
+        }
+        Ok(payload)
+    }
+
+    fn schedules_io_lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .schedules_io
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The scheduler's fire hook: record that the action was dispatched.
+    /// The caller has already passed the policy checks (enabled, due,
+    /// state-appropriate); this persists the memory and returns whether
+    /// the record still exists (a concurrent delete is honored).
+    pub(crate) fn schedule_mark_fired(
+        &self,
+        server_id: &ServerId,
+        schedule_id: &str,
+        fired_ms: i64,
+    ) -> bool {
+        let id = schedule_id.to_string();
+        self.schedules_mutate(server_id, move |list| {
+            let known = list.iter_mut().any(|s| {
+                if s.id == id {
+                    s.last_fired_ms = Some(fired_ms);
+                    true
+                } else {
+                    false
+                }
+            });
+            Ok((known, known))
+        })
+        .unwrap_or(false) // unregistered mid-flight: nothing to remember
+    }
+
     /// Broadcast a registry-driven transition (registration, removal).
     /// These are state changes from the registry's point of view, not the
     /// actor's, so they are published here rather than in an actor.
@@ -2019,6 +2271,29 @@ fn not_found(server_id: &ServerId) -> ProtocolError {
         ErrorCode::ServerNotFound,
         format!("Server {server_id} is not registered."),
     )
+}
+
+fn schedule_not_found(schedule_id: &str) -> ProtocolError {
+    ProtocolError::new(
+        ErrorCode::ScheduleNotFound,
+        format!("Schedule {schedule_id:?} does not exist for this server."),
+    )
+}
+
+/// Wall-clock now, epoch milliseconds (saturates at the epoch on a
+/// broken clock — a schedule computed there simply fires later).
+pub(crate) fn now_ms_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// The system zone's current east-positive offset in seconds. "Daily at
+/// 04:30" means this zone (ADR-0014); the offset is re-read every tick,
+/// so a DST change or a moved machine is picked up without a restart.
+pub(crate) fn local_offset_secs() -> i64 {
+    i64::from(chrono::Local::now().offset().local_minus_utc())
 }
 
 fn internal(message: &str) -> EngineError {

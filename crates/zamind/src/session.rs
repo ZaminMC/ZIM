@@ -524,6 +524,65 @@ async fn dispatch(request: &Request, engine: &Engine) -> Response {
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
+        methods::SCHEDULES_LIST => {
+            let params: zamin_protocol::schedules::SchedulesListParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.schedules_list(&server_id).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::SCHEDULES_CREATE => {
+            let params: zamin_protocol::schedules::SchedulesCreateParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.schedules_create(&server_id, &params).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::SCHEDULES_UPDATE => {
+            let params: zamin_protocol::schedules::SchedulesUpdateParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.schedules_update(&server_id, &params).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::SCHEDULES_DELETE => {
+            let params: zamin_protocol::schedules::SchedulesDeleteParams =
+                match request.parse_params() {
+                    Ok(params) => params,
+                    Err(e) => return unreadable(id, e),
+                };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine
+                    .schedules_delete(&server_id, &params.schedule_id)
+                    .await
+                {
+                    Ok(()) => json_ok(id, EmptyResult {}),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::CATALOG_LIST => json_ok(id, engine.catalog_list().await),
         methods::CATALOG_VERSIONS => {
             let params: zamin_protocol::software::CatalogVersionsParams =

@@ -1301,6 +1301,14 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             ),
         )
         .with_context("file", file.clone()),
+        E::InvalidSchedule { reason } => ProtocolError::new(
+            ErrorCode::ScheduleInvalid,
+            format!("The schedule is invalid: {reason}."),
+        ),
+        E::SchedulesCorrupt { path, reason } => ProtocolError::new(
+            ErrorCode::InternalError,
+            format!("The schedule store at {path:?} is corrupt: {reason}."),
+        ),
         E::ChecksumMismatch {
             path,
             algorithm,

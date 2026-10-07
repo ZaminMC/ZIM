@@ -40,6 +40,9 @@ pub const AUDITED_METHODS: &[&str] = &[
     zamin_protocol::methods::FILES_MKDIR,
     zamin_protocol::methods::FILES_RENAME,
     zamin_protocol::methods::FILES_DELETE,
+    zamin_protocol::methods::SCHEDULES_CREATE,
+    zamin_protocol::methods::SCHEDULES_UPDATE,
+    zamin_protocol::methods::SCHEDULES_DELETE,
 ];
 
 #[derive(Clone)]
