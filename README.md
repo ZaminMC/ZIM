@@ -46,6 +46,11 @@ zamin schedules add <id> --name "backup" --every 3600 --backup # interval backup
 zamin schedules add <id> --name "weekend" --weekdays sat,sun --at 09:00 \
       --command "say Restarting soon"
 zamin schedules pause|resume|remove <id> <schedule-id>
+zamin publish preview <id>          # the diff and the security scan (ADR-0017)
+zamin publish config <id> --include "folder:plugins" --title "Demo"   # rules: folder:/file:/glob:
+zamin publish review <id> <file> <kind>   # record a false positive (--unreview clears)
+zamin publish run <id>              # package + upload as a job (--confirm-unsafe overrides the gate)
+zamin publish state <id>            # the last publication and its receipt
 zamin jobs list                     # installs, backups, downloads — running and finished
 zamin jobs get|cancel <job-id>
 ```
@@ -107,6 +112,27 @@ stopped server on, and missed firings are skipped, never replayed — a week
 of downtime is not a firing storm at boot. `lastFiredMs` on the record is
 the clock's only memory; the panel's Schedules tab and
 `zamin schedules list/add/pause/resume/remove` are the two ways to author it.
+
+## Publish
+
+Publish packages a **selection** of a server's files and hands it to a
+provider ([ADR-0017](docs/adr/0017-publish.md), the founder's §40–47
+and §74). Three rules are structural. The §41 selection: include rules
+(a whole folder, one file, or a glob) minus excludes — an empty include
+list selects *nothing*, the whole server directory is never packaged.
+The §42 diff: the preview merges byte digests against the last
+publication (mtimes are never consulted) and the change counter lights
+the Publish button only when something actually changed. The §44/§46
+security scan stands in front of packaging: token-shaped detectors,
+configuration-key heuristics, high-entropy noise, sensitive filenames —
+excerpts always redacted, false positives reviewable, and an unreviewed
+finding refuses the run until it is reviewed, the file excluded, or
+Publish Anyway is confirmed explicitly. The provider interface has two
+honest built-ins (archive-only and a local output folder); marketplaces
+arrive as new providers, nothing is hardcoded. Credentials ride the
+environment channel only — the daemon has nowhere to store them, so it
+never does (§47). The §43 AI changelog room is named and disabled: a
+room, not a fake.
 
 ## Players
 
@@ -182,7 +208,7 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0014
+- [ADRs](docs/adr/) — accepted decisions 0001–0017
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
 
 ## Install (Phase 7)
