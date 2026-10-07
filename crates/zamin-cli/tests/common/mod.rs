@@ -24,7 +24,11 @@ pub fn workspace_bin(name: &str) -> PathBuf {
         }
         dir = parent.to_path_buf();
     }
-    panic!("{name} not found next to the test binary; run `cargo test --workspace`");
+    panic!(
+        "{name} not found next to the test binary; run `cargo build --workspace` \
+         first — on newer toolchains `cargo test --workspace` does not link \
+         bin-only crates that carry no test targets"
+    );
 }
 
 /// Owns the daemon process. Tree kill on drop: the daemon deliberately

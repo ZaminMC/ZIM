@@ -65,6 +65,7 @@ delete` plus `zamin jobs` for the long-running operations.
 ## Development loop
 
 ```
+cargo build --workspace  # once: links every binary the tests spawn
 cargo test --workspace    # unit + conformance + lifecycle + e2e (no Java needed)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
@@ -74,7 +75,7 @@ Panel (apps/panel) has its own gates — `npm test`, `npm run typecheck`,
 `npm run lint` — and a browser smoke loop described in
 [apps/panel/README.md](apps/panel/README.md).
 
-`cargo test --workspace` builds every binary the tests spawn (`zamind`,
+`cargo build --workspace` produces every binary the tests spawn (`zamind`,
 `zamin`, `fake-mc-server`); run it rather than per-package tests so the
 integration harnesses find their binaries.
 
@@ -137,7 +138,10 @@ On the desktop, the panel's footer has a connection chip (default
 file, and the fingerprint the agent printed (the pin is the server
 identity; the token is the credential, sent as `daemon.hello` `auth`
 inside TLS). Everything works as if the server were local: fleet,
-lifecycle, console, files, backups. See
+lifecycle, console, files, backups. The shipped app dials the agent
+from Rust — the Tauri host opens the pinned TLS relay itself, so the
+chip behaves identically in the installed panel and in the browser dev
+loop (the Node bridge relays the same way). See
 [ADR-0011](docs/adr/0011-remote-transport-agent-tls-auth.md) for the
 threat model — no CA, no trust store; a pinned fingerprint or an explicit,
 discouraged skip-verify.
