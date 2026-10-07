@@ -146,6 +146,21 @@ and Ctrl+K keeps the command palette. Dutchmen — the AI part of the
 vision — is a documented reservation: the new tab's room is reserved,
 the dialect will grow, nothing pretends.
 
+The tabs are operators too
+([ADR-0016](docs/adr/0016-tab-machinery.md)): a tab carries its own
+identity, so Duplicate clones the *view* — one server process, two
+isolated tabs, never a second backend. Pinned tabs sit compact at the
+strip's head, keep their favicon, and refuse the accidental close;
+groups behave like browser groups — a collapsible, renamable, colored
+chip, never a folder — and dissolve when their last member leaves.
+Closed tabs land in a bounded most-recent-first memory; Ctrl+Shift+T (or
+the menu) reopens them. A view that throws crashes into a recoverable
+"This tab crashed" page — the strip and the other tabs never notice, and
+the recovery verb is reload, which still never touches the server
+process. The §48 context menu carries the verbs with real machinery and
+keeps the rest honest: Mute, Move to new window, Share with Dutchmen,
+and the vertical strip are named rooms, not fakes.
+
 ## Development loop
 
 ```
