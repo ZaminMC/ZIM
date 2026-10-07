@@ -452,3 +452,44 @@ fn schedules_round_trip_preserves_unknown_fields_inside_schedules() {
     assert_eq!(result.schedules.len(), 1);
     assert_eq!(result.schedules[0].schedule.id, "s1");
 }
+
+#[test]
+fn audit_list_response_mirrors_the_writer_and_counts_malformed() {
+    // ADR-0011's read side: entries newest-first, the writer's line shape
+    // field-for-field, optional fields honestly absent (a hello has no
+    // serverId and the daemon-side handshake has no protocol client), and
+    // `malformed` names the lines the file carries but the reader could
+    // not parse — counted, never silently dropped.
+    let original = fixture("audit-list-response");
+    let msg = parse("audit-list-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::audit::AuditListResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.entries.len(), 4);
+    assert!(result.has_more);
+    assert_eq!(result.malformed, 1);
+
+    let start = &result.entries[0];
+    assert_eq!(start.method, "server.start");
+    assert_eq!(start.server_id.as_deref(), Some("demo"));
+    assert_eq!(start.outcome, "ok");
+    assert_eq!(
+        start.client,
+        Some(zamin_protocol::audit::AuditClient {
+            name: "zamin-cli".into(),
+            version: "0.1.0".into()
+        })
+    );
+
+    let refused = &result.entries[2];
+    assert_eq!(refused.outcome, "SERVER_NOT_FOUND");
+
+    let handshake = &result.entries[3];
+    assert_eq!(handshake.method, "daemon.hello");
+    assert_eq!(handshake.server_id, None, "a hello names no server");
+    assert_eq!(handshake.client, None, "the daemon-side handshake has none");
+}

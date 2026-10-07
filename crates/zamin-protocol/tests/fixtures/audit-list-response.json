@@ -1,0 +1,36 @@
+{
+  "jsonrpc": "2.0",
+  "id": 51,
+  "result": {
+    "entries": [
+      {
+        "tsMs": 1730000045000,
+        "method": "server.start",
+        "serverId": "demo",
+        "outcome": "ok",
+        "client": { "name": "zamin-cli", "version": "0.1.0" }
+      },
+      {
+        "tsMs": 1730000000000,
+        "method": "server.register",
+        "serverId": "demo",
+        "outcome": "ok",
+        "client": { "name": "zamin-cli", "version": "0.1.0" }
+      },
+      {
+        "tsMs": 1729999990000,
+        "method": "server.stop",
+        "serverId": "ghost",
+        "outcome": "SERVER_NOT_FOUND",
+        "client": { "name": "zamin-panel", "version": "0.1.0" }
+      },
+      {
+        "tsMs": 1729999980000,
+        "method": "daemon.hello",
+        "outcome": "ok"
+      }
+    ],
+    "hasMore": true,
+    "malformed": 1
+  }
+}

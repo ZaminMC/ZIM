@@ -66,3 +66,9 @@ pub const SCHEDULES_LIST: &str = "schedules.list";
 pub const SCHEDULES_CREATE: &str = "schedules.create";
 pub const SCHEDULES_UPDATE: &str = "schedules.update";
 pub const SCHEDULES_DELETE: &str = "schedules.delete";
+
+// Specified in v0 with the audit's read side (ADR-0011): the audit was
+// write-only evidence until something could read it back; reads are not
+// themselves audited (a listing floods the file without making the
+// system safer).
+pub const AUDIT_LIST: &str = "audit.list";
