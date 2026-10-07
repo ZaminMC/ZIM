@@ -1,0 +1,142 @@
+.page {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(600px 300px at 50% 0%, rgba(92, 157, 244, 0.06), transparent),
+    var(--bg);
+}
+
+.center {
+  width: min(640px, 100%);
+  padding: 12vh var(--space-6) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.title {
+  margin: 0 0 var(--space-5);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.form {
+  width: 100%;
+}
+
+.input {
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  outline: none;
+  box-shadow: var(--shadow-s);
+  transition: border-color var(--speed-fast) var(--ease), box-shadow var(--speed-fast) var(--ease);
+}
+
+.input:focus {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-m);
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.hint {
+  margin: var(--space-3) 0 0;
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  text-align: center;
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  color: var(--text);
+}
+
+.empty {
+  margin-top: 8vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.emptyIcon {
+  color: var(--text-faint);
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.emptyBody {
+  margin: 0 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-m);
+  max-width: 40ch;
+}
+
+.noHits {
+  margin-top: 8vh;
+  color: var(--text-faint);
+  font-size: var(--text-m);
+}
+
+.list {
+  width: 100%;
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-m);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed-fast) var(--ease), border-color var(--speed-fast) var(--ease);
+}
+
+.row:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.name {
+  font-weight: 500;
+}
+
+.addr {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+}

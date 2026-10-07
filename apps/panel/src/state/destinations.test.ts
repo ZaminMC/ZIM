@@ -40,11 +40,13 @@ describe("tab keys and URLs", () => {
     const destinations: Destination[] = [
       { kind: "servers" },
       { kind: "new" },
+      { kind: "settings" },
       { kind: "server", serverId: "alpha" },
     ];
     expect(destinations.map(destinationUrl)).toEqual([
       "zaminpanel://servers/",
       "zaminpanel://new",
+      "zaminpanel://settings/",
       "zaminpanel://server/alpha",
     ]);
   });
@@ -94,6 +96,17 @@ describe("parseAddressInput", () => {
     expect(parseAddressInput("zaminpanel://server/alpha")).toEqual({
       kind: "internal",
       destination: { kind: "server", serverId: "alpha" },
+    });
+    expect(parseAddressInput("zaminpanel://settings/")).toEqual({
+      kind: "internal",
+      destination: { kind: "settings" },
+    });
+  });
+
+  it("answers an unknown internal page as a typed missing destination, not a search", () => {
+    expect(parseAddressInput("zaminpanel://nope/")).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "zaminpanel://nope/" },
     });
   });
 

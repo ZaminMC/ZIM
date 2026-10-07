@@ -10,6 +10,7 @@ import { autostartStatus, setAutostart } from "../integration/autostart";
 import type { AutostartStatus } from "../integration/autostart";
 import { availableVerbs } from "./ServerView";
 import { useServers } from "../state/servers";
+import { tabDestination, tabKeyOf, useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
 import styles from "./Palette.module.css";
 
@@ -67,7 +68,12 @@ export function buildCommands(
 export function Palette() {
   const close = useUi((s) => s.setPaletteOpen);
   const openNewServer = useUi((s) => s.setNewServerOpen);
-  const activeTab = useUi((s) => s.activeTab);
+  // The palette's context is the active tab when it rests on a server.
+  const activeTab = useTabs((s) => {
+    const tab = s.tabs.find((t) => tabKeyOf(t) === s.activeKey) ?? s.tabs[0];
+    const dest = tab ? tabDestination(tab) : undefined;
+    return dest?.kind === "server" ? dest.serverId : null;
+  });
   const setPending = useUi((s) => s.setPending);
   const activeServer = useServers((s) => (activeTab ? s.servers[activeTab] : undefined));
 

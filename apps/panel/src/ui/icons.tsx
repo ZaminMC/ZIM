@@ -159,3 +159,57 @@ export function IconPuzzle(p: IconProps) {
     </svg>
   );
 }
+
+// --- browser chrome marks (ADR-0015) -----------------------------------------
+
+export function IconArrowLeft(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M19 12H5" />
+      <path d="M11 18l-6-6 6-6" />
+    </svg>
+  );
+}
+
+export function IconArrowRight(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M5 12h14" />
+      <path d="M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+export function IconReload(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M20 11a8 8 0 1 0-2.34 6.34" />
+      <path d="M20 5v6h-6" />
+    </svg>
+  );
+}
+
+export function IconClose(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+export function IconGear(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M18.5 5.5l-1.9 1.9M7.4 16.6l-1.9 1.9" />
+    </svg>
+  );
+}
+
+export function IconDots(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M12 5.5h.01M12 12h.01M12 18.5h.01" />
+    </svg>
+  );
+}

@@ -1,17 +1,16 @@
-// Overview dashboard: the landing page when no server workspace is open.
-// Honest numbers only — what the panel actually knows (fleet counts and
-// the daemon identity), then the fleet itself as cards. The empty state
-// keeps the original nudge sentence (it is the documented §53 journey
-// copy) and gives it the space it deserves.
+// zaminpanel://servers/ — the fleet page (ADR-0015). The registry as
+// cards, honest counts, the daemon identity. The empty state keeps the
+// original nudge sentence (it is the documented §53 journey copy) and
+// gives it the space it deserves.
 
 import { useConnection } from "../state/connection";
 import type { ServerEntry } from "../state/servers";
 import { Button } from "../ui/Button";
 import { StatusChip } from "../ui/StatusChip";
 import { IconBolt, IconPlus, IconSearch, IconServer } from "../ui/icons";
-import styles from "./Dashboard.module.css";
+import styles from "./FleetPage.module.css";
 
-export function Dashboard({
+export function FleetPage({
   servers,
   onOpen,
   onNewServer,
@@ -31,7 +30,7 @@ export function Dashboard({
     <div className={styles.page}>
       <header className={styles.pageHead}>
         <div>
-          <h1 className={styles.title}>Overview</h1>
+          <h1 className={styles.title}>Servers</h1>
           <p className={styles.subtitle}>
             {status === "ready"
               ? daemon
@@ -103,7 +102,7 @@ export function Dashboard({
                   {server.port ? <span className={styles.cardChip}>:{server.port}</span> : null}
                 </div>
                 <div className={styles.cardFoot}>
-                  <span className={styles.cardOpen}>Open workspace →</span>
+                  <span className={styles.cardOpen}>Open →</span>
                 </div>
               </div>
             ))}

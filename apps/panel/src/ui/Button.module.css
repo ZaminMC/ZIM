@@ -86,3 +86,16 @@
     transform: rotate(360deg);
   }
 }
+
+/* Ghost (ADR-0015): the browser chrome's borderless control. */
+.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-color: transparent;
+  color: var(--text);
+}

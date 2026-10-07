@@ -22,8 +22,25 @@ export interface ServerDestination {
   kind: "server";
   serverId: string;
 }
+export interface SettingsDestination {
+  kind: "settings";
+}
+/** A typed request for an internal page that does not exist. The shell
+ *  answers it honestly (§58: an unknown internal page is a real
+ *  destination request, never silently a web search) — an error page,
+ *  as a tab, because the operator typed it and deserves the history
+ *  entry back out of it. */
+export interface MissingPageDestination {
+  kind: "missing";
+  url: string;
+}
 /** The closed set of places a tab can show (§58: typed, never web pages). */
-export type Destination = ServersDestination | NewTabDestination | ServerDestination;
+export type Destination =
+  | ServersDestination
+  | NewTabDestination
+  | ServerDestination
+  | SettingsDestination
+  | MissingPageDestination;
 
 /** A tab's stable identity. Derived from the destination on purpose: one
  *  tab per server, one fleet page, one new-tab page (§6). */
@@ -31,6 +48,7 @@ export type TabKey = string;
 
 export const SERVERS_TAB: TabKey = "servers";
 export const NEW_TAB: TabKey = "new";
+export const SETTINGS_TAB: TabKey = "settings";
 export const serverTab = (serverId: string): TabKey => `server:${serverId}`;
 
 export function tabKey(destination: Destination): TabKey {
@@ -39,8 +57,12 @@ export function tabKey(destination: Destination): TabKey {
       return SERVERS_TAB;
     case "new":
       return NEW_TAB;
+    case "settings":
+      return SETTINGS_TAB;
     case "server":
       return serverTab(destination.serverId);
+    case "missing":
+      return `missing:${destination.url}`;
   }
 }
 
@@ -51,8 +73,12 @@ export function destinationUrl(destination: Destination): string {
       return "zaminpanel://servers/";
     case "new":
       return "zaminpanel://new";
+    case "settings":
+      return "zaminpanel://settings/";
     case "server":
       return `zaminpanel://server/${destination.serverId}`;
+    case "missing":
+      return destination.url;
   }
 }
 
@@ -67,6 +93,9 @@ export function restingAddress(
 ): string {
   if (destination.kind === "servers") return destinationUrl(destination);
   if (destination.kind === "new") return "";
+  if (destination.kind === "settings" || destination.kind === "missing") {
+    return destinationUrl(destination);
+  }
   const entry = entries.find((e) => e.serverId === destination.serverId);
   if (entry?.port) return joinAddress(entry, host);
   return destinationUrl(destination);
@@ -112,12 +141,13 @@ export function parseAddressInput(text: string): AddressRequest {
     const page = internal[1];
     if (page === "servers") return { kind: "internal", destination: { kind: "servers" } };
     if (page === "new") return { kind: "internal", destination: { kind: "new" } };
+    if (page === "settings") return { kind: "internal", destination: { kind: "settings" } };
     if (page === "server" && internal[2]) {
       return { kind: "internal", destination: { kind: "server", serverId: internal[2] } };
     }
     // An unknown internal page is a real destination request the shell
     // answers honestly (no such page) — not silently a web search.
-    return { kind: "internal", destination: { kind: "servers" } };
+    return { kind: "internal", destination: { kind: "missing", url: trimmed } };
   }
   const join = JOIN.exec(trimmed);
   if (join) {

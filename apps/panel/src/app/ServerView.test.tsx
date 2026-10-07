@@ -8,6 +8,7 @@ import { ProtocolRequestError } from "../protocol/client";
 import { useServers } from "../state/servers";
 import { useMetrics } from "../state/metrics";
 import { useUi } from "../state/ui";
+import { useTabs } from "../state/tabs";
 
 const mocks = vi.hoisted(() => ({
   getServer: vi.fn(),
@@ -57,7 +58,12 @@ describe("ServerView", () => {
       },
       crashes: {},
     });
-    useUi.setState({ pending: {}, openTabs: ["alpha"], activeTab: "alpha" });
+    useUi.setState({ pending: {} });
+    useTabs.setState({
+      tabs: [{ history: [{ kind: "server", serverId: "alpha" }], historyIndex: 0, reloadToken: 0 }],
+      activeKey: "server:alpha",
+      discoveryQuery: null,
+    });
     useMetrics.setState({ samples: {} });
     mocks.consoleRenders = 0;
 
@@ -196,7 +202,12 @@ describe("ServerView — EULA acceptance", () => {
       },
       crashes: {},
     });
-    useUi.setState({ pending: {}, openTabs: ["fresh"], activeTab: "fresh" });
+    useUi.setState({ pending: {} });
+    useTabs.setState({
+      tabs: [{ history: [{ kind: "server", serverId: "fresh" }], historyIndex: 0, reloadToken: 0 }],
+      activeKey: "server:fresh",
+      discoveryQuery: null,
+    });
     mocks.getServer.mockReset().mockResolvedValue({
       serverId: "fresh",
       displayName: "Fresh",

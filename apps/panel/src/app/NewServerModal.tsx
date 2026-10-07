@@ -20,6 +20,7 @@ import { describeError } from "../state/errors";
 import type { DescribedError } from "../state/errors";
 import { useJobs } from "../state/jobs";
 import { useServers } from "../state/servers";
+import { useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
 import type { CatalogBuild, CatalogEntry, JavaRuntime } from "../protocol/types";
 import { Button } from "../ui/Button";
@@ -52,7 +53,7 @@ export function satisfyingRuntime(
 
 export function NewServerModal() {
   const close = useUi((s) => s.setNewServerOpen);
-  const openServer = useUi((s) => s.openServer);
+  const navigate = useTabs((s) => s.navigate);
   const upsert = useServers((s) => s.upsert);
 
   const [mode, setMode] = useState<"download" | "register">("download");
@@ -203,7 +204,7 @@ export function NewServerModal() {
       void getServer(serverId)
         .then((details) => upsert(details))
         .catch(() => {}); // the registered event reconciles anyway
-      openServer(serverId);
+      navigate({ kind: "server", serverId });
       close(false);
     } else if (createJob.state === "failed" || createJob.state === "cancelled") {
       setCreateJobId(null);
@@ -218,7 +219,7 @@ export function NewServerModal() {
         remediation: createJob.error?.remediation ?? [],
       });
     }
-  }, [createJob, serverId, openServer, close, upsert]);
+  }, [createJob, serverId, navigate, close, upsert]);
 
   const installing = installJobId !== null;
   const needsJava =
@@ -274,7 +275,7 @@ export function NewServerModal() {
     })
       .then((result) => {
         upsert(result.server);
-        openServer(result.server.serverId);
+        navigate({ kind: "server", serverId: result.server.serverId });
         close(false);
       })
       .catch((error: unknown) => {
