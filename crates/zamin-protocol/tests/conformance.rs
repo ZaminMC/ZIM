@@ -493,3 +493,54 @@ fn audit_list_response_mirrors_the_writer_and_counts_malformed() {
     assert_eq!(handshake.server_id, None, "a hello names no server");
     assert_eq!(handshake.client, None, "the daemon-side handshake has none");
 }
+
+#[test]
+fn publish_preview_response_parses_with_reserved_rooms_absent() {
+    // ADR-0017: the publish wire carries the §42 diff, the §44 scan, and
+    // the §40 config; the §43 Dutchmen changelog room stays OFF the wire
+    // (the AI part is ignored, rooms reserved) — the changelog field is a
+    // plain operator-edited string. Optional fields are honestly absent
+    // (a removed row has no sha512; a first publication has no
+    // lastPublication).
+    let original = fixture("publish-preview-response");
+    let msg = parse("publish-preview-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::publish::PublishPreviewResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.server_id, "demo");
+    assert_eq!(result.config.provider_id, "local-dir");
+    assert_eq!(result.config.selection.includes.len(), 3);
+    assert_eq!(result.config.selection.excludes.len(), 1);
+    assert_eq!(result.counts.changed, 3);
+
+    let modified = &result.files[0];
+    assert_eq!(
+        modified.status,
+        zamin_protocol::publish::FileDiffStatus::Modified
+    );
+    let removed = &result.files[2];
+    assert_eq!(
+        removed.status,
+        zamin_protocol::publish::FileDiffStatus::Removed
+    );
+    assert!(
+        removed.sha512.is_none(),
+        "a removed row has no current digest"
+    );
+
+    let finding = &result.scan.findings[0];
+    assert_eq!(finding.kind, "config-secret-key");
+    assert_eq!(
+        finding.severity,
+        zamin_protocol::publish::SecretSeverity::Medium
+    );
+    assert_eq!(result.blocking_count, 1);
+    let last = result
+        .last_publication
+        .expect("the fixture has a last publication");
+    assert_eq!(last.version.as_deref(), Some("1.4.1"));
+}

@@ -25,6 +25,7 @@ pub mod methods;
 pub mod metrics;
 pub mod players;
 pub mod plugins;
+pub mod publish;
 pub mod schedules;
 pub mod server;
 pub mod software;

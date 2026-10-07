@@ -45,6 +45,10 @@ pub enum ErrorCode {
     ChecksumMismatch,
     ScheduleNotFound,
     ScheduleInvalid,
+    PublishNotConfigured,
+    PublishNothingSelected,
+    PublishSecretsDetected,
+    PublishUploadFailed,
     InternalError,
 }
 
@@ -85,6 +89,10 @@ impl ErrorCode {
             ErrorCode::ChecksumMismatch => "CHECKSUM_MISMATCH",
             ErrorCode::ScheduleNotFound => "SCHEDULE_NOT_FOUND",
             ErrorCode::ScheduleInvalid => "SCHEDULE_INVALID",
+            ErrorCode::PublishNotConfigured => "PUBLISH_NOT_CONFIGURED",
+            ErrorCode::PublishNothingSelected => "PUBLISH_NOTHING_SELECTED",
+            ErrorCode::PublishSecretsDetected => "PUBLISH_SECRETS_DETECTED",
+            ErrorCode::PublishUploadFailed => "PUBLISH_UPLOAD_FAILED",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
     }

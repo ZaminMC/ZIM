@@ -72,3 +72,15 @@ pub const SCHEDULES_DELETE: &str = "schedules.delete";
 // themselves audited (a listing floods the file without making the
 // system safer).
 pub const AUDIT_LIST: &str = "audit.list";
+
+// Publish (founder vision §40–47, §74, ADR-0017): the creator packages a
+// chosen selection of a server's files and hands it to a provider. The
+// AI changelog room (§43) is deliberately absent from this surface —
+// see the scoping note in publish.rs.
+pub const PUBLISH_CONFIG_GET: &str = "publish.config.get";
+pub const PUBLISH_CONFIG_SET: &str = "publish.config.set";
+pub const PUBLISH_PROVIDERS_LIST: &str = "publish.providers.list";
+pub const PUBLISH_PREVIEW: &str = "publish.preview";
+pub const PUBLISH_EXECUTE: &str = "publish.execute";
+pub const PUBLISH_STATE: &str = "publish.state";
+pub const PUBLISH_REVIEW_SET: &str = "publish.review.set";

@@ -22,6 +22,8 @@ pub enum JobKind {
     JavaInstall,
     #[serde(rename = "plugins.install")]
     PluginInstall,
+    #[serde(rename = "publish.execute")]
+    PublishExecute,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
