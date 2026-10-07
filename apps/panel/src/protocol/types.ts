@@ -391,6 +391,9 @@ export interface CatalogEntry {
   id: string;
   name: string;
   description: string;
+  /** Which upstream API family this entry speaks: builds (with
+   * published checksums) or loaders (Fabric's meta API). */
+  source: "fill" | "fabric-meta";
 }
 
 export interface CatalogListResult {
@@ -426,6 +429,9 @@ export interface CatalogBuildsResult {
   version: string;
   javaMajor?: number;
   builds: CatalogBuild[];
+  /** The Fabric family's stand-in for builds: stable loader versions,
+   * newest first; `server.create` pins one via `loader`. */
+  loaders?: string[];
 }
 
 export interface ServerCreateParams {
@@ -435,6 +441,8 @@ export interface ServerCreateParams {
   project: string;
   version: string;
   build?: number;
+  /** The Fabric loader version to pin; omit for the newest stable. */
+  loader?: string;
   templateId?: string;
   port?: number;
   javaPath?: string;

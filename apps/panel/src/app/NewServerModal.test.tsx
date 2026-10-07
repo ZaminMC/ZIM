@@ -89,7 +89,15 @@ describe("NewServerModal — download door", () => {
       state: "not-running",
     });
     m.catalogList.mockResolvedValue({
-      entries: [{ id: "paper", name: "Paper", description: "The default." }],
+      entries: [
+        { id: "paper", name: "Paper", description: "The default.", source: "fill" },
+        {
+          id: "fabric",
+          name: "Fabric",
+          description: "Lightweight mod loader.",
+          source: "fabric-meta",
+        },
+      ],
     });
     m.catalogVersions.mockResolvedValue({
       project: "paper",
@@ -149,6 +157,53 @@ describe("NewServerModal — download door", () => {
     useJobs.getState().completed("job-1", "succeeded");
     await waitFor(() => expect(useUi.getState().newServerOpen).toBe(false));
     expect(useUi.getState().activeTab).toBe("survival");
+  });
+
+  it("creates a fabric server by pinning a loader instead of a build", async () => {
+    (catalogVersions as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project: "fabric",
+      versions: [{ id: "1.21.11" }, { id: "1.20.1" }],
+    });
+    (catalogBuilds as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project: "fabric",
+      version: "1.21.11",
+      javaMajor: 21,
+      builds: [],
+      loaders: ["0.16.14", "0.16.13"],
+    });
+    (createServer as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      kind: "server.create",
+      job: { jobId: "fabric-1", kind: "server.create", state: "running" },
+    });
+    render(<NewServerModal />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLSelectElement>(/software/i).value).toBe("paper"),
+    );
+    fireEvent.change(screen.getByLabelText(/software/i), { target: { value: "fabric" } });
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLSelectElement>(/^version/i).value).toBe("1.21.11"),
+    );
+
+    // The loader select takes the build select's place, newest stable
+    // loader preselected.
+    expect(screen.queryByLabelText(/build/i)).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLSelectElement>(/loader/i).value).toBe("0.16.14"),
+    );
+
+    fireEvent.change(screen.getByLabelText(/^server id/i), { target: { value: "mods" } });
+    fireEvent.click(screen.getByRole("button", { name: /download & create/i }));
+    await waitFor(() => expect(createServer).toHaveBeenCalled());
+    expect(createServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: "mods",
+        project: "fabric",
+        version: "1.21.11",
+        build: undefined,
+        loader: "0.16.14",
+      }),
+    );
   });
 
   it("offers the Java fetch when no runtime satisfies the requirement", async () => {

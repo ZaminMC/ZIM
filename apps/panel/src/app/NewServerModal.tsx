@@ -73,6 +73,9 @@ export function NewServerModal() {
   const [version, setVersion] = useState<string>("");
   const [builds, setBuilds] = useState<CatalogBuild[] | null>(null);
   const [buildId, setBuildId] = useState<number | null>(null);
+  // The Fabric family's stand-in for builds: stable loader versions.
+  const [loaders, setLoaders] = useState<string[] | null>(null);
+  const [loaderId, setLoaderId] = useState<string>("");
   const [javaMajor, setJavaMajor] = useState<number | null>(null);
   const [portText, setPortText] = useState("");
 
@@ -130,20 +133,25 @@ export function NewServerModal() {
     };
   }, [mode, project]);
 
-  // Builds (and the version's Java requirement) follow the version.
+  // Builds (or the Fabric family's loader list) follow the version.
   useEffect(() => {
     if (mode !== "download" || !project || !version) return;
     let alive = true;
     setBuilds(null);
     setBuildId(null);
+    setLoaders(null);
+    setLoaderId("");
     setJavaMajor(null);
     catalogBuilds(project, version)
       .then((result) => {
         if (!alive) return;
         setBuilds(result.builds);
         setJavaMajor(result.javaMajor ?? null);
+        setLoaders(result.loaders ?? null);
         const newestBuild = result.builds[0];
         if (newestBuild !== undefined) setBuildId(newestBuild.id);
+        const newestLoader = result.loaders?.[0];
+        if (newestLoader !== undefined) setLoaderId(newestLoader);
       })
       .catch((error: unknown) => {
         if (alive) setSubmitError(describeError(error));
@@ -225,6 +233,9 @@ export function NewServerModal() {
       setSubmitError({ title: "Port must be a whole number between 1 and 65535.", remediation: [] });
       return;
     }
+    // The Fabric family pins a loader instead of a numeric build.
+    const isFabric =
+      (entries ?? []).find((entry) => entry.id === project)?.source === "fabric-meta";
     setBusy(true);
     setSubmitError(null);
     void createServer({
@@ -233,6 +244,7 @@ export function NewServerModal() {
       project,
       version,
       build: buildId ?? undefined,
+      loader: isFabric && loaderId ? loaderId : undefined,
       port,
       javaPath: javaPath === "auto" ? undefined : javaPath,
     })
@@ -347,22 +359,51 @@ export function NewServerModal() {
                 </select>
               </div>
               <div className={styles.field}>
-                <label className={styles.label} htmlFor="new-server-build">
-                  Build
-                </label>
-                <select
-                  id="new-server-build"
-                  className={styles.input}
-                  value={buildId === null ? "" : String(buildId)}
-                  onChange={(event) => setBuildId(Number(event.target.value))}
-                >
-                  {(builds ?? []).map((b) => (
-                    <option key={b.id} value={b.id}>
-                      #{b.id}
-                      {b.channel.toLowerCase() !== "default" ? ` (${b.channel.toLowerCase()})` : ""}
-                    </option>
-                  ))}
-                </select>
+                {loaders !== null ? (
+                  <>
+                    <label className={styles.label} htmlFor="new-server-loader">
+                      Loader
+                    </label>
+                    <select
+                      id="new-server-loader"
+                      className={styles.input}
+                      value={loaderId}
+                      onChange={(event) => setLoaderId(event.target.value)}
+                    >
+                      {loaders.map((loader) => (
+                        <option key={loader} value={loader}>
+                          {loader}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={styles.hint}>
+                      {loaders.length === 0
+                        ? "No stable loader published."
+                        : "Stable loaders, newest first."}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <label className={styles.label} htmlFor="new-server-build">
+                      Build
+                    </label>
+                    <select
+                      id="new-server-build"
+                      className={styles.input}
+                      value={buildId === null ? "" : String(buildId)}
+                      onChange={(event) => setBuildId(Number(event.target.value))}
+                    >
+                      {(builds ?? []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          #{b.id}
+                          {b.channel.toLowerCase() !== "default"
+                            ? ` (${b.channel.toLowerCase()})`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
               </div>
             </div>
 
@@ -550,7 +591,13 @@ export function NewServerModal() {
               createJobId !== null ||
               serverId.length === 0 ||
               (mode === "register" && rootPath.length === 0) ||
-              (mode === "download" && (!project || !version || builds?.length === 0))
+              // Download mode needs something to install: a build (the
+              // Fill family) or a loader (the Fabric family) — an empty
+              // builds list is the fabric family's normal shape.
+              (mode === "download" &&
+                (!project ||
+                  !version ||
+                  ((builds?.length ?? 0) === 0 && (loaders?.length ?? 0) === 0)))
             }
           >
             {mode === "download" ? "Download & create" : "Register"}
