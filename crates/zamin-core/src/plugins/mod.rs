@@ -173,5 +173,132 @@ fn file_sha512(path: &Path) -> Result<String, CoreError> {
         .collect())
 }
 
+/// The update check's verdict on one jar (ADR-0012's update rule, read
+/// side): the disk's bytes identify the installed version — the same
+/// no-shadow-state rule the install path enforces — and the catalog is
+/// asked, fresh, what it now publishes for that plugin's project.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateStatus {
+    /// The file's digest matches the newest installable version's
+    /// published digest.
+    UpToDate,
+    /// A newer (or different-loader) installable version exists; the
+    /// entry carries what `plugins.install` needs to apply it.
+    UpdateAvailable,
+    /// The operator action is "none through the panel", for either of
+    /// two honest reasons: the catalog has no file with these bytes (a
+    /// jar dropped in by hand), or it knows the bytes but publishes
+    /// nothing installable for this server's loader family. Said
+    /// plainly instead of inventing a version to click.
+    Unmanaged,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateEntry {
+    pub file_name: String,
+    pub status: UpdateStatus,
+    /// Present when the catalog recognized the file's bytes.
+    pub project_id: Option<String>,
+    /// The installed version's display number, when known.
+    pub installed_version: Option<String>,
+    /// The catalog's newest installable version's display number.
+    pub latest_version: Option<String>,
+    /// The pin that applies the update: `plugins.install`'s `versionId`.
+    pub latest_version_id: Option<String>,
+}
+
+/// Check every jar in `target_dir` against the catalog. Network cost is
+/// two catalog round trips per recognized file (version-from-hash, then
+/// the project's version list); jars are few, so this stays a direct
+/// request — the same trade `plugins.search` already makes. The report
+/// sorts by file name so clients render a stable order.
+pub fn check_updates(
+    target_dir: &Path,
+    client: &ModrinthClient,
+    loaders: &[&str],
+) -> Result<Vec<UpdateEntry>, CoreError> {
+    let mut jars: Vec<PathBuf> = Vec::new();
+    if target_dir.is_dir() {
+        for entry in std::fs::read_dir(target_dir).map_err(|source| CoreError::Io {
+            path: target_dir.to_path_buf(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| CoreError::Io {
+                path: target_dir.to_path_buf(),
+                source,
+            })?;
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jar") {
+                jars.push(path);
+            }
+        }
+    }
+    jars.sort();
+
+    let mut entries = Vec::with_capacity(jars.len());
+    for path in jars {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let digest = file_sha512(&path)?;
+        let entry = match client.version_from_sha512(&digest)? {
+            // Bytes the catalog never published: unmanaged, no story.
+            None => UpdateEntry {
+                file_name,
+                status: UpdateStatus::Unmanaged,
+                project_id: None,
+                installed_version: None,
+                latest_version: None,
+                latest_version_id: None,
+            },
+            Some(installed) => {
+                // The same resolve rule the install path uses: newest
+                // first as returned, first version installable for this
+                // loader family wins, only versions with a publishable
+                // file count.
+                let versions = client.versions(&installed.project_id)?;
+                let latest = versions
+                    .into_iter()
+                    .filter(|v| v.loaders.iter().any(|l| loaders.contains(&l.as_str())))
+                    .find_map(|mut v| {
+                        let file = v.file.take().filter(|f| !f.sha512.is_empty())?;
+                        Some((v, file))
+                    });
+                match latest {
+                    // Known bytes, but nothing installable for this
+                    // server's loader family: unmanaged, told honestly.
+                    None => UpdateEntry {
+                        file_name,
+                        status: UpdateStatus::Unmanaged,
+                        project_id: Some(installed.project_id),
+                        installed_version: Some(installed.version_number),
+                        latest_version: None,
+                        latest_version_id: None,
+                    },
+                    Some((latest_version, latest_file)) => {
+                        let status = if latest_file.sha512.to_ascii_lowercase() == digest {
+                            UpdateStatus::UpToDate
+                        } else {
+                            UpdateStatus::UpdateAvailable
+                        };
+                        UpdateEntry {
+                            file_name,
+                            status,
+                            project_id: Some(installed.project_id),
+                            installed_version: Some(installed.version_number),
+                            latest_version: Some(latest_version.version_number),
+                            latest_version_id: Some(latest_version.id),
+                        }
+                    }
+                }
+            }
+        };
+        entries.push(entry);
+    }
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests;

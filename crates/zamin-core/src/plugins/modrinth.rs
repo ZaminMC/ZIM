@@ -12,6 +12,9 @@
 //    "loaders":["paper"],"date_published":…,
 //    "files":[{"url":…,"filename":…,"primary":true,"size":…,
 //              "hashes":{"sha1":…,"sha512":…}}]}`
+// - `GET {base}/v2/version_file/{sha512}?hashes=sha512` → one object of
+//   that same shape (the version whose file carries the digest), or 404
+//   when none does — the update check's "what is this jar?" question.
 
 use std::time::Duration;
 
@@ -60,6 +63,9 @@ pub struct VersionFile {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectVersion {
     pub id: String,
+    /// The owning project's id — the version-from-hash answer needs it
+    /// (the update check learns "which plugin is this jar?" from it).
+    pub project_id: String,
     /// The version's display number (`1.2.3+mc1.21.4`).
     pub version_number: String,
     pub game_versions: Vec<String>,
@@ -155,67 +161,44 @@ impl ModrinthClient {
     pub fn versions(&self, project_id: &str) -> Result<Vec<ProjectVersion>, CoreError> {
         let url = format!("{}/v2/project/{}/version", self.base, urlencode(project_id));
         let body = self.get_json(&url)?;
-        #[derive(Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        struct RawVersion {
-            id: String,
-            version_number: String,
-            #[serde(default)]
-            game_versions: Vec<String>,
-            #[serde(default)]
-            loaders: Vec<String>,
-            #[serde(default)]
-            date_published: Option<String>,
-            #[serde(default)]
-            files: Vec<RawFile>,
-        }
-        #[derive(Deserialize, Clone)]
-        #[serde(rename_all = "snake_case")]
-        struct RawFile {
-            url: String,
-            filename: String,
-            size: Option<u64>,
-            hashes: RawHashes,
-            #[serde(default)]
-            primary: bool,
-        }
-        #[derive(Deserialize, Clone)]
-        #[serde(rename_all = "snake_case")]
-        struct RawHashes {
-            #[serde(default)]
-            sha512: Option<String>,
-        }
         let parsed: Vec<RawVersion> =
             serde_json::from_str(&body).map_err(|e| CoreError::HttpTransport {
                 url: url.clone(),
                 message: format!("versions response is not the shape the client speaks: {e}"),
             })?;
-        Ok(parsed
-            .into_iter()
-            .map(|v| {
-                let file = v
-                    .files
-                    .iter()
-                    .find(|f| f.primary)
-                    .or_else(|| v.files.first())
-                    .cloned()
-                    .filter(|f| f.hashes.sha512.is_some())
-                    .map(|f| VersionFile {
-                        url: f.url,
-                        filename: f.filename,
-                        sha512: f.hashes.sha512.unwrap_or_default(),
-                        size: f.size,
-                    });
-                ProjectVersion {
-                    id: v.id,
-                    version_number: v.version_number,
-                    game_versions: v.game_versions,
-                    loaders: v.loaders,
-                    date_published: v.date_published,
-                    file,
-                }
-            })
-            .collect())
+        Ok(parsed.into_iter().map(raw_to_version).collect())
+    }
+
+    /// The version whose file carries this exact sha512, or `None` when
+    /// the catalog publishes no such file. A miss is a normal answer,
+    /// not an error: a jar dropped on disk by hand is unknown to the
+    /// catalog by definition.
+    pub fn version_from_sha512(&self, sha512: &str) -> Result<Option<ProjectVersion>, CoreError> {
+        let url = format!(
+            "{}/v2/version_file/{}?hashes=sha512",
+            self.base,
+            urlencode(sha512)
+        );
+        match self.agent.get(&url).call() {
+            Ok(response) => {
+                let body = response
+                    .into_string()
+                    .map_err(|e| CoreError::HttpTransport {
+                        url: url.clone(),
+                        message: e.to_string(),
+                    })?;
+                let parsed: RawVersion =
+                    serde_json::from_str(&body).map_err(|e| CoreError::HttpTransport {
+                        url: url.clone(),
+                        message: format!(
+                            "version_file response is not the shape the client speaks: {e}"
+                        ),
+                    })?;
+                Ok(Some(raw_to_version(parsed)))
+            }
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(error) => Err(http_error(&url, error)),
+        }
     }
 
     fn get_json(&self, url: &str) -> Result<String, CoreError> {
@@ -242,6 +225,66 @@ fn http_error(url: &str, error: ureq::Error) -> CoreError {
             url: url.to_owned(),
             message: t.to_string(),
         },
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct RawVersion {
+    id: String,
+    #[serde(default)]
+    project_id: String,
+    version_number: String,
+    #[serde(default)]
+    game_versions: Vec<String>,
+    #[serde(default)]
+    loaders: Vec<String>,
+    #[serde(default)]
+    date_published: Option<String>,
+    #[serde(default)]
+    files: Vec<RawFile>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+struct RawFile {
+    url: String,
+    filename: String,
+    size: Option<u64>,
+    hashes: RawHashes,
+    #[serde(default)]
+    primary: bool,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+struct RawHashes {
+    #[serde(default)]
+    sha512: Option<String>,
+}
+
+fn raw_to_version(v: RawVersion) -> ProjectVersion {
+    let file = v
+        .files
+        .iter()
+        .find(|f| f.primary)
+        .or_else(|| v.files.first())
+        .cloned()
+        .filter(|f| f.hashes.sha512.is_some())
+        .map(|f| VersionFile {
+            url: f.url,
+            filename: f.filename,
+            sha512: f.hashes.sha512.unwrap_or_default(),
+            size: f.size,
+        });
+    ProjectVersion {
+        id: v.id,
+        project_id: v.project_id,
+        version_number: v.version_number,
+        game_versions: v.game_versions,
+        loaders: v.loaders,
+        date_published: v.date_published,
+        file,
     }
 }
 

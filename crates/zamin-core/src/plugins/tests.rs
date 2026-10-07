@@ -464,3 +464,242 @@ fn replace_lands_the_new_bytes_over_the_old_file() {
         "no residue"
     );
 }
+
+// --- version_from_sha512 (the update check's "what is this jar?") ------------
+
+fn version_json(id: &str, number: &str, project: &str, loaders: &[&str], sha512: &str) -> String {
+    serde_json::json!({
+        "id": id,
+        "project_id": project,
+        "version_number": number,
+        "game_versions": ["1.21.1"],
+        "loaders": loaders,
+        "date_published": "2026-09-01T10:00:00Z",
+        "files": [{"url": "http://mock/files/x.jar", "filename": "x.jar",
+                   "size": 10, "primary": true, "hashes": {"sha1": "aa", "sha512": sha512}}]
+    })
+    .to_string()
+}
+
+#[test]
+fn version_from_sha512_answers_the_version_or_a_honest_none() {
+    let digest = sha512_hex(b"known bytes");
+    let digest_for_handler = digest.clone();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_for_handler = Arc::clone(&seen);
+    let server = MockServer::spawn(move |path| {
+        seen_for_handler.lock().unwrap().push(path.to_owned());
+        match path {
+            p if p.starts_with(&format!("/v2/version_file/{digest_for_handler}")) => {
+                MockResponse::json(version_json(
+                    "ver9",
+                    "2.20.0",
+                    "AABBCC",
+                    &["paper"],
+                    &digest_for_handler,
+                ))
+            }
+            _ => MockResponse::not_found(),
+        }
+    });
+    let client = ModrinthClient::new(&server.url);
+
+    // A published digest resolves to the version that carries it, with
+    // the project id the update check needs.
+    let version = client
+        .version_from_sha512(&digest)
+        .expect("known digest resolves")
+        .expect("the mock published it");
+    assert_eq!(version.id, "ver9");
+    assert_eq!(version.project_id, "AABBCC");
+    assert_eq!(version.version_number, "2.20.0");
+    // Copy the seen path out — holding the guard across the next request
+    // would stall the mock's handler thread on this very mutex.
+    let first_path = seen.lock().unwrap()[0].clone();
+    assert!(
+        first_path.contains(&format!("/v2/version_file/{digest}?hashes=sha512")),
+        "the hash query is the endpoint's contract: {first_path}"
+    );
+
+    // An unpublished digest is a normal answer (404 → None), never an
+    // error: manually dropped jars are unknown by definition.
+    let unknown = client
+        .version_from_sha512(&sha512_hex(b"nobody published this"))
+        .expect("404 is a normal answer");
+    assert!(unknown.is_none());
+
+    // A server-side failure is the typed transport error, not a fake miss.
+    let failing = MockServer::spawn(|_| MockResponse {
+        status: 500,
+        reason: "Internal Server Error",
+        content_type: "application/json",
+        body: b"{}".to_vec(),
+    });
+    match ModrinthClient::new(&failing.url).version_from_sha512(&digest) {
+        Err(CoreError::Http { status, .. }) => assert_eq!(status, 500),
+        other => panic!("expected Http(500), got {other:?}"),
+    }
+}
+
+// --- check_updates ------------------------------------------------------------
+
+#[test]
+fn check_updates_reports_the_three_honest_statuses_in_stable_order() {
+    use super::{check_updates, UpdateStatus};
+
+    // Each jar's bytes decide its fate: the mock answers version_file
+    // per digest, and the project's version list per project id.
+    let jar_up_to_date = b"PK\x03\x04 up-to-date payload";
+    let d_up = sha512_hex(jar_up_to_date);
+    let jar_stale = b"PK\x03\x04 stale payload";
+    let d_stale = sha512_hex(jar_stale);
+    let jar_foreign = b"PK\x03\x04 foreign-loader payload";
+    let d_foreign = sha512_hex(jar_foreign);
+    let jar_empty_pool = b"PK\x03\x04 no-installable-version payload";
+    let d_empty = sha512_hex(jar_empty_pool);
+    let jar_manual = b"PK\x03\x04 never-published payload";
+
+    // The project's version list: ver9 is the newest paper version and
+    // its primary file carries the up-to-date jar's exact digest; ver8
+    // publishes only a sha1 (unusable, skipped); a fabric-only project
+    // answers EMPTY (nothing installable for the paper family).
+    let aabbcc = format!(
+        "[{},{}]",
+        version_json("ver9", "2.20.0", "AABBCC", &["paper"], &d_up),
+        // sha1-only: unusable file → skipped by the resolve rule.
+        r#"{"id": "ver8", "version_number": "2.19.0", "game_versions": ["1.21"],
+            "loaders": ["paper"], "files": [{"url": "http://mock/files/v8.jar",
+            "filename": "v8.jar", "size": 10, "primary": true,
+            "hashes": {"sha1": "ee"}}]}"#
+    );
+    let empty_pool = r#"[{"id": "verF", "version_number": "0.1-fabric",
+        "game_versions": ["1.21"], "loaders": ["fabric"],
+        "files": [{"url": "http://mock/files/f.jar", "filename": "f.jar",
+                  "size": 10, "primary": true, "hashes": {"sha1": "ff", "sha512": "11"}}]}]"#;
+
+    let (d_up_for_handler, d_stale_for_handler, d_foreign_for_handler, d_empty_for_handler) = (
+        d_up.clone(),
+        d_stale.clone(),
+        d_foreign.clone(),
+        d_empty.clone(),
+    );
+    let server = MockServer::spawn(move |path| {
+        if let Some(rest) = path.strip_prefix("/v2/version_file/") {
+            let hash = rest.split('?').next().unwrap_or("");
+            if hash == d_up_for_handler {
+                return MockResponse::json(version_json(
+                    "ver9",
+                    "2.20.0",
+                    "AABBCC",
+                    &["paper"],
+                    &d_up_for_handler,
+                ));
+            }
+            if hash == d_stale_for_handler {
+                return MockResponse::json(version_json(
+                    "ver8",
+                    "2.19.0",
+                    "AABBCC",
+                    &["paper"],
+                    &d_stale_for_handler,
+                ));
+            }
+            if hash == d_foreign_for_handler {
+                return MockResponse::json(version_json(
+                    "ver7",
+                    "1.0-fabric",
+                    "AABBCC",
+                    &["fabric"],
+                    &d_foreign_for_handler,
+                ));
+            }
+            if hash == d_empty_for_handler {
+                return MockResponse::json(version_json(
+                    "verF",
+                    "0.1-fabric",
+                    "EMPTY",
+                    &["fabric"],
+                    &d_empty_for_handler,
+                ));
+            }
+            return MockResponse::not_found();
+        }
+        if path.starts_with("/v2/project/AABBCC/version") {
+            return MockResponse::json(aabbcc.clone());
+        }
+        if path.starts_with("/v2/project/EMPTY/version") {
+            return MockResponse::json(empty_pool);
+        }
+        MockResponse::not_found()
+    });
+
+    let guard = tempdir::scoped("plugin-updates");
+    let target = guard.path.join("plugins");
+    std::fs::create_dir_all(&target).unwrap();
+    // Scrambled creation order; the report must come back sorted by name.
+    std::fs::write(target.join("e-manual.jar"), jar_manual).unwrap();
+    std::fs::write(target.join("a-up-to-date.jar"), jar_up_to_date).unwrap();
+    std::fs::write(target.join("d-empty-pool.jar"), jar_empty_pool).unwrap();
+    std::fs::write(target.join("b-stale.jar"), jar_stale).unwrap();
+    std::fs::write(target.join("c-foreign.jar"), jar_foreign).unwrap();
+    std::fs::write(target.join("readme.txt"), b"not a jar").unwrap();
+
+    let entries = check_updates(
+        &target,
+        &ModrinthClient::new(&server.url),
+        loaders_for_target("plugins"),
+    )
+    .expect("update check succeeds");
+    assert_eq!(entries.len(), 5, "the .txt file is nobody's business");
+
+    assert_eq!(entries[0].file_name, "a-up-to-date.jar");
+    assert_eq!(entries[0].status, UpdateStatus::UpToDate);
+    assert_eq!(entries[0].project_id.as_deref(), Some("AABBCC"));
+    assert_eq!(entries[0].installed_version.as_deref(), Some("2.20.0"));
+    assert_eq!(entries[0].latest_version.as_deref(), Some("2.20.0"));
+    assert_eq!(entries[0].latest_version_id.as_deref(), Some("ver9"));
+
+    assert_eq!(entries[1].file_name, "b-stale.jar");
+    assert_eq!(entries[1].status, UpdateStatus::UpdateAvailable);
+    assert_eq!(entries[1].installed_version.as_deref(), Some("2.19.0"));
+    assert_eq!(entries[1].latest_version.as_deref(), Some("2.20.0"));
+    assert_eq!(
+        entries[1].latest_version_id.as_deref(),
+        Some("ver9"),
+        "the entry carries the pin that applies the update"
+    );
+
+    // A foreign-loader jar resolves in the catalog and the project has
+    // installable paper versions: the update is the fix — installing the
+    // proper paper jar replaces the wrong-family bytes.
+    assert_eq!(entries[2].file_name, "c-foreign.jar");
+    assert_eq!(entries[2].status, UpdateStatus::UpdateAvailable);
+    assert_eq!(entries[2].installed_version.as_deref(), Some("1.0-fabric"));
+
+    // Known bytes, but the project publishes nothing installable for
+    // this loader family: unmanaged, told with its story.
+    assert_eq!(entries[3].file_name, "d-empty-pool.jar");
+    assert_eq!(entries[3].status, UpdateStatus::Unmanaged);
+    assert_eq!(entries[3].project_id.as_deref(), Some("EMPTY"));
+    assert_eq!(entries[3].installed_version.as_deref(), Some("0.1-fabric"));
+    assert_eq!(entries[3].latest_version_id, None);
+
+    // Never-published bytes: unmanaged with no story at all.
+    assert_eq!(entries[4].file_name, "e-manual.jar");
+    assert_eq!(entries[4].status, UpdateStatus::Unmanaged);
+    assert_eq!(entries[4].project_id, None);
+}
+
+#[test]
+fn check_updates_answers_an_empty_report_for_a_missing_directory() {
+    use super::check_updates;
+    let server = MockServer::spawn(|_| MockResponse::not_found());
+    let guard = tempdir::scoped("plugin-updates-empty");
+    let entries = check_updates(
+        &guard.path.join("plugins"),
+        &ModrinthClient::new(&server.url),
+        loaders_for_target("plugins"),
+    )
+    .expect("a server with no plugins directory has no updates");
+    assert!(entries.is_empty());
+}
