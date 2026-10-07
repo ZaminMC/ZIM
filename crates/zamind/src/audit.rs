@@ -32,6 +32,8 @@ pub const AUDITED_METHODS: &[&str] = &[
     zamin_protocol::methods::BACKUP_CREATE,
     zamin_protocol::methods::BACKUP_RESTORE,
     zamin_protocol::methods::JAVA_INSTALL,
+    zamin_protocol::methods::PLUGINS_INSTALL,
+    zamin_protocol::methods::PLUGINS_DELETE,
     zamin_protocol::methods::JOBS_CANCEL,
     zamin_protocol::methods::FILES_WRITE,
     zamin_protocol::methods::FILES_COMMIT,

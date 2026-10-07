@@ -54,6 +54,15 @@ async fn handshakes_and_mutations_are_audited_reads_are_not() {
         .await
         .expect("stopped");
 
+    // A mutating plugins command is audited too — even when it fails
+    // (the file does not exist; the daemon's outcome is still recorded).
+    let _deleted = client
+        .request(
+            methods::PLUGINS_DELETE,
+            json!({"serverId": "test", "fileName": "not-there.jar"}),
+        )
+        .await;
+
     // A read: answered, never audited.
     let _list: Value = client
         .request(methods::SERVER_LIST, json!({}))
@@ -109,6 +118,13 @@ async fn handshakes_and_mutations_are_audited_reads_are_not() {
             "{audited} is audited with server, outcome and client"
         );
     }
+
+    assert!(
+        lines.iter().any(|l| l["method"] == "plugins.delete"
+            && l["serverId"] == "test"
+            && l["client"]["name"] == "zamind-test"),
+        "the mutating plugins command is audited: {lines:?}"
+    );
 
     assert!(
         !lines.iter().any(|l| l["method"] == "server.list"),

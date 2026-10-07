@@ -40,6 +40,18 @@ error object and exit 1), `--timeout <secs>`.
 
 Exit codes: `0` success, `1` operation/protocol failure, `2` usage error.
 
+## Plugin catalog
+
+The panel's Plugins tab installs from Modrinth
+([ADR-0012](docs/adr/0012-plugin-catalog-modrinth.md)): search is faceted
+by the server's own layout — a `mods/` directory means the
+Fabric/Quilt/NeoForge/Forge family, everything else is Bukkit-family
+`plugins/`. Installs resolve at request time, stream byte progress as a
+job, verify the published sha512, and land atomically in the target
+directory; the directory is the inventory. The catalog base URL is a
+daemon flag (`--modrinth-url`), so mirrors and air-gapped installs work
+exactly like the software catalog's `--catalog-url`.
+
 ## Development loop
 
 ```
