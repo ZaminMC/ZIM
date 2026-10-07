@@ -283,7 +283,7 @@ export function ServerView({ serverId }: { serverId: string }) {
           ) : lowerView === "files" ? (
             <FilesView serverId={serverId} />
           ) : lowerView === "players" ? (
-            <PlayersView serverId={serverId} />
+            <PlayersView serverId={serverId} running={server.state === "running"} />
           ) : lowerView === "plugins" ? (
             <PluginsView serverId={serverId} />
           ) : lowerView === "schedules" ? (

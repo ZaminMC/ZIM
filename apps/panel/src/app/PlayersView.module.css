@@ -63,6 +63,78 @@
   padding: 4px 14px;
   font-size: var(--text-s);
   font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.player:hover {
+  border-color: var(--accent);
+}
+
+.playerSelected {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.moderation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--space-3);
+  background: var(--surface-2);
+}
+
+.moderationHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.moderationName {
+  font-weight: 600;
+  font-size: var(--text-m);
+}
+
+.moderationHint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.moderationActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-s);
+}
+
+.sentNote {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--text-muted);
+}
+
+.sentNote code {
+  background: var(--surface-3);
+  border-radius: var(--radius-s);
+  padding: 1px 6px;
+  font-family: var(--font-mono, monospace);
+}
+
+.actionError {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--danger);
 }
 
 .more {
