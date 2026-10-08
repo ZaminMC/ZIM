@@ -185,8 +185,15 @@ fn write_archive(
     let gz = builder
         .into_inner()
         .map_err(|source| classify_io(staging.to_path_buf(), source))?;
-    gz.finish()
+    // fsync rides the write handle before it is dropped — Windows answers
+    // ACCESS_DENIED to FlushFileBuffers on a read-only reopen, so the
+    // commit below renames an already-durable archive without reopening.
+    let file = gz
+        .finish()
         .map_err(|source| classify_io(staging.to_path_buf(), source))?;
+    file.sync_all()
+        .map_err(|source| classify_io(staging.to_path_buf(), source))?;
+    drop(file);
     Ok(stats)
 }
 
@@ -197,13 +204,8 @@ fn commit(
     opts: BackupCreateOptions,
     stats: ArchiveStats,
 ) -> Result<BackupCreateOutcome, CoreError> {
-    // The archive is complete: flush it to disk before it becomes visible.
-    let file =
-        fs::File::open(staging).map_err(|source| classify_io(staging.to_path_buf(), source))?;
-    file.sync_all()
-        .map_err(|source| classify_io(staging.to_path_buf(), source))?;
-    drop(file);
-
+    // The archive is complete and already fsynced by write_archive (on its
+    // write handle — a read-only reopen cannot FlushFileBuffers on Windows).
     let archive = archive_path(backups_dir, backup_id);
     fs::rename(staging, &archive).map_err(|source| classify_io(archive.clone(), source))?;
 

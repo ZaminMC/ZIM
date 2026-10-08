@@ -193,14 +193,22 @@ pub fn build_package(opts: &mut PackageOptions<'_>) -> Result<PackageOutcome, Co
             bytes_done,
         });
     }
-    writer
+    // fsync the staged archive before it becomes THE package. The fsync
+    // rides the handle `finish()` hands back — it still holds write access,
+    // and Windows answers ACCESS_DENIED to FlushFileBuffers on a read-only
+    // handle. The hash then reopens read-only, which is all it needs.
+    let written = writer
         .finish()
         .map_err(|e| CoreError::PublishStateCorrupt {
             path: opts.staging_path.to_path_buf(),
             reason: format!("finishing the archive: {e}"),
         })?;
+    written.sync_all().map_err(|source| CoreError::Io {
+        path: opts.staging_path.to_path_buf(),
+        source,
+    })?;
+    drop(written);
 
-    // fsync the staged archive before it becomes THE package.
     let mut staged = std::fs::OpenOptions::new()
         .read(true)
         .open(opts.staging_path)
@@ -208,10 +216,6 @@ pub fn build_package(opts: &mut PackageOptions<'_>) -> Result<PackageOutcome, Co
             path: opts.staging_path.to_path_buf(),
             source,
         })?;
-    staged.sync_all().map_err(|source| CoreError::Io {
-        path: opts.staging_path.to_path_buf(),
-        source,
-    })?;
     let sha = hash_file(&mut staged)?;
     let size_bytes = staged
         .metadata()
