@@ -8,14 +8,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{classify_jar, read_port, scan_roots, DiscoveredKind, SCAN_ENTRY_BUDGET};
 use crate::server::marker::write_marker;
 use crate::server::registry::tempdir;
 use crate::server::ServerId;
 
-fn dir_with_properties(root: &PathBuf, rel: &str, port: Option<u16>) -> PathBuf {
+fn dir_with_properties(root: &Path, rel: &str, port: Option<u16>) -> PathBuf {
     let dir = root.join(rel);
     fs::create_dir_all(&dir).unwrap();
     let mut properties = String::from("motd=hello\n");
@@ -35,7 +35,10 @@ fn jar_classification_names_the_family_only_when_the_name_says_so() {
         Some("fabric")
     );
     assert_eq!(classify_jar("neoforge-21.4.30.jar"), Some("neoforge"));
-    assert_eq!(classify_jar("forge-1.21.4-54.0.24-universal.jar"), Some("forge"));
+    assert_eq!(
+        classify_jar("forge-1.21.4-54.0.24-universal.jar"),
+        Some("forge")
+    );
     assert_eq!(classify_jar("server.jar"), Some("vanilla"));
     assert_eq!(classify_jar("minecraft_server.1.21.4.jar"), Some("vanilla"));
     assert_eq!(classify_jar("velocity-3.4.0.jar"), Some("velocity"));
@@ -122,7 +125,10 @@ fn server_directory_is_not_descended_into_and_its_jar_names_its_platform() {
     assert_eq!(hit.kind, DiscoveredKind::Directory);
     assert_eq!(hit.platform, Some("paper"));
     assert_eq!(hit.jar_name.as_deref(), Some("paper-1.21.4.jar"));
-    assert!(!report.found.iter().any(|f| f.path.ends_with("fabric-server.jar")));
+    assert!(!report
+        .found
+        .iter()
+        .any(|f| f.path.ends_with("fabric-server.jar")));
 }
 
 #[test]
@@ -199,7 +205,10 @@ fn the_budget_cuts_the_walk_and_says_so() {
     assert!(report.found.len() < count as usize);
     // Every candidate is still honest: a directory with its port read.
     assert!(
-        report.found.iter().all(|f| f.kind == DiscoveredKind::Directory),
+        report
+            .found
+            .iter()
+            .all(|f| f.kind == DiscoveredKind::Directory),
         "past the budget no half-read candidate may appear"
     );
 }
@@ -212,7 +221,7 @@ fn repeated_scans_are_deterministic() {
     dir_with_properties(&root, "a-server", None);
     fs::write(root.join("z-paper.jar"), b"jar").unwrap();
 
-    let first = scan_roots(&[root.clone()]);
+    let first = scan_roots(std::slice::from_ref(&root));
     let second = scan_roots(&[root]);
     assert_eq!(first, second);
 }

@@ -63,7 +63,8 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | Namespace | Methods |
 |---|---|
 | `daemon` | `daemon.hello`, `daemon.status` |
-| `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.create` (Phase 6: download, stamp, and register a fresh server — §7b), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream) |
+| `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.create` (Phase 6: download, stamp, and register a fresh server — §7b), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream), `server.discover` (§64, ADR-0027) |
+| `discovery` (ADR-0027) | `discovery.roots.get`, `discovery.roots.set` |
 | `catalog` (Phase 6) | `catalog.list`, `catalog.versions`, `catalog.builds` (§7b) |
 | `java` (Phase 6) | `java.list`, `java.install` (§7c) |
 | `plugins` (§7d) | `plugins.search`, `plugins.versions`, `plugins.installed`, `plugins.install` (a job), `plugins.delete`, `plugins.updates` |
@@ -96,6 +97,8 @@ Implemented for the daemon's first release; the file set is specified now, imple
 - `olderAvailable` is exactly `startOffset > 0` — a scroll-up affordance, not an error.
 - Reads walk the file backward in bounded windows (8 MiB), so a page costs roughly the page plus one window regardless of file size; a tail never re-reads from offset 0.
 - A `beforeOffset` beyond the file's current length means rotation or truncation happened; the daemon answers a typed `LOG_CURSOR_INVALID` and the client restarts from the tail. A missing log file is a typed `FS_NOT_FOUND`, never a silent empty result.
+
+- `server.discover {query?}` (ADR-0027) answers the founder's §64: the merged, typed list of what this machine holds — registry entries first (`kind:"registered"`, live `state`), then scanned `directory` rows (with `port` from `server.properties`) and `jar` rows (with `platform` as filename evidence), each with its absolute `path`. The merge never names one server twice: marker ids, registered roots, and anything inside a registered root are dropped from the scan side. Honesty fields ride along: `roots` (what was actually scanned), `skippedRoots` (named, not hidden), `scanned`, `truncated`.
 
 - `players.list {serverId}` asks the server itself with a Server List Ping (vanilla flow, no plugins): `{source: "ping", online, max, sample: [{name, id?}], latencyMs, version?, motd?}`. The sample is the server's own preview (vanilla caps it at 12 names), not the full roster. A server that does not answer (off, starting) is an empty-room result with `online: null` — a normal state, never an error; a server with no port configured is a typed `PROTOCOL_INVALID_REQUEST`.
 

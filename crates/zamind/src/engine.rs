@@ -15,6 +15,9 @@ use zamin_protocol::config::{
     ConfigGetResult, EffectiveSettingsView, NetworkStatusResult, ProvenanceView,
     ServerSettingsPatch,
 };
+use zamin_protocol::discovery::{
+    DiscoverParams, DiscoverResult, DiscoveredServer, RootsGetResult, RootsSetParams,
+};
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::publish::PublishConfig;
 use zamin_protocol::server::{LifecycleResult, ServerDetails, ServerState, ServerSummary};
@@ -290,6 +293,234 @@ impl Engine {
             version: None,
             port: None,
         })
+    }
+
+    // --- §64 server discovery (ADR-0027) -----------------------------------
+
+    /// The roots discovery walks: the operator-configured list plus the
+    /// daemon's own instances dir (implicit, always scanned). Returns the
+    /// effective set and which configured entries could not be used.
+    fn discovery_roots(&self) -> (Vec<PathBuf>, Vec<String>) {
+        let configured: Vec<PathBuf> = {
+            let _io = self.inner.config_io.lock();
+            match zamin_core::config::load_global(&self.global_config_path()) {
+                Ok(global) => global
+                    .discovery
+                    .roots
+                    .iter()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(PathBuf::from)
+                    .collect(),
+                // A corrupt global file is a loud error elsewhere; here the
+                // scan degrades to the implicit root and the corruption is
+                // not silently swallowed — it surfaces in the daemon log.
+                Err(_) => Vec::new(),
+            }
+        };
+        let mut roots = configured.clone();
+        let instances = self.instances_dir();
+        if instances.exists() {
+            roots.push(instances);
+        }
+        (roots, Vec::new())
+    }
+
+    fn global_config_path(&self) -> PathBuf {
+        self.inner.data_dir.join("config.toml")
+    }
+
+    pub async fn discover(&self, params: DiscoverParams) -> Result<DiscoverResult, EngineError> {
+        // The managed side first: registry entries with their live states.
+        let managed = self.list_servers().await;
+        let registry_roots: Vec<(String, PathBuf)> = {
+            let registry = self.registry_lock();
+            registry
+                .all()
+                .map(|e| (e.server_id.to_string(), e.root.clone()))
+                .collect()
+        };
+        let (roots, _skipped_named) = self.discovery_roots();
+        let scan_roots = roots.clone();
+        let scan =
+            tokio::task::spawn_blocking(move || zamin_core::discovery::scan_roots(&scan_roots))
+                .await
+                .map_err(|e| internal(&format!("discovery scan task failed: {e}")))?;
+
+        let query = params
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(str::to_lowercase);
+
+        let matches = |text: &str| {
+            query
+                .as_ref()
+                .map(|needle| text.to_lowercase().contains(needle.as_str()))
+                .unwrap_or(true)
+        };
+
+        let mut servers: Vec<DiscoveredServer> = Vec::new();
+        for summary in &managed {
+            if !matches(&summary.display_name) && !matches(&summary.server_id) {
+                continue;
+            }
+            let root = registry_roots
+                .iter()
+                .find(|(id, _)| id == &summary.server_id)
+                .map(|(_, root)| root.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !root.is_empty() && !matches(&root) {
+                continue;
+            }
+            servers.push(DiscoveredServer {
+                server_id: Some(summary.server_id.clone()),
+                display_name: Some(summary.display_name.clone()),
+                path: root,
+                kind: "registered".to_owned(),
+                state: {
+                    let summary_state = &summary.state;
+                    serde_json::to_value(summary_state)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_owned))
+                },
+                port: None,
+                platform: None,
+                marker: None,
+                jar_name: None,
+            });
+        }
+
+        // The scanned side: skip anything the registry already owns (by
+        // marker id or by root path), so a managed server never appears
+        // twice with two names (identity discipline, §61).
+        let registered_ids: std::collections::HashSet<&str> =
+            managed.iter().map(|s| s.server_id.as_str()).collect();
+        let registered_roots: Vec<PathBuf> = registry_roots
+            .iter()
+            .map(|(_, root)| root.clone())
+            .collect();
+        for found in &scan.found {
+            let path_string = found.path.to_string_lossy().into_owned();
+            if !matches(&path_string) {
+                continue;
+            }
+            if let Some(marker_id) = &found.marker {
+                if registered_ids.contains(marker_id.as_str()) {
+                    continue;
+                }
+            }
+            // Inside a managed root (the root itself, or a jar sitting in
+            // it): the registered server already owns that story — listing
+            // its runtime jar separately would name one server twice.
+            let path_canonical = found
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| found.path.clone());
+            let inside_registered = registered_roots.iter().any(|root| {
+                root.canonicalize()
+                    .map(|c| path_canonical.starts_with(&c))
+                    .unwrap_or(false)
+            });
+            if inside_registered {
+                continue;
+            }
+            let (server_id, display_name) = match (&found.kind, &found.marker) {
+                (_, Some(marker_id)) => (Some(marker_id.to_string()), None),
+                (zamin_core::discovery::DiscoveredKind::Directory, None) => {
+                    let name = found
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path_string.clone());
+                    (None, Some(name))
+                }
+                (zamin_core::discovery::DiscoveredKind::Jar, None) => (None, None),
+            };
+            servers.push(DiscoveredServer {
+                server_id,
+                display_name,
+                path: path_string,
+                kind: found.kind.as_str().to_owned(),
+                state: None,
+                port: found.port,
+                platform: found.platform.map(str::to_owned),
+                marker: found.marker.as_ref().map(|m| m.to_string()),
+                jar_name: found.jar_name.clone(),
+            });
+        }
+
+        servers.sort_by_key(|s| match s.kind.as_str() {
+            "registered"
+                if matches!(
+                    s.state.as_deref(),
+                    Some("running") | Some("starting") | Some("adopting")
+                ) =>
+            {
+                0
+            }
+            "registered" => 1,
+            "directory" => 2,
+            _ => 3,
+        });
+
+        Ok(DiscoverResult {
+            servers,
+            roots: roots
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+            skipped_roots: scan
+                .skipped_roots
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+            scanned: scan.scanned,
+            truncated: scan.truncated,
+        })
+    }
+
+    pub async fn discovery_roots_get(&self) -> Result<RootsGetResult, EngineError> {
+        let roots = {
+            let _io = self.inner.config_io.lock();
+            zamin_core::config::load_global(&self.global_config_path())
+                .map(|global| global.discovery.roots)
+                .unwrap_or_default()
+        };
+        Ok(RootsGetResult { roots })
+    }
+
+    pub async fn discovery_roots_set(
+        &self,
+        params: RootsSetParams,
+    ) -> Result<RootsGetResult, EngineError> {
+        // The scan walks these paths with daemon privileges: relative or
+        // empty entries are refused loudly, duplicates collapse, and the
+        // stored order is the operator's order.
+        let mut roots: Vec<String> = Vec::new();
+        for raw in &params.roots {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !Path::new(trimmed).is_absolute() {
+                return Err(EngineError::Internal(format!(
+                    "discovery root {trimmed:?} is not an absolute path — roots are directories on this machine"
+                )));
+            }
+            if !roots.iter().any(|existing| existing == trimmed) {
+                roots.push(trimmed.to_owned());
+            }
+        }
+        {
+            let _io = self.inner.config_io.lock();
+            let path = self.global_config_path();
+            let mut global = zamin_core::config::load_global(&path).unwrap_or_default();
+            global.discovery.roots = roots.clone();
+            zamin_core::config::save_global(&path, &global)
+                .map_err(|e| internal(&format!("the discovery roots could not be saved: {e}")))?;
+        }
+        Ok(RootsGetResult { roots })
     }
 
     pub async fn register_server(

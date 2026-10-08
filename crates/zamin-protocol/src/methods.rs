@@ -12,7 +12,14 @@ pub const SERVER_REMOVE: &str = "server.remove";
 pub const SERVER_START: &str = "server.start";
 pub const SERVER_STOP: &str = "server.stop";
 pub const SERVER_RESTART: &str = "server.restart";
+pub const SERVER_DISCOVER: &str = "server.discover";
 pub const SERVER_KILL: &str = "server.kill";
+
+/// Discovery's scan-roots surface (founder §64, ADR-0027): the
+/// operator-configured roots the daemon walks; the instance dir is
+/// implicit and always scanned.
+pub const DISCOVERY_ROOTS_GET: &str = "discovery.roots.get";
+pub const DISCOVERY_ROOTS_SET: &str = "discovery.roots.set";
 pub const SERVER_STDIN: &str = "server.stdin";
 
 pub const JOBS_LIST: &str = "jobs.list";

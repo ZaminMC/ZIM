@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 
 use zamin_cli::ClientError;
 use zamin_ipc::{Endpoint, IpcError};
+use zamin_protocol::discovery::DiscoverResult;
 use zamin_protocol::error::ProtocolError;
 use zamin_protocol::jobs::{Job, JobKind, JobState};
 use zamin_protocol::plugins::{
@@ -982,6 +983,49 @@ pub fn files_search(result: &zamin_protocol::files::FilesSearchResult) {
         result.scanned,
         cut
     );
+}
+
+/// The discovery answer (§64): managed servers first (already the engine's
+/// order), then directories and jars — path, port, and the family
+/// evidence a filename classification can honestly give.
+pub fn discovery_table(result: &DiscoverResult) {
+    if result.servers.is_empty() {
+        println!("Nothing discovered. Add scan roots with `zamin discovery add <dir>`.");
+        return;
+    }
+    println!(
+        "{:<10}  {:<18}  {:<7}  {:<10}  KIND",
+        "STATE", "NAME/PATH", "PORT", "FAMILY"
+    );
+    for server in &result.servers {
+        let name = server
+            .display_name
+            .clone()
+            .unwrap_or_else(|| server.path.clone());
+        let name = if name.chars().count() > 18 {
+            let cut: String = name.chars().take(17).collect();
+            format!("{cut}…")
+        } else {
+            name
+        };
+        println!(
+            "{:<10}  {:<18}  {:<7}  {:<10}  {}",
+            server.state.as_deref().unwrap_or(""),
+            name,
+            server
+                .port
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "-".to_owned()),
+            server.platform.as_deref().unwrap_or(""),
+            server.kind,
+        );
+    }
+    if result.truncated {
+        println!("(the scan hit its budget — some entries may be missing)");
+    }
+    for skipped in &result.skipped_roots {
+        println!("(a configured root could not be read: {skipped})");
+    }
 }
 
 #[cfg(test)]

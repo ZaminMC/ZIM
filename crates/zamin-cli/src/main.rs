@@ -15,6 +15,7 @@ use tokio::io::AsyncBufReadExt as _;
 use clap::{Parser, Subcommand};
 use zamin_cli::{Client, ClientError};
 use zamin_ipc::Endpoint;
+use zamin_protocol::discovery::{DiscoverResult, RootsGetResult, RootsSetParams};
 use zamin_protocol::jobs::{CancelJobParams, GetJobParams, Job, JobState, ListJobsResult};
 use zamin_protocol::methods;
 use zamin_protocol::plugins::{
@@ -77,6 +78,17 @@ struct Cli {
 enum Commands {
     /// List every registered server and its lifecycle state
     List,
+    /// Discover servers on this machine: managed ones plus what the scan
+    /// roots hold (server directories, supported jars)
+    Discover {
+        /// Substring filter over id, name, and path
+        query: Option<String>,
+    },
+    /// Manage the discovery scan roots (the instance dir is always scanned)
+    Discovery {
+        #[command(subcommand)]
+        command: DiscoveryCommands,
+    },
     /// Show one server's details
     Status { server_id: String },
     /// Show the daemon's own status
@@ -172,6 +184,16 @@ enum Commands {
         #[command(subcommand)]
         command: JobsCommands,
     },
+}
+
+#[derive(Subcommand)]
+enum DiscoveryCommands {
+    /// Print the configured scan roots
+    List,
+    /// Add a root (absolute path; the OS must be able to name it)
+    Add { path: String },
+    /// Remove a root (exact match)
+    Remove { path: String },
 }
 
 #[derive(Subcommand)]
@@ -673,6 +695,14 @@ async fn run(cli: Cli) -> Result<(), Failure> {
 
     match &cli.command {
         Commands::List => list(&cli, &client).await,
+        Commands::Discover { query } => discover(&cli, &client, query.clone()).await,
+        Commands::Discovery { command } => match command {
+            DiscoveryCommands::List => discovery_roots(&client).await,
+            DiscoveryCommands::Add { path } => discovery_roots_add(&client, path.clone()).await,
+            DiscoveryCommands::Remove { path } => {
+                discovery_roots_remove(&client, path.clone()).await
+            }
+        },
         Commands::Status { server_id } => status(&cli, &client, server_id).await,
         Commands::Daemon => daemon(&cli, &client).await,
         Commands::Register {
@@ -1015,6 +1045,81 @@ async fn list(cli: &Cli, client: &Client) -> CmdResult {
     }
     render::server_table(&result.servers);
     Ok(())
+}
+
+async fn discover(cli: &Cli, client: &Client, query: Option<String>) -> CmdResult {
+    let params = serde_json::json!({
+        "query": query.filter(|q| !q.trim().is_empty()),
+    });
+    let result: DiscoverResult = client
+        .request_typed(methods::SERVER_DISCOVER, params)
+        .await
+        .map_err(protocol_with_usage_hint)?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::discovery_table(&result);
+    Ok(())
+}
+
+async fn discovery_roots(client: &Client) -> CmdResult {
+    let result: RootsGetResult = client
+        .request_typed(methods::DISCOVERY_ROOTS_GET, serde_json::json!({}))
+        .await
+        .map_err(protocol_with_usage_hint)?;
+    if result.roots.is_empty() {
+        println!("No scan roots configured. Add one with `zamin discovery add <dir>`.");
+        return Ok(());
+    }
+    for root in &result.roots {
+        println!("{root}");
+    }
+    Ok(())
+}
+
+async fn discovery_roots_add(client: &Client, path: String) -> CmdResult {
+    let roots = discovery_roots_current(client).await?;
+    if roots.iter().any(|existing| existing == &path) {
+        println!("{path} is already a scan root.");
+        return Ok(());
+    }
+    let mut next = roots;
+    next.push(path.clone());
+    let result: RootsGetResult = client
+        .request_typed(methods::DISCOVERY_ROOTS_SET, RootsSetParams { roots: next })
+        .await
+        .map_err(protocol_with_usage_hint)?;
+    println!("Scan roots now:");
+    for root in &result.roots {
+        println!("  {root}");
+    }
+    Ok(())
+}
+
+async fn discovery_roots_remove(client: &Client, path: String) -> CmdResult {
+    let roots = discovery_roots_current(client).await?;
+    let next: Vec<String> = roots
+        .into_iter()
+        .filter(|existing| *existing != path)
+        .collect();
+    let result: RootsGetResult = client
+        .request_typed(methods::DISCOVERY_ROOTS_SET, RootsSetParams { roots: next })
+        .await
+        .map_err(protocol_with_usage_hint)?;
+    println!("Scan roots now:");
+    for root in &result.roots {
+        println!("  {root}");
+    }
+    Ok(())
+}
+
+async fn discovery_roots_current(client: &Client) -> Result<Vec<String>, Failure> {
+    let result: RootsGetResult = client
+        .request_typed(methods::DISCOVERY_ROOTS_GET, serde_json::json!({}))
+        .await
+        .map_err(protocol_with_usage_hint)?;
+    Ok(result.roots)
 }
 
 async fn status(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {

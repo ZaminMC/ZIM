@@ -43,6 +43,20 @@ pub struct GlobalConfigFile {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
     pub defaults: ServerSettingsDefaults,
+    /// Discovery's operator-configured scan roots (§64): where the daemon
+    /// looks for unregistered servers. Absent in older files → serde's
+    /// default (no roots); the instance dir is always scanned implicitly.
+    #[serde(default)]
+    pub discovery: DiscoveryConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DiscoveryConfig {
+    /// Absolute paths the discovery scan walks (two levels deep, ADR-0009
+    /// rules). Managed instance dirs live outside this list — the daemon
+    /// scans its own instances dir regardless.
+    pub roots: Vec<String>,
 }
 
 impl Default for GlobalConfigFile {
@@ -54,6 +68,7 @@ impl Default for GlobalConfigFile {
                 startup_timeout_secs: Some(120),
                 ..ServerSettingsDefaults::default()
             },
+            discovery: DiscoveryConfig::default(),
         }
     }
 }

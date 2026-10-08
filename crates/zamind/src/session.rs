@@ -18,6 +18,7 @@ use zamin_protocol::backups::{
     BackupCreateParams, BackupCreateResult, BackupRestoreParams, BackupRestoreResult,
     BackupsListParams, BackupsListResult,
 };
+use zamin_protocol::discovery::{DiscoverParams, RootsSetParams};
 use zamin_protocol::envelope::{IncomingMessage, Request, RequestId, Response};
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::handshake::{capabilities, HelloParams, HelloResult};
@@ -374,6 +375,30 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
         methods::SERVER_LIST => {
             let servers = engine.list_servers().await;
             json_ok(id, ListServersResult { servers })
+        }
+        methods::SERVER_DISCOVER => {
+            let params: DiscoverParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.discover(params).await {
+                Ok(result) => json_ok(id, result),
+                Err(e) => dispatch_error(id, e),
+            }
+        }
+        methods::DISCOVERY_ROOTS_GET => match engine.discovery_roots_get().await {
+            Ok(result) => json_ok(id, result),
+            Err(e) => dispatch_error(id, e),
+        },
+        methods::DISCOVERY_ROOTS_SET => {
+            let params: RootsSetParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.discovery_roots_set(params).await {
+                Ok(result) => json_ok(id, result),
+                Err(e) => dispatch_error(id, e),
+            }
         }
         methods::SERVER_GET => match parse_server_id::<GetServerParams>(request) {
             Ok((server_id, _)) => match engine.get_server(&server_id).await {

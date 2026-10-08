@@ -76,12 +76,18 @@ pub struct ScanReport {
 /// client, sources and launcher jars are deliberately not candidates.
 pub fn classify_jar(file_name: &str) -> Option<&'static str> {
     let lower = file_name.to_lowercase();
-    let Some(stem) = lower.strip_suffix(".jar") else {
-        return None;
-    };
+    let stem = lower.strip_suffix(".jar")?;
     // An installer / client / sources artifact is not a runnable server —
     // naming it one would make discovery lie.
-    for poison in ["installer", "sources", "javadoc", "decomp", "client", "launcher", "shim"] {
+    for poison in [
+        "installer",
+        "sources",
+        "javadoc",
+        "decomp",
+        "client",
+        "launcher",
+        "shim",
+    ] {
         if stem.contains(poison) {
             return None;
         }

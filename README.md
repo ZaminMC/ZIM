@@ -311,6 +311,35 @@ discipline, the connected daemon, and the reserved rooms by name —
 never a fake badge (§82). The palette carries all three as keyboard
 commands.
 
+**Feedback** ([ADR-0028](docs/adr/0028-feedback-lane.md)) is a typed
+destination too — `zaminpanel://feedback/`, reachable from the ⋮ menu,
+the palette, and the about page. The operator types what happened and
+pastes a screenshot; the page says which route it will take before
+anything leaves. With a GitHub token configured in Settings (masked,
+machine-local, verified against the account endpoint, sent only to
+api.github.com) the issue files directly from the panel. Without one,
+the composed report opens in the operator's own signed-in browser with
+the screenshot handed back through the clipboard — GitHub's own
+paste-attach takes it from there, because the issues API cannot carry
+images and the page does not pretend otherwise. The report's diagnostics
+block is shown before sending: version, platform, screenshot truth —
+nothing else.
+
+## Discovery (§64)
+
+The daemon answers "what servers does this machine already have"
+([ADR-0027](docs/adr/0027-server-discovery.md)). `server.discover` merges
+the registry (managed servers, live states first) with a bounded scan of
+operator-configured roots — `zamin discovery add <dir>` — plus the
+daemon's own instances directory: server-shaped directories (a
+`server.properties` inside, its port read) and supported server jars
+(family stated as filename evidence — paper, fabric, forge, vanilla, … —
+never a probe). Symlinks are never followed, the walk is budgeted and
+says `truncated` when cut short, a managed server is never named twice
+(marker, root, and anything inside a managed root are dropped from the
+scan side), and roots that cannot be read are named in the answer, not
+hidden. The CLI reads it all: `zamin discover [query]`.
+
 ## Development loop
 
 ```
