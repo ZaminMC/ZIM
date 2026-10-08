@@ -80,7 +80,7 @@ pub async fn endpoint_ready(endpoint: &Endpoint) -> bool {
 /// (per-user endpoint, XDG/Known-Folders data dir).
 pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
-    let child = Command::new(binary)
+    let mut child = Command::new(binary)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -93,10 +93,10 @@ pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
 
 /// Probe, spawn if down, wait for bind. Returns what happened, typed as a
 /// small string the webview logs verbatim ("already-running" | "spawned").
-pub async fn ensure_daemon() -> Result<&'static str, String> {
+pub async fn ensure_daemon() -> Result<String, String> {
     let endpoint = Endpoint::default_endpoint();
     if endpoint_ready(&endpoint).await {
-        return Ok("already-running");
+        return Ok("already-running".to_owned());
     }
     let binary = resolve_daemon_binary().ok_or_else(|| {
         "the zamind daemon was not found next to the panel or on PATH".to_owned()
@@ -106,7 +106,7 @@ pub async fn ensure_daemon() -> Result<&'static str, String> {
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
         if endpoint_ready(&endpoint).await {
-            return Ok("spawned");
+            return Ok("spawned".to_owned());
         }
         if Instant::now() >= deadline {
             return Err("the daemon did not start listening within 10 s".to_owned());
