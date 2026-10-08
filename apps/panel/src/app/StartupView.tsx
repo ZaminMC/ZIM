@@ -172,7 +172,7 @@ export function StartupView({ serverId }: { serverId: string }) {
     return (
       <section className={styles.startup} aria-label="Startup">
         <div className={styles.alert} role="alert">
-        {error ? <ErrorNote error={error} /> : null}
+        <ErrorNote error={error} />
       </div>
       </section>
     );
@@ -210,7 +210,7 @@ export function StartupView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-        {error ? <ErrorNote error={error} /> : null}
+        <ErrorNote error={error} />
       </div>
       ) : null}
       {notice && !error ? (

@@ -142,7 +142,7 @@ export function BackupsView({ serverId, running }: { serverId: string; running: 
 
       {error ? (
         <div className={styles.alert} role="alert">
-        {error ? <ErrorNote error={error} /> : null}
+        <ErrorNote error={error} />
       </div>
       ) : null}
       {notice && !error ? (

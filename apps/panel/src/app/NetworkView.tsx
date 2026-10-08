@@ -78,7 +78,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
     return (
       <section className={styles.network} aria-label="Network">
         <div className={styles.alert} role="alert">
-        {error ? <ErrorNote error={error} /> : null}
+        <ErrorNote error={error} />
       </div>
       </section>
     );
@@ -106,7 +106,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-        {error ? <ErrorNote error={error} /> : null}
+        <ErrorNote error={error} />
       </div>
       ) : null}
       {notice && !error ? (

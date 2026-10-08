@@ -189,6 +189,45 @@ describe("PluginsView", () => {
     ).toBe(false);
   });
 
+  it("a typed daemon rejection carries the remediation and the [View details] disclosure", async () => {
+    mocks.pluginsSearch.mockResolvedValue({
+      target: "plugins",
+      hits: [
+        {
+          projectId: "ESSENTIALS",
+          slug: "essentialsx",
+          title: "EssentialsX",
+          description: "Made for another version.",
+          downloads: 1,
+          loaders: ["paper"],
+        },
+      ],
+    });
+    const rejection = new ProtocolRequestError({
+      code: "PLUGIN_INCOMPATIBLE",
+      message: "The server rejected the plugin because the installed server version is incompatible.",
+      context: { file: "essentialsx.jar", serverVersion: "1.21.4" },
+      remediation: ["Install a build made for this server version."],
+    });
+    mocks.pluginsInstall.mockRejectedValue(rejection);
+    render(<PluginsView serverId="alpha" />);
+    fireEvent.change(screen.getByLabelText(/Search the plugin catalog/), {
+      target: { value: "essentials" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /Search/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText("Install a build made for this server version.")).toBeTruthy();
+    // The technical layer is present but closed — §81: available, never forced.
+    const details = document.querySelector("details");
+    expect(details).toBeTruthy();
+    expect(details?.open).toBe(false);
+    details?.setAttribute("open", "");
+    expect(document.querySelector("pre")?.textContent).toContain("code: PLUGIN_INCOMPATIBLE");
+    expect(document.querySelector("pre")?.textContent).toContain('"file": "essentialsx.jar"');
+  });
+
   it("a PLUGIN_EXISTS rejection offers the explicit replace", async () => {
     mocks.pluginsSearch.mockResolvedValue({
       target: "plugins",

@@ -33,7 +33,11 @@ const BUDGETS = {
   // stylesheet, shared across windows) and the scoreboard editor's two
   // panes ride the files chunk — feature surface, not boot bloat; the
   // entry CSS grew only by the crash card's reason row.
-  totalCssGzip: 15 * 1024,
+  // 15 → 16 KB at ADR-0025: ui/ErrorNote's one stylesheet — the shared
+  // body of every error alert (sentence, remediation, [View details]
+  // disclosure) across fourteen call sites; the alternative was bespoke
+  // error CSS per view, the regression the design system prevents.
+  totalCssGzip: 16 * 1024,
 };
 
 function assets() {
