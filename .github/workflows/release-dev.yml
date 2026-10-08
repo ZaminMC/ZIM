@@ -103,6 +103,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx @tauri-apps/cli@2 build
 
+      - name: Stage the host binary beside the workspace ones
+        run: |
+          # The Tauri host builds into its own target dir (ADR-0008); the
+          # portable payload wants all four binaries in one place.
+          cp apps/panel/src-tauri/target/release/zamin-panel target/release/zamin-panel
+
       - name: Portable archive
         run: ./scripts/packaging/make-portable.sh target/release "$VERSION" bundle-out
 
@@ -172,6 +178,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx @tauri-apps/cli@2 build
+
+      - name: Stage the host binary beside the workspace ones
+        shell: bash
+        run: |
+          # The Tauri host builds into its own target dir (ADR-0008); the
+          # portable payload wants all four binaries in one place.
+          cp apps/panel/src-tauri/target/release/zamin-panel.exe target/release/zamin-panel.exe
 
       - name: Portable archive
         run: ./scripts/packaging/make-portable.ps1 -BinsDir target/release -Version $env:VERSION -OutDir bundle-out

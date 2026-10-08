@@ -142,8 +142,12 @@ fn config_home() -> Option<std::path::PathBuf> {
 pub fn get() -> Option<bool> {
     #[cfg(unix)]
     return linux::get(&config_home()?);
+    // The Windows half answers Result<Option<bool>>: the outer Result is
+    // the registry probe ("cannot be determined"), the inner Option is the
+    // Run key's absence ("autostart is off") — flatten, so a failed probe
+    // reads as "unavailable" and an absent key reads as "off".
     #[cfg(windows)]
-    return windows::get().ok();
+    return windows::get().ok().flatten();
 }
 
 pub fn set(enabled: bool) -> Result<(), String> {
