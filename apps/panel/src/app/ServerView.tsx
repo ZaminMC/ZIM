@@ -37,7 +37,6 @@ import {
 } from "../ui/icons";
 import { CrashCard } from "./CrashCard";
 import { ConsoleView } from "./ConsoleView";
-import { FilesView } from "./FilesView";
 import { LogViewer } from "./LogViewer";
 import { MetricsView } from "./MetricsView";
 import { PlayersView } from "./PlayersView";
@@ -53,6 +52,12 @@ import styles from "./ServerView.module.css";
 // with no heavy terminal dependency behind it.
 const NetworkView = lazy(() =>
   import("./NetworkView").then((m) => ({ default: m.NetworkView })),
+);
+// The files browser (§32, ADR-0021) lazy-loads with the same reason: its
+// editor, compose AST, and search walk are per-tab machinery a session
+// may never open, and the cold start does not pay for them.
+const FilesView = lazy(() =>
+  import("./FilesView").then((m) => ({ default: m.FilesView })),
 );
 const StartupView = lazy(() =>
   import("./StartupView").then((m) => ({ default: m.StartupView })),
