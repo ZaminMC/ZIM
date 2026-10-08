@@ -30,7 +30,6 @@ fn fake_java_script() -> &'static str {
     "#!/bin/sh\necho '  java.version = 21.0.99' >&2\necho '  java.vendor = Test Temurin' >&2\nexit 0\n"
 }
 
-#[cfg(unix)]
 fn build_tar(top: &str, java_body: &str) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     let add = |builder: &mut tar::Builder<Vec<u8>>, path: &str, body: &[u8], mode: u32| {
@@ -55,7 +54,6 @@ fn build_tar(top: &str, java_body: &str) -> Vec<u8> {
     builder.into_inner().unwrap()
 }
 
-#[cfg(unix)]
 fn build_tar_gz_gzipped(top: &str, java_body: &str) -> Vec<u8> {
     let tar_bytes = build_tar(top, java_body);
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
