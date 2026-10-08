@@ -32,9 +32,16 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         #[cfg(windows)]
         {
+            // Kill the daemon and ONLY the daemon. `/T` would walk into the
+            // servers the daemon spawned — but on this platform each server
+            // lives in its own job object without kill-on-close (ADR-0005),
+            // so it must survive the harness drop exactly as it survives a
+            // real daemon crash: adoption is the test subject. Tests that
+            // start servers stop them (or adopt them); a leaked fake server
+            // holds only an ephemeral port and dies with the runner.
             use std::os::windows::process::CommandExt;
             let _ = std::process::Command::new("taskkill")
-                .args(["/PID", &self.child.id().to_string(), "/T", "/F"])
+                .args(["/PID", &self.child.id().to_string(), "/F"])
                 .creation_flags(0x0800_0000)
                 .status();
         }
