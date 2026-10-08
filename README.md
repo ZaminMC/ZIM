@@ -337,6 +337,28 @@ system" where the host can deliver it. Bundles are built and tested by
 [.github/workflows/bundle.yml](.github/workflows/bundle.yml) on both OS
 lanes; the remaining §23 proof (clean VM installs) is manual by design.
 
+### The development channel (updates)
+
+Installers for the **development** line publish to the public
+[ZaminPanel-Releases](https://github.com/ZaminMC/ZaminPanel-Releases/releases)
+repo under the fixed `dev` tag (ADR-0024) — the NSIS setup for Windows,
+the AppImage for Linux, portable archives alongside. The repo with the
+sources stays private; the channel is what users touch.
+
+Installed dev builds keep themselves current: the panel asks the
+channel on boot and every six hours, verifies the minisign signature
+against the committed public key before anything is applied, and — with
+"Install updates automatically" on, the default — downloads and installs
+by itself. Only the restart asks. Turn either automatic off under
+`zaminpanel://settings/` → Updates; [Check for updates now] is there
+for the impatient. The version of a dev build is `0.1.<run number>`, so
+every published run is strictly newer than the one before it.
+
+Re-publishing is one button: the `Release (dev)` workflow
+([.github/workflows/release-dev.yml](.github/workflows/release-dev.yml))
+builds both lanes, signs, regenerates `latest.json` (the updater's one
+manifest), and replaces the `dev` release's assets.
+
 ## Remote (Phase 8)
 
 A headless box runs the same binaries as a desktop. On the box: install

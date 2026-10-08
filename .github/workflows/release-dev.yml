@@ -1,0 +1,233 @@
+# Release (development channel): build the installers, sign them with the
+# updater key, and publish them to the PUBLIC releases repo
+# (ZaminMC/ZaminPanel-Releases) under the fixed `dev` tag — the URL the
+# panel's update lane reads (ADR-0024). The code repo stays private; the
+# channel must not.
+#
+# Version discipline: a dev build's version is 0.1.<run number>, stamped at
+# build time — the updater only offers an update when the manifest's
+# version is greater than the installed one, so every run must increase.
+#
+# The proof of done (real installs on clean Win11 + Ubuntu VMs) stays the
+# bundle lane's manual step; this workflow adds the signing and the
+# publication the bundle lane deliberately does not do.
+
+name: Release (dev)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-dev
+  cancel-in-progress: false
+
+env:
+  RELEASES_REPO: ZaminMC/ZaminPanel-Releases
+  RELEASE_TAG: dev
+
+jobs:
+  version:
+    name: Stamp the build version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.stamp.outputs.version }}
+    steps:
+      - id: stamp
+        run: echo "version=0.1.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: AppImage + portable tar.gz, signed
+    runs-on: ubuntu-latest
+    needs: version
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/panel/package-lock.json
+
+      - name: System dependencies (Tauri on Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            file \
+            desktop-file-utils
+
+      - name: Stamp the version into the bundle
+        working-directory: apps/panel/src-tauri
+        run: |
+          node -e '
+            const fs = require("fs");
+            const conf = JSON.parse(fs.readFileSync("tauri.conf.json", "utf8"));
+            conf.version = process.env.VERSION;
+            fs.writeFileSync("tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
+            console.log("version:", conf.version);
+          '
+
+      - name: Build the daemon, CLI, and agent (release)
+        run: cargo build --release -p zamind -p zamin-cli -p zamin-agent
+
+      - name: Panel frontend build (also feeds the host's context macro)
+        run: npm ci && npm run build
+        working-directory: apps/panel
+
+      - name: Stage sidecar binaries
+        run: |
+          mkdir -p apps/panel/src-tauri/binaries
+          cp target/release/zamind apps/panel/src-tauri/binaries/zamind-x86_64-unknown-linux-gnu
+          cp target/release/zamin apps/panel/src-tauri/binaries/zamin-x86_64-unknown-linux-gnu
+
+      - name: Bundle (AppImage, signed)
+        working-directory: apps/panel
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx @tauri-apps/cli@2 build
+
+      - name: Portable archive
+        run: ./scripts/packaging/make-portable.sh target/release "$VERSION" bundle-out
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p bundle-out
+          cp apps/panel/src-tauri/target/release/bundle/appimage/*.AppImage bundle-out/
+          cp apps/panel/src-tauri/target/release/bundle/appimage/*.AppImage.sig bundle-out/
+          ls -la bundle-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zaminpanel-linux-${{ env.VERSION }}
+          path: |
+            bundle-out/*.AppImage
+            bundle-out/*.AppImage.sig
+            bundle-out/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: NSIS installer + portable zip, signed
+    runs-on: windows-latest
+    needs: version
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/panel/package-lock.json
+
+      - name: Stamp the version into the bundle
+        working-directory: apps/panel/src-tauri
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const conf = JSON.parse(fs.readFileSync("tauri.conf.json", "utf8"));
+            conf.version = process.env.VERSION;
+            fs.writeFileSync("tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
+            console.log("version:", conf.version);
+          '
+
+      - name: Build the daemon, CLI, and agent (release)
+        run: cargo build --release -p zamind -p zamin-cli -p zamin-agent
+
+      - name: Panel frontend build (also feeds the host's context macro)
+        run: npm ci && npm run build
+        working-directory: apps/panel
+
+      - name: Stage sidecar binaries
+        run: |
+          New-Item -ItemType Directory -Force -Path apps/panel/src-tauri/binaries | Out-Null
+          Copy-Item target/release/zamind.exe apps/panel/src-tauri/binaries/zamind-x86_64-pc-windows-msvc.exe
+          Copy-Item target/release/zamin.exe apps/panel/src-tauri/binaries/zamin-x86_64-pc-windows-msvc.exe
+
+      - name: Bundle (NSIS, signed)
+        working-directory: apps/panel
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx @tauri-apps/cli@2 build
+
+      - name: Portable archive
+        run: ./scripts/packaging/make-portable.ps1 -BinsDir target/release -Version $env:VERSION -OutDir bundle-out
+        env:
+          VERSION: ${{ env.VERSION }}
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bundle-out | Out-Null
+          Copy-Item apps/panel/src-tauri/target/release/bundle/nsis/*.exe bundle-out/
+          Copy-Item apps/panel/src-tauri/target/release/bundle/nsis/*.sig bundle-out/
+          Get-ChildItem bundle-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zaminpanel-windows-${{ env.VERSION }}
+          path: |
+            bundle-out/*.exe
+            bundle-out/*.sig
+            bundle-out/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish the dev release + updater manifest
+    runs-on: ubuntu-latest
+    needs: [version, linux, windows]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Generate the updater manifest (latest.json)
+        run: |
+          node scripts/packaging/make-updater-json.mjs \
+            --version "$VERSION" \
+            --notes "Development build $VERSION from commit $GITHUB_SHA (develop). Auto-update picks this up in-app." \
+            --base-url "https://github.com/$RELEASES_REPO/releases/download/$RELEASE_TAG" \
+            --out latest.json \
+            --entry "windows-x86_64=$(find assets -name '*-setup.exe' | head -n 1)" \
+            --entry "linux-x86_64=$(find assets -name '*.AppImage' | head -n 1)"
+
+      - name: Replace the dev release (assets + manifest)
+        run: |
+          set -euo pipefail
+          export GH_REPO="$RELEASES_REPO"
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
+          gh release create "$RELEASE_TAG" \
+            --title "ZaminPanel development build $VERSION" \
+            --notes "Development build $VERSION from commit ${GITHUB_SHA::7} on the develop branch.
+
+          Installers: the NSIS setup (Windows) and the AppImage (Linux) are signed — the panel verifies them before applying an update. The portable archives (zip / tar.gz) carry the daemon and CLI without installing anything.
+
+          The app checks this release's latest.json on boot and every six hours; with \`Install updates automatically\` on (default), the download and install run by themselves and only the restart asks." \
+            --prerelease \
+            assets/* latest.json
+          echo "--- published ---"
+          gh release view "$RELEASE_TAG" --json assets,url --jq '{url, assets: [.assets[].name]}'
