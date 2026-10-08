@@ -20,7 +20,7 @@ import styles from "./SettingsPage.module.css";
 const RESERVED: Array<{ name: string; note: string }> = [
   { name: "Dutchmen", note: "The agent side of the panel — its rooms (new tab, chats) are reserved." },
   { name: "Tab groups", note: "Collapsible groups in the strip." },
-  { name: "Extensions", note: "Typed addons with declared permissions." },
+  { name: "Extensions", note: "Typed addons with declared permissions — the inventory is live at zaminpanel://extensions/; contributions are reserved." },
   { name: "Publishing", note: "Package and publish a server through provider APIs." },
 ];
 

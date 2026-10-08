@@ -47,7 +47,10 @@ const BUDGETS = {
   // settings account row — both lazy-chunk CSS. The same slice moved the
   // settings page onto the internal-pages lazy lane, paying ~3 KB of
   // entry JS back; the boot path's CSS line is untouched.
-  totalCssGzip: 19 * 1024,
+  // 19 → 20 KB at ADR-0031: the extensions room's own stylesheet — a
+  // lazy-chunk file (~0.76 KB gzip) for the §56/§57 inventory page; the
+  // entry stylesheet was untouched by the slice.
+  totalCssGzip: 20 * 1024,
   // The entry stylesheet's own line (the cold start's CSS), kept
   // explicit so a chrome-only regression cannot hide inside the total.
   entryCssGzip: 11 * 1024,

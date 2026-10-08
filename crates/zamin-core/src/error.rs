@@ -141,6 +141,18 @@ pub enum CoreError {
     #[error("the schedule store is corrupt at {path:?}: {reason}")]
     SchedulesCorrupt { path: PathBuf, reason: String },
 
+    #[error("extension {id:?} has an invalid manifest: {reason}")]
+    InvalidExtensionManifest { id: String, reason: String },
+
+    #[error("extension id {id:?} is invalid: ids are lowercase alphanumerics with dashes/underscores, starting with a letter or digit")]
+    InvalidExtensionId { id: String },
+
+    #[error("extension permission {permission:?} is not in the vocabulary; the model is deny-by-default")]
+    InvalidExtensionPermission { permission: String },
+
+    #[error("the extension folder {path:?} could not be read: {reason}")]
+    ExtensionDirUnreadable { path: PathBuf, reason: String },
+
     #[error("the publish configuration is invalid: {reason}")]
     InvalidPublishConfig { reason: String },
 

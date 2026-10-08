@@ -340,6 +340,22 @@ says `truncated` when cut short, a managed server is never named twice
 scan side), and roots that cannot be read are named in the answer, not
 hidden. The CLI reads it all: `zamin discover [query]`.
 
+## Extensions (§56/§57, foundation)
+
+The declaration half of the extension system is live
+([ADR-0031](docs/adr/0031-extensions-foundation.md)): an extension is a
+folder under the daemon's `extensions/` data dir carrying one
+`zamin-extension.toml` — id, name, version, and the permissions it
+claims from a closed, deny-by-default vocabulary (`contribution:*` for
+what it may add once the contribution model lands, `data:*` for the
+machine state it may touch). Nothing in the folder is executed.
+`zaminpanel://extensions/` (and `zamin extensions`) renders the
+inventory: valid manifests with their claims, and every folder that
+could not be read named with its reason — a broken manifest is
+evidence, never a silent skip. The execution and contribution model is
+the reserved next room; the vocabulary landed first so that, when it
+arrives, the grants are judged against a contract that already exists.
+
 ## Development loop
 
 ```

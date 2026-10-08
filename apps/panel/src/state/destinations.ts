@@ -53,6 +53,13 @@ export interface AboutDestination {
 export interface FeedbackDestination {
   kind: "feedback";
 }
+/** §56/§57: the extensions room — the daemon's inventory of installed
+ *  extensions and the permissions they declare (deny-by-default). The
+ *  execution/contribution model is reserved (ADR-0031) and the page
+ *  says so. */
+export interface ExtensionsDestination {
+  kind: "extensions";
+}
 /** A typed request for an internal page that does not exist. The shell
  *  answers it honestly (§58: an unknown internal page is a real
  *  destination request, never silently a web search) — an error page,
@@ -73,6 +80,7 @@ export type Destination =
   | AuditDestination
   | AboutDestination
   | FeedbackDestination
+  | ExtensionsDestination
   | MissingPageDestination;
 
 /** A tab's stable identity. Derived from the destination on purpose: one
@@ -86,6 +94,7 @@ export const JOBS_TAB: TabKey = "jobs";
 export const AUDIT_TAB: TabKey = "audit";
 export const ABOUT_TAB: TabKey = "about";
 export const FEEDBACK_TAB: TabKey = "feedback";
+export const EXTENSIONS_TAB: TabKey = "extensions";
 export const serverTab = (serverId: string): TabKey => `server:${serverId}`;
 export const consoleTab = (serverId: string): TabKey => `console:${serverId}`;
 
@@ -109,6 +118,8 @@ export function tabKey(destination: Destination): TabKey {
       return ABOUT_TAB;
     case "feedback":
       return FEEDBACK_TAB;
+    case "extensions":
+      return EXTENSIONS_TAB;
     case "missing":
       return `missing:${destination.url}`;
   }
@@ -131,6 +142,8 @@ export function destinationUrl(destination: Destination): string {
       return "zaminpanel://about/";
     case "feedback":
       return "zaminpanel://feedback/";
+    case "extensions":
+      return "zaminpanel://extensions/";
     case "server":
       return `zaminpanel://server/${destination.serverId}`;
     case "console":
@@ -158,7 +171,8 @@ export function restingAddress(
     destination.kind === "jobs" ||
     destination.kind === "audit" ||
     destination.kind === "about" ||
-    destination.kind === "feedback"
+    destination.kind === "feedback" ||
+    destination.kind === "extensions"
   ) {
     // The evidence pages rest at their internal URLs — they are ZaminPanel
     // pages, not a server's join address.
@@ -219,6 +233,7 @@ export function parseAddressInput(text: string): AddressRequest {
     if (page === "audit") return { kind: "internal", destination: { kind: "audit" } };
     if (page === "about") return { kind: "internal", destination: { kind: "about" } };
     if (page === "feedback") return { kind: "internal", destination: { kind: "feedback" } };
+    if (page === "extensions") return { kind: "internal", destination: { kind: "extensions" } };
     if (page === "server" && internal[2]) {
       return { kind: "internal", destination: { kind: "server", serverId: internal[2] } };
     }
@@ -303,6 +318,8 @@ export function destinationLabel(destination: Destination, entries: ServerEntry[
       return "About ZaminPanel";
     case "feedback":
       return "Feedback";
+    case "extensions":
+      return "Extensions";
     case "new":
       return "New tab";
     case "missing":

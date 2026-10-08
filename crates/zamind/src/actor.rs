@@ -1379,6 +1379,26 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             ErrorCode::InternalError,
             format!("Restore failed mid-commit ({reason}); the previous files were rolled back."),
         ),
+        E::InvalidExtensionManifest { id, reason } => ProtocolError::new(
+            ErrorCode::ConfigInvalid,
+            format!("The extension {id:?} has an invalid manifest: {reason}."),
+        ),
+        E::InvalidExtensionId { id } => ProtocolError::new(
+            ErrorCode::ConfigInvalid,
+            format!(
+                "Extension id {id:?} is invalid; ids are lowercase alphanumerics with dashes and underscores, starting with a letter or digit."
+            ),
+        ),
+        E::InvalidExtensionPermission { permission } => ProtocolError::new(
+            ErrorCode::ConfigInvalid,
+            format!(
+                "Extension permission {permission:?} is not in the vocabulary; the permission model is deny-by-default."
+            ),
+        ),
+        E::ExtensionDirUnreadable { path, reason } => ProtocolError::new(
+            ErrorCode::InternalError,
+            format!("The extension folder {path:?} could not be read: {reason}."),
+        ),
         E::Platform(e) => ProtocolError::new(ErrorCode::InternalError, e.to_string()),
     }
 }

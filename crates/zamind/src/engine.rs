@@ -19,6 +19,7 @@ use zamin_protocol::discovery::{
     DiscoverParams, DiscoverResult, DiscoveredServer, RootsGetResult, RootsSetParams,
 };
 use zamin_protocol::error::{ErrorCode, ProtocolError};
+use zamin_protocol::extensions::{ExtensionProblem, ExtensionView, ExtensionsListResult};
 use zamin_protocol::publish::PublishConfig;
 use zamin_protocol::server::{LifecycleResult, ServerDetails, ServerState, ServerSummary};
 use zamin_protocol::streams::{EventsSnapshot, StreamCursor, StreamKind, SubscribeResult};
@@ -521,6 +522,51 @@ impl Engine {
                 .map_err(|e| internal(&format!("the discovery roots could not be saved: {e}")))?;
         }
         Ok(RootsGetResult { roots })
+    }
+
+    /// The extension inventory (§56/§57, ADR-0031): read the manifests
+    /// under `<data>/extensions`, validate each against the deny-by-
+    /// default vocabulary, and answer for every folder seen. Problems
+    /// are named in-band; this method never fails for one bad folder.
+    pub async fn extensions_list(&self) -> Result<ExtensionsListResult, EngineError> {
+        let dir = self.inner.data_dir.join("extensions");
+        let scanned = dir.display().to_string();
+        let listings =
+            tokio::task::spawn_blocking(move || zamin_core::extensions::list_extensions(&dir))
+                .await
+                .map_err(|e| internal(&format!("the extensions walk could not run: {e}")))?;
+        let mut extensions = Vec::new();
+        let mut problems = Vec::new();
+        for listing in listings {
+            match listing {
+                zamin_core::extensions::ExtensionListing::Valid {
+                    directory,
+                    manifest,
+                } => {
+                    extensions.push(ExtensionView {
+                        id: manifest.id,
+                        name: manifest.name,
+                        version: manifest.version,
+                        description: manifest.description,
+                        permissions: manifest
+                            .permissions
+                            .into_iter()
+                            .map(|p| p.as_str().to_string())
+                            .collect(),
+                        directory,
+                    });
+                }
+                zamin_core::extensions::ExtensionListing::Invalid { directory, reason } => {
+                    problems.push(ExtensionProblem { directory, reason });
+                }
+            }
+        }
+        Ok(ExtensionsListResult {
+            directory: scanned,
+            extensions,
+            problems,
+            contributions_active: false,
+        })
     }
 
     pub async fn register_server(

@@ -98,6 +98,31 @@ export interface RootsSetParams {
   roots: string[];
 }
 
+/** §56/§57 (ADR-0031): the daemon's extension inventory — the
+ *  declaration half of the permission model. */
+export interface ExtensionView {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  /** The claimed permissions, in their wire spelling
+   *  (`contribution:*` / `data:*`). */
+  permissions: string[];
+  directory: string;
+}
+
+export interface ExtensionProblem {
+  directory: string;
+  reason: string;
+}
+
+export interface ExtensionsListResult {
+  directory: string;
+  extensions: ExtensionView[];
+  problems: ExtensionProblem[];
+  contributionsActive: boolean;
+}
+
 export interface RegisterServerParams {
   requestId: string;
   serverId: string;

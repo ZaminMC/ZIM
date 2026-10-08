@@ -12,6 +12,7 @@ pub mod backup;
 pub mod config;
 pub mod discovery;
 pub mod error;
+pub mod extensions;
 pub mod fsops;
 pub mod java;
 pub mod logparse;

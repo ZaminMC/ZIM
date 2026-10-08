@@ -65,6 +65,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `daemon` | `daemon.hello`, `daemon.status` |
 | `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.create` (Phase 6: download, stamp, and register a fresh server — §7b), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream), `server.discover` (§64, ADR-0027) |
 | `discovery` (ADR-0027) | `discovery.roots.get`, `discovery.roots.set` |
+| `extensions` (§56/§57, ADR-0031) | `extensions.list` — the declaration half of the permission model: valid manifests with their claimed permissions, folders that could not be read named in-band, `contributionsActive: false` until the execution model lands |
 | `catalog` (Phase 6) | `catalog.list`, `catalog.versions`, `catalog.builds` (§7b) |
 | `java` (Phase 6) | `java.list`, `java.install` (§7c) |
 | `plugins` (§7d) | `plugins.search`, `plugins.versions`, `plugins.installed`, `plugins.install` (a job), `plugins.delete`, `plugins.updates` |

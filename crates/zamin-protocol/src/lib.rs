@@ -17,6 +17,7 @@ pub mod config;
 pub mod discovery;
 pub mod envelope;
 pub mod error;
+pub mod extensions;
 pub mod files;
 pub mod framing;
 pub mod handshake;

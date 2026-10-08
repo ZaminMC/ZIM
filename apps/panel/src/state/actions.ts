@@ -58,6 +58,7 @@ import type {
   ConfigSetResult,
   NetworkStatusResult,
   DiscoverResult,
+  ExtensionsListResult,
   RootsGetResult,
   RootsSetParams,
 } from "../protocol/types";
@@ -82,6 +83,10 @@ export async function discoveryRoots(): Promise<RootsGetResult> {
 export async function setDiscoveryRoots(roots: string[]): Promise<RootsGetResult> {
   const params: RootsSetParams = { roots };
   return client.request<RootsGetResult>("discovery.roots.set", params);
+}
+
+export async function listExtensions(): Promise<ExtensionsListResult> {
+  return client.request<ExtensionsListResult>("extensions.list");
 }
 
 export async function getServer(serverId: string): Promise<ServerDetails> {

@@ -45,6 +45,11 @@ const AboutPage = lazy(() => import("./AboutPage").then((m) => ({ default: m.Abo
 const FeedbackPage = lazy(() =>
   import("./FeedbackPage").then((m) => ({ default: m.FeedbackPage })),
 );
+// §56/§57 (ADR-0031): the extensions room — the inventory rides its own
+// lazy chunk like the other internal pages.
+const ExtensionsPage = lazy(() =>
+  import("./ExtensionsPage").then((m) => ({ default: m.ExtensionsPage })),
+);
 // The settings page rides the same lane: an internal page, not a boot
 // surface — its tab loads it on first open (PERFORMANCE-BUDGETS).
 const SettingsPage = lazy(() =>
@@ -80,6 +85,8 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <AboutPage />;
     case "feedback":
       return <FeedbackPage />;
+    case "extensions":
+      return <ExtensionsPage />;
     case "missing":
       return <MissingPage url={destination.url} />;
   }

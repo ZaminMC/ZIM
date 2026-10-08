@@ -400,6 +400,10 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
                 Err(e) => dispatch_error(id, e),
             }
         }
+        methods::EXTENSIONS_LIST => match engine.extensions_list().await {
+            Ok(result) => json_ok(id, result),
+            Err(e) => dispatch_error(id, e),
+        },
         methods::SERVER_GET => match parse_server_id::<GetServerParams>(request) {
             Ok((server_id, _)) => match engine.get_server(&server_id).await {
                 Ok(details) => json_ok(id, details),

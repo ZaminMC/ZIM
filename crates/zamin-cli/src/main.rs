@@ -16,6 +16,7 @@ use clap::{Parser, Subcommand};
 use zamin_cli::{Client, ClientError};
 use zamin_ipc::Endpoint;
 use zamin_protocol::discovery::{DiscoverResult, RootsGetResult, RootsSetParams};
+use zamin_protocol::extensions::ExtensionsListResult;
 use zamin_protocol::jobs::{CancelJobParams, GetJobParams, Job, JobState, ListJobsResult};
 use zamin_protocol::methods;
 use zamin_protocol::plugins::{
@@ -89,6 +90,8 @@ enum Commands {
         #[command(subcommand)]
         command: DiscoveryCommands,
     },
+    /// List installed extensions and what they declare (§56/§57, ADR-0031)
+    Extensions,
     /// Show one server's details
     Status { server_id: String },
     /// Show the daemon's own status
@@ -703,6 +706,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 discovery_roots_remove(&client, path.clone()).await
             }
         },
+        Commands::Extensions => extensions(&cli, &client).await,
         Commands::Status { server_id } => status(&cli, &client, server_id).await,
         Commands::Daemon => daemon(&cli, &client).await,
         Commands::Register {
@@ -1060,6 +1064,22 @@ async fn discover(cli: &Cli, client: &Client, query: Option<String>) -> CmdResul
         return Ok(());
     }
     render::discovery_table(&result);
+    Ok(())
+}
+
+/// §56/§57 (ADR-0031): what is installed, what it declares, and what
+/// the daemon could not answer for — the declaration half of the
+/// permission model, printed with the reserved room named.
+async fn extensions(cli: &Cli, client: &Client) -> CmdResult {
+    let result: ExtensionsListResult = client
+        .request_typed(methods::EXTENSIONS_LIST, serde_json::json!({}))
+        .await
+        .map_err(protocol_with_usage_hint)?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::extensions_table(&result);
     Ok(())
 }
 

@@ -22,6 +22,12 @@ pub const DISCOVERY_ROOTS_GET: &str = "discovery.roots.get";
 pub const DISCOVERY_ROOTS_SET: &str = "discovery.roots.set";
 pub const SERVER_STDIN: &str = "server.stdin";
 
+// Extensions (founder §56/§57, ADR-0031): the declaration half of the
+// permission model — an inventory of installed manifests and the
+// problems found reading them. No execution, no contributions yet; the
+// result says so itself (contributionsActive).
+pub const EXTENSIONS_LIST: &str = "extensions.list";
+
 pub const JOBS_LIST: &str = "jobs.list";
 pub const JOBS_GET: &str = "jobs.get";
 pub const JOBS_CANCEL: &str = "jobs.cancel";

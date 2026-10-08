@@ -6,6 +6,7 @@ use zamin_cli::ClientError;
 use zamin_ipc::{Endpoint, IpcError};
 use zamin_protocol::discovery::DiscoverResult;
 use zamin_protocol::error::ProtocolError;
+use zamin_protocol::extensions::ExtensionsListResult;
 use zamin_protocol::jobs::{Job, JobKind, JobState};
 use zamin_protocol::plugins::{
     PluginUpdateStatus, PluginsInstalledResult, PluginsSearchResult, PluginsUpdatesResult,
@@ -1025,6 +1026,41 @@ pub fn discovery_table(result: &DiscoverResult) {
     }
     for skipped in &result.skipped_roots {
         println!("(a configured root could not be read: {skipped})");
+    }
+}
+
+/// §56/§57 (ADR-0031): the extension inventory — who is installed, what
+/// it declares, what could not be answered for, and the reserved room
+/// named in one line so the output cannot overpromise.
+pub fn extensions_table(result: &ExtensionsListResult) {
+    if result.extensions.is_empty() && result.problems.is_empty() {
+        println!(
+            "No extensions installed. Extension folders live in {}.",
+            result.directory
+        );
+    }
+    for ext in &result.extensions {
+        println!("{:<20}  {:<8}  {}", ext.name, ext.version, ext.id);
+        if let Some(description) = &ext.description {
+            println!("  {description}");
+        }
+        if ext.permissions.is_empty() {
+            println!("  declares no permissions");
+        } else {
+            println!("  declares:");
+            for permission in &ext.permissions {
+                println!("    {permission}");
+            }
+        }
+        println!("  folder: {}", ext.directory);
+    }
+    for problem in &result.problems {
+        println!("! {} — {}", problem.directory, problem.reason);
+    }
+    if !result.contributions_active {
+        println!(
+            "Extensions declare permissions; contributions (context menus, pages, tools) are not active yet (ADR-0031)."
+        );
     }
 }
 

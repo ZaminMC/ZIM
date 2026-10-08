@@ -45,19 +45,23 @@ describe("buildCommands", () => {
         audit: () => ran.push("audit"),
         about: () => ran.push("about"),
         feedback: () => ran.push("feedback"),
+        extensions: () => ran.push("extensions"),
       },
     );
     const jobs = commands.find((command) => command.id === "page-jobs");
     const audit = commands.find((command) => command.id === "page-audit");
     const about = commands.find((command) => command.id === "page-about");
     const feedback = commands.find((command) => command.id === "page-feedback");
+    const extensions = commands.find((command) => command.id === "page-extensions");
     jobs?.run();
     audit?.run();
     about?.run();
     feedback?.run();
-    expect(ran).toEqual(["jobs", "audit", "about", "feedback"]);
+    extensions?.run();
+    expect(ran).toEqual(["jobs", "audit", "about", "feedback", "extensions"]);
     expect(jobs?.hint).toBe("zaminpanel://jobs/");
     expect(feedback?.hint).toBe("zaminpanel://feedback/");
+    expect(extensions?.hint).toBe("zaminpanel://extensions/");
   });
 
   it("hides the autostart command where the host cannot deliver it", () => {

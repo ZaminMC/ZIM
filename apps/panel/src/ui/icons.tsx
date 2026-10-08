@@ -302,3 +302,13 @@ export function IconFeedback(p: IconProps) {
     </svg>
   );
 }
+
+/** §56/§57: the extensions room's icon — three joined blocks, the
+   addon shape. */
+export function IconExtension(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z" />
+    </svg>
+  );
+}
