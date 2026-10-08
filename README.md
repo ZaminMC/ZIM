@@ -176,6 +176,35 @@ it unchanged. The terminal emulator is gone: the heaviest dependency in the
 panel was the wrong shape for a filterable, copyable console, and the file
 was always the unbounded memory (§30) the scrollback cap could never be.
 
+## Files
+
+The file manager speaks the founder's §32 list end to end
+([ADR-0021](docs/adr/0021-files-slice.md)). The browser lists
+directories-first with sizes and mtimes; **search** walks the whole root
+(case-insensitive names, the daemon's staging dir invisible) and says
+honestly when the bound cut it — hits open at their real path. **Copy**
+refuses to overwrite (the typed refusal is the message; the panel
+suggests a fresh name), and a pre-flight measure pass proves the tree
+fits before the first byte moves, so a refusal can never leave a
+half-copied folder looking like success. **Move** is the one-rename
+path. **Upload** lands through the staged writes and one atomic commit
+per file; **download** streams back through the browser's own save
+affordance, capped honestly at 100 MiB — bigger trees belong to
+backups, which stream.
+
+The editor keeps two modes over one AST (§33): Source is the raw file,
+always one click away; Compose renders the pairs as friendly controls —
+toggles for true/false, numbers for integers — and an edit rewrites
+only the pair it touched, so comments, ordering, and unknown keys
+survive a save byte for byte. Control kinds come from the value's own
+bytes, never a hardcoded key list. And the reload verb knows how the
+file loads (§35): server.properties says "read at boot", plugin configs
+say the panel does not fake a plugin reload — **Save & Restart** applies
+both for real, behind its confirm, bytes-land-then-boot order, offered
+only while the server actually runs. `/reload` is deliberately absent:
+it is the one verb that pretends. The CLI reaches the same surface —
+`zamin files ls/find/cp/mv/mkdir/rm/get/put`.
+
 ## Players
 
 The Players tab asks the server itself — Server List Ping plus the log's
