@@ -916,6 +916,36 @@ impl Engine {
             .await
     }
 
+    /// `files.copy`: the file manager's copy verb (spec §8b). Bounds,
+    /// symlink refusals, and the never-overwrite rule are the rooted
+    /// filesystem's; the engine only keeps the sync work off the async
+    /// runtime.
+    pub async fn files_copy(
+        &self,
+        server_id: &ServerId,
+        from: &str,
+        to: &str,
+    ) -> Result<zamin_protocol::files::FilesCopyResult, EngineError> {
+        let from = from.to_owned();
+        let to = to.to_owned();
+        self.file_op(server_id, move |root| crate::files::copy(root, &from, &to))
+            .await
+    }
+
+    /// `files.search`: the bounded name walk (spec §8c), same discipline.
+    pub async fn files_search(
+        &self,
+        server_id: &ServerId,
+        query: &str,
+        limit: u32,
+    ) -> Result<zamin_protocol::files::FilesSearchResult, EngineError> {
+        let query = query.to_owned();
+        self.file_op(server_id, move |root| {
+            crate::files::search(root, &query, limit)
+        })
+        .await
+    }
+
     /// `players.list`: a Server List Ping against the server's configured
     /// port. A server that is off, or has no port configured, answers
     /// with an honest "nobody" shape — that is a normal state, not an

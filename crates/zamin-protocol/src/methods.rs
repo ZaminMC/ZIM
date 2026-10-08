@@ -59,6 +59,11 @@ pub const FILES_COMMIT: &str = "files.commit";
 pub const FILES_MKDIR: &str = "files.mkdir";
 pub const FILES_RENAME: &str = "files.rename";
 pub const FILES_DELETE: &str = "files.delete";
+// The files slice (spec §8b/§8c, ADR-0021): copy and search complete the
+// founder's §32 file manager — a copy that never overwrites, a bounded
+// walk that answers "where is it".
+pub const FILES_COPY: &str = "files.copy";
+pub const FILES_SEARCH: &str = "files.search";
 
 // Specified in v0, implemented with the scheduler (protocol spec §7e,
 // ADR-0014): the daemon runs the clock, clients author the rules.

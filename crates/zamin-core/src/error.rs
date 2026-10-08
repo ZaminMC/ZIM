@@ -41,6 +41,24 @@ pub enum CoreError {
         max_bytes: u64,
     },
 
+    #[error("copy target {path:?} already exists; copies never overwrite")]
+    CopyTargetExists { path: PathBuf },
+
+    #[error(
+        "copy of {path:?} is {size} bytes, above the {max_bytes} byte limit for one synchronous copy"
+    )]
+    CopyTooLarge {
+        path: PathBuf,
+        size: u64,
+        max_bytes: u64,
+    },
+
+    #[error("directory tree below {path:?} is deeper than the copy depth limit")]
+    CopyTooDeep { path: PathBuf },
+
+    #[error("refusing to copy through the symlink at {path:?}; copy its real target instead")]
+    SymlinkInCopy { path: PathBuf },
+
     #[error("io error at {path:?}: {source}")]
     Io {
         path: PathBuf,

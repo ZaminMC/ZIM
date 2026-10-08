@@ -158,3 +158,178 @@ fn write_into_new_subdirectory_creates_parents() {
     // PathBuf sanity for the tempdir guard drop.
     assert!(PathBuf::from(&_guard.path).exists());
 }
+
+// --- copy (the files slice, ADR-0021) ---
+
+#[test]
+fn copy_file_lands_byte_identical_and_reports() {
+    let (fs, _guard) = fixture("copy-file");
+    fs.write("paper.yml", b"spawn-protection: 16\n").unwrap();
+
+    let outcome = fs.copy("paper.yml", "backup/paper.yml").unwrap();
+    assert_eq!(outcome.files, 1);
+    assert_eq!(outcome.bytes, 21);
+    assert_eq!(
+        fs.read("backup/paper.yml", 64).unwrap(),
+        b"spawn-protection: 16\n"
+    );
+    // The original is untouched.
+    assert_eq!(fs.read("paper.yml", 64).unwrap(), b"spawn-protection: 16\n");
+}
+
+#[test]
+fn copy_never_overwrites_an_existing_target() {
+    let (fs, _guard) = fixture("copy-exists");
+    fs.write("a.txt", b"first").unwrap();
+    fs.write("b.txt", b"second").unwrap();
+
+    let err = fs.copy("a.txt", "b.txt").unwrap_err();
+    assert!(matches!(err, CoreError::CopyTargetExists { .. }));
+    // The target's bytes survived the refusal.
+    assert_eq!(fs.read("b.txt", 16).unwrap(), b"second");
+}
+
+#[test]
+fn copy_directory_copies_the_whole_tree() {
+    let (fs, _guard) = fixture("copy-tree");
+    fs.write("plugins/EssentialsX/config.yml", b"a\n").unwrap();
+    fs.write("plugins/EssentialsX/messages.yml", b"b\n").unwrap();
+    fs.write("plugins/Vault.jar", b"c").unwrap();
+
+    let outcome = fs.copy("plugins", "plugins-backup").unwrap();
+    assert_eq!(outcome.files, 3);
+    assert_eq!(outcome.bytes, 5);
+    assert_eq!(fs.read("plugins-backup/Vault.jar", 8).unwrap(), b"c");
+    assert_eq!(
+        fs.read("plugins-backup/EssentialsX/config.yml", 8).unwrap(),
+        b"a\n"
+    );
+}
+
+#[test]
+fn copy_refuses_symlinks_inside_the_tree() {
+    let (fs, _guard) = fixture("copy-symlink");
+    fs.write("real.txt", b"payload").unwrap();
+    fs.mkdir("dir").unwrap();
+    let link = fs.root().join("dir/link.txt");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(fs.root().join("real.txt"), &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(fs.root().join("real.txt"), &link).unwrap();
+
+    // A symlink anywhere inside the copied tree refuses the whole copy —
+    // silently dereferencing it would duplicate a subtree the operator
+    // did not point at, and following it could loop.
+    let err = fs.copy("dir", "dir-copy").unwrap_err();
+    assert!(matches!(err, CoreError::SymlinkInCopy { .. }));
+    assert!(!fs.resolve("dir-copy").unwrap().exists());
+
+    // The top-level path is resolved like every other method — the copy
+    // of the link's path lands the target's bytes under the link's name,
+    // exactly what a read of that path would answer.
+    let outcome = fs.copy("dir/link.txt", "deref.txt").unwrap();
+    assert_eq!(outcome.files, 1);
+    assert_eq!(fs.read("deref.txt", 16).unwrap(), b"payload");
+}
+
+#[test]
+fn copy_stops_at_the_byte_budget_with_the_tree_untouched() {
+    let (fs, _guard) = fixture("copy-budget");
+    fs.write("big1.bin", &[0u8; 40].as_slice()).unwrap();
+    fs.write("big2.bin", &[0u8; 40].as_slice()).unwrap();
+
+    let err = fs
+        .copy_bounded("big1.bin", "out.bin", 32)
+        .unwrap_err();
+    assert!(matches!(err, CoreError::CopyTooLarge { .. }));
+    assert!(!fs.resolve("out.bin").unwrap().exists(), "no partial file");
+
+    // A tree whose total exceeds the budget after some files landed:
+    // the copy fails loudly, and nothing partial answers as success.
+    let err = fs.copy_bounded(".", "out-dir", 64).unwrap_err();
+    assert!(matches!(err, CoreError::CopyTooLarge { .. }));
+    assert!(!fs.resolve("out-dir").unwrap().exists());
+}
+
+#[test]
+fn copy_through_traversal_stays_rejected() {
+    let (fs, _guard) = fixture("copy-traversal");
+    fs.write("secret.txt", b"").unwrap();
+    assert!(fs.copy("secret.txt", "../outside.txt").is_err());
+    assert!(fs.copy("../outside.txt", "inside.txt").is_err());
+}
+
+// --- search (the files slice, ADR-0021) ---
+
+#[test]
+fn search_finds_names_case_insensitively_across_depths() {
+    let (fs, _guard) = fixture("search-basic");
+    fs.write("server.properties", b"").unwrap();
+    fs.write("plugins/EssentialsX.jar", b"").unwrap();
+    fs.write("plugins/EssentialsXSpawn/config.yml", b"").unwrap();
+    fs.write("unrelated.txt", b"").unwrap();
+
+    let result = fs.search("essentialsx", 50).unwrap();
+    let paths: Vec<&str> = result.hits.iter().map(|h| h.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["plugins/EssentialsX.jar", "plugins/EssentialsXSpawn"]
+    );
+    assert!(!result.truncated);
+    assert!(result.scanned >= 5);
+    // Files carry their size; the hit is a real row, not a name.
+    assert_eq!(result.hits[0].kind, EntryKind::File);
+}
+
+#[test]
+fn search_reports_directories_and_skips_the_staging_area() {
+    let (fs, _guard) = fixture("search-dirs");
+    fs.mkdir("world/region").unwrap();
+    fs.write("world/region/r.0.0.mca", b"").unwrap();
+    std::fs::create_dir_all(fs.root().join(".zamin-staging")).unwrap();
+    fs.write(".zamin-staging/stage-x", b"").unwrap();
+
+    let result = fs.search("world", 50).unwrap();
+    assert_eq!(result.hits.len(), 1);
+    assert_eq!(result.hits[0].path, "world");
+    assert_eq!(result.hits[0].kind, EntryKind::Dir);
+    assert!(result.hits[0].size.is_none(), "directories carry no size");
+
+    // The daemon's staging dir is never an answer.
+    let result = fs.search("stage", 50).unwrap();
+    assert!(result.hits.is_empty(), "staging is invisible to search");
+}
+
+#[test]
+fn search_truncates_honestly_at_the_limit() {
+    let (fs, _guard) = fixture("search-limit");
+    for i in 0..8 {
+        fs.write(&format!("log-{i}.txt"), b"").unwrap();
+    }
+
+    let result = fs.search("log-", 3).unwrap();
+    assert_eq!(result.hits.len(), 3);
+    assert!(result.truncated, "the bound must say so");
+
+    // A limit above the match count is not a truncation.
+    let result = fs.search("log-", 100).unwrap();
+    assert_eq!(result.hits.len(), 8);
+    assert!(!result.truncated);
+}
+
+#[test]
+fn search_of_a_deep_tree_stops_at_the_depth_bound() {
+    let (fs, _guard) = fixture("search-deep");
+    let mut deep = String::new();
+    for i in 0..40 {
+        deep.push_str(&format!("d{i}/"));
+    }
+    deep.push_str("target.txt");
+    fs.write(&deep, b"").unwrap();
+
+    // 40 levels down, past the walk's 32-level bound: the walk says it
+    // was cut short rather than silently answering "nothing".
+    let result = fs.search("target", 50).unwrap();
+    assert!(result.truncated || !result.hits.is_empty(),
+        "either the hit is found or the truncation flag says why not");
+}

@@ -1184,6 +1184,26 @@ pub(crate) fn to_protocol_error(error: &CoreError) -> ProtocolError {
             ErrorCode::FsNotFound,
             format!("Path {path:?} does not exist."),
         ),
+        E::CopyTargetExists { path } => ProtocolError::new(
+            ErrorCode::FsCopyTargetExists,
+            format!("Copy target {path:?} already exists; copies never overwrite — pick a fresh name."),
+        ),
+        E::CopyTooLarge {
+            path,
+            size,
+            max_bytes,
+        } => ProtocolError::new(
+            ErrorCode::FsCopyTooLarge,
+            format!("Copy of {path:?} is {size} bytes, above the {max_bytes} byte limit for one synchronous copy. Use a backup for trees this size."),
+        ),
+        E::CopyTooDeep { path } => ProtocolError::new(
+            ErrorCode::FsTooDeep,
+            format!("Directory tree below {path:?} is deeper than the copy walk's depth limit."),
+        ),
+        E::SymlinkInCopy { path } => ProtocolError::new(
+            ErrorCode::FsSymlinkRefused,
+            format!("Refusing to copy through the symlink at {path:?}; copy its real target instead."),
+        ),
         E::NeedsEula { path } => ProtocolError::new(
             ErrorCode::NeedsEula,
             format!("The server cannot start: EULA at {path:?} is missing or not accepted."),

@@ -9,7 +9,8 @@ use std::path::Path;
 use base64::Engine as _;
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::files::{
-    EntryKind, FilesCommitResult, FilesEntry, FilesListResult, FilesReadResult, FilesWriteResult,
+    EntryKind, FilesCommitResult, FilesCopyResult, FilesEntry, FilesListResult, FilesReadResult,
+    FilesSearchHit, FilesSearchResult, FilesWriteResult, FILES_SEARCH_MAX_LIMIT,
 };
 
 use crate::engine::to_protocol;
@@ -263,6 +264,59 @@ pub fn delete(root: &Path, path: &str) -> Result<(), ProtocolError> {
     fs.delete(path).map_err(|e| to_protocol(&e))
 }
 
+/// `files.copy`: a file or a whole tree, root-contained, never
+/// overwriting. The core owns every rule (bounds, symlinks, depth); this
+/// wrapper only translates the outcome into the wire shape.
+pub fn copy(root: &Path, from: &str, to: &str) -> Result<FilesCopyResult, ProtocolError> {
+    use zamin_core::fsops::RootedFs;
+
+    let fs = RootedFs::open(root).map_err(|e| to_protocol(&e))?;
+    let outcome = fs.copy(from, to).map_err(|e| to_protocol(&e))?;
+    Ok(FilesCopyResult {
+        path: to.to_owned(),
+        files: outcome.files,
+        bytes: outcome.bytes,
+    })
+}
+
+/// `files.search`: the bounded name walk over the whole root. The query
+/// is validated here (empty means the client confused search with the
+/// listing) and the limit clamped to the wire cap.
+pub fn search(
+    root: &Path,
+    query: &str,
+    limit: u32,
+) -> Result<FilesSearchResult, ProtocolError> {
+    use zamin_core::fsops::RootedFs;
+
+    if query.trim().is_empty() {
+        return Err(ProtocolError::new(
+            ErrorCode::ProtocolInvalidRequest,
+            "files.search needs a query; an empty one would answer the whole server. Use files.list for a directory.",
+        ));
+    }
+    let fs = RootedFs::open(root).map_err(|e| to_protocol(&e))?;
+    let limit = limit.clamp(1, FILES_SEARCH_MAX_LIMIT);
+    let result = fs.search(query, limit as usize).map_err(|e| to_protocol(&e))?;
+    Ok(FilesSearchResult {
+        hits: result
+            .hits
+            .into_iter()
+            .map(|hit| FilesSearchHit {
+                path: hit.path,
+                kind: match hit.kind {
+                    zamin_core::fsops::EntryKind::Dir => EntryKind::Directory,
+                    zamin_core::fsops::EntryKind::File => EntryKind::File,
+                },
+                size_bytes: hit.size,
+                modified_ms: hit.modified_ms,
+            })
+            .collect(),
+        truncated: result.truncated,
+        scanned: result.scanned,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -319,6 +373,62 @@ mod tests {
 
         let past = read(&root, "data.bin", 99, 4).unwrap_err();
         assert_eq!(past.code, ErrorCode::ProtocolInvalidRequest);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn copy_lands_bytes_and_refuses_existing_targets_typed() {
+        let root = scratch("copy");
+        std::fs::write(root.join("a.yml"), b"alpha\n").unwrap();
+        std::fs::write(root.join("b.yml"), b"beta\n").unwrap();
+
+        let result = copy(&root, "a.yml", "backup/a.yml").unwrap();
+        assert_eq!(result.path, "backup/a.yml");
+        assert_eq!(result.files, 1);
+        assert_eq!(result.bytes, 6);
+        assert_eq!(std::fs::read(root.join("backup/a.yml")).unwrap(), b"alpha\n");
+
+        // Never overwrite: the refusal is typed and the target is intact.
+        let err = copy(&root, "a.yml", "b.yml").unwrap_err();
+        assert_eq!(err.code, ErrorCode::FsCopyTargetExists);
+        assert_eq!(std::fs::read(root.join("b.yml")).unwrap(), b"beta\n");
+
+        // Containment travels with copy like every other verb.
+        let err = copy(&root, "a.yml", "../escape.yml").unwrap_err();
+        assert_eq!(err.code, ErrorCode::FsPathEscapesRoot);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn search_answers_sorted_hits_and_skips_staging() {
+        let root = scratch("search");
+        std::fs::create_dir_all(root.join("plugins/EssentialsX")).unwrap();
+        std::fs::create_dir_all(root.join(".zamin-staging")).unwrap();
+        std::fs::write(root.join("plugins/EssentialsX/config.yml"), b"").unwrap();
+        std::fs::write(root.join("plugins/EssentialsX.jar"), b"").unwrap();
+        std::fs::write(root.join(".zamin-staging/stage-1"), b"").unwrap();
+
+        let result = search(&root, "ESSENTIALS", 100).unwrap();
+        let paths: Vec<&str> = result.hits.iter().map(|h| h.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["plugins/EssentialsX", "plugins/EssentialsX.jar"]
+        );
+        assert!(result.scanned > 0);
+        assert!(!result.truncated);
+
+        // The daemon's staging area is never an answer about the server's files.
+        let result = search(&root, "stage-1", 100).unwrap();
+        assert!(result.hits.is_empty());
+
+        // An empty query is the listing's job, not the search's.
+        let err = search(&root, "   ", 100).unwrap_err();
+        assert_eq!(err.code, ErrorCode::ProtocolInvalidRequest);
+
+        // The limit is clamped and the truncation flag is honest.
+        let result = search(&root, "essentials", 1).unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert!(result.truncated);
         std::fs::remove_dir_all(&root).unwrap();
     }
 

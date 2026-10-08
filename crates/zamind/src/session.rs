@@ -1057,6 +1057,38 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
                 Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
             }
         }
+        methods::FILES_COPY => {
+            let params: zamin_protocol::files::FilesCopyParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => match engine.files_copy(&server_id, &params.from, &params.to).await {
+                    Ok(result) => json_ok(id, result),
+                    Err(e) => dispatch_error(id, e),
+                },
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
+        methods::FILES_SEARCH => {
+            let params: zamin_protocol::files::FilesSearchParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match ServerId::parse(&params.server_id) {
+                Ok(server_id) => {
+                    let limit = params
+                        .limit
+                        .unwrap_or(zamin_protocol::files::FILES_SEARCH_DEFAULT_LIMIT)
+                        .clamp(1, zamin_protocol::files::FILES_SEARCH_MAX_LIMIT);
+                    match engine.files_search(&server_id, &params.query, limit).await {
+                        Ok(result) => json_ok(id, result),
+                        Err(e) => dispatch_error(id, e),
+                    }
+                }
+                Err(e) => Response::err(id, crate::engine::to_protocol(&e)),
+            }
+        }
         methods::PLAYERS_LIST => {
             let params: zamin_protocol::players::PlayersListParams = match request.parse_params() {
                 Ok(params) => params,
