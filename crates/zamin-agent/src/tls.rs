@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rcgen::{CertificateParams, DnType, KeyPair, SanType};
 use rustls::pki_types::pem::PemObject;
@@ -102,7 +102,7 @@ fn generate_self_signed() -> Result<(CertificateDer<'static>, PrivateKeyDer<'sta
 
 /// Credential-adjacent files are 0600; the directory is created by the
 /// caller (`load_or_generate`).
-fn write_private(path: &PathBuf, contents: String) -> Result<(), TlsError> {
+fn write_private(path: &Path, contents: String) -> Result<(), TlsError> {
     // The private-by-default write is the platform seam's call (ADR-0008).
     zamin_core::platform::private_file::write_private_file(path, &contents)?;
     Ok(())

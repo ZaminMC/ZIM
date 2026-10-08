@@ -2,6 +2,7 @@
 // files named tests.rs — the seam guard's test exemption).
 
 use super::*;
+use std::path::PathBuf;
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("zamin-agent-tls-{}-{tag}", std::process::id()));
