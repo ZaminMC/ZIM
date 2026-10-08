@@ -5,6 +5,7 @@
 
 import { useConnection } from "../../state/connection";
 import { activeProfile, useConnections } from "../../state/connections";
+import { useFeedback } from "../../state/feedback";
 import { updatesSentence, useUpdates } from "../../state/updates";
 import { useUi } from "../../state/ui";
 import { Button } from "../../ui/Button";
@@ -17,10 +18,60 @@ const RESERVED: Array<{ name: string; note: string }> = [
   { name: "Publishing", note: "Package and publish a server through provider APIs." },
 ];
 
-/** The updates rows (ADR-0024): the lane's phase in plain sentences, the
- *  two automatics as honest toggles, and the manual check. A pending
- *  restart disables the manual check — an install already ran; asking the
- *  channel again would quietly bury that fact (§82). */
+/** The feedback account rows (ADR-0028): the machine-local GitHub token
+ *  the feedback page files issues with — masked, proven on demand, never
+ *  rendered back in full. Empty means the browser route stays the route. */
+function FeedbackAccountSection() {
+  const token = useFeedback((s) => s.token);
+  const login = useFeedback((s) => s.login);
+  const signIn = useFeedback((s) => s.signIn);
+  const setToken = useFeedback((s) => s.setToken);
+  const checkSignIn = useFeedback((s) => s.checkSignIn);
+
+  const status =
+    token === ""
+      ? "No token — feedback opens in your own signed-in browser."
+      : signIn === "signed-in"
+        ? `Signed in as ${login ?? "?"}.`
+        : signIn === "checking"
+          ? "Checking…"
+          : signIn === "invalid"
+            ? "Rejected by GitHub — paste a fresh token."
+            : "Saved but unverified — it will be proven at first use.";
+
+  return (
+    <section className={styles.section} aria-label="Feedback account">
+      <h2 className={styles.sectionTitle}>Feedback account</h2>
+      <div className={styles.row}>
+        <div className={styles.rowMain}>
+          <span className={styles.rowName}>GitHub token for feedback</span>
+          <span className={styles.rowDetail}>{status}</span>
+          <span className={styles.rowDetail}>
+            Stays on this machine; sent only to api.github.com. The browser route needs none.
+          </span>
+        </div>
+        <div className={styles.tokenStack}>
+          <input
+            className={styles.tokenInput}
+            type="password"
+            value={token}
+            placeholder="ghp_… (classic) or github_pat_… (fine-grained)"
+            aria-label="GitHub token for feedback"
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setToken(e.target.value)}
+          />
+          {token !== "" ? (
+            <Button variant="ghost" onClick={() => void checkSignIn()}>
+              Verify
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function UpdatesSection() {
   const phase = useUpdates((s) => s.phase);
   const prefs = useUpdates((s) => s.prefs);
@@ -204,6 +255,8 @@ export function SettingsPage() {
         </section>
 
         <UpdatesSection />
+
+        <FeedbackAccountSection />
 
         <section className={styles.section} aria-label="Planned">
           <h2 className={styles.sectionTitle}>Planned — not in this build</h2>

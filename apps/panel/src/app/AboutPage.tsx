@@ -74,6 +74,10 @@ export function AboutPage() {
           Apache License 2.0. The panel is a client; the daemon owns the processes, the files,
           and the audit trail (§65 — one authoritative backend).
         </p>
+        <p className={styles.body}>
+          Found something broken or missing? <strong>Feedback</strong> (zaminpanel://feedback/)
+          files a real issue with the builders.
+        </p>
       </section>
     </div>
   );

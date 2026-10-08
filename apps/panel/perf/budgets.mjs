@@ -43,7 +43,11 @@ const BUDGETS = {
   // §54 vertical rail's rules ride the strip's chrome stylesheet. The
   // entry CSS (the boot path) is untouched by this slice; the growth is
   // surfaces arriving, not the shell regrowing.
-  totalCssGzip: 18 * 1024,
+  // 18 → 19 KB at ADR-0028: the feedback page's own stylesheet plus the
+  // settings account row — both lazy-chunk CSS. The same slice moved the
+  // settings page onto the internal-pages lazy lane, paying ~3 KB of
+  // entry JS back; the boot path's CSS line is untouched.
+  totalCssGzip: 19 * 1024,
   // The entry stylesheet's own line (the cold start's CSS), kept
   // explicit so a chrome-only regression cannot hide inside the total.
   entryCssGzip: 11 * 1024,

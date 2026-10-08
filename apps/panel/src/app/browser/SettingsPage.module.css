@@ -67,6 +67,31 @@
   min-width: 0;
 }
 
+/* The feedback token rows (ADR-0028): a masked field plus its verify
+   verb, stacked so the row stays one quiet unit. */
+.tokenStack {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.tokenInput {
+  width: 260px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+}
+
+.tokenInput:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .rowName {
   color: var(--text);
   font-size: var(--text-m);

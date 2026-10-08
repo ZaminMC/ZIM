@@ -199,6 +199,11 @@ fn main() {
         // through these plugins; the host adds no policy of its own.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Feedback's send routes (ADR-0028): the webview composes the issue
+        // and picks the route; these perform the OS calls — the browser
+        // open, and the clipboard handoff for a pasted screenshot.
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(HostState::default())
         .invoke_handler(tauri::generate_handler![
             daemon_connect,

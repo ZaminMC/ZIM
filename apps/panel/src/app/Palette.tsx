@@ -37,6 +37,7 @@ export function buildCommands(
     jobs: () => void;
     audit: () => void;
     about: () => void;
+    feedback: () => void;
   },
 ): Command[] {
   const commands: Command[] = [
@@ -49,6 +50,7 @@ export function buildCommands(
       { id: "page-jobs", label: "Open jobs — long-running daemon operations", hint: "zaminpanel://jobs/", run: pages.jobs },
       { id: "page-audit", label: "Open the audit log", hint: "zaminpanel://audit/", run: pages.audit },
       { id: "page-about", label: "Open About ZaminPanel", hint: "zaminpanel://about/", run: pages.about },
+      { id: "page-feedback", label: "Send feedback — file an issue", hint: "zaminpanel://feedback/", run: pages.feedback },
     );
   }
   if (integration?.autostart.available) {
@@ -175,6 +177,10 @@ export function Palette() {
           about: () => {
             close(false);
             navigate({ kind: "about" });
+          },
+          feedback: () => {
+            close(false);
+            navigate({ kind: "feedback" });
           },
         },
       ),

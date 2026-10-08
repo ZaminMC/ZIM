@@ -20,7 +20,6 @@ import { FleetPage } from "./FleetPage";
 import { MissingPage } from "./browser/MissingPage";
 import { BookmarksBar } from "./browser/BookmarksBar";
 import { NewTabPage } from "./browser/NewTabPage";
-import { SettingsPage } from "./browser/SettingsPage";
 import { TabBoundary } from "./browser/TabCrash";
 import { TabStrip } from "./browser/TabStrip";
 import { ToolBar } from "./browser/ToolBar";
@@ -43,6 +42,14 @@ const Palette = lazy(() => import("./Palette").then((m) => ({ default: m.Palette
 const JobsPage = lazy(() => import("./JobsPage").then((m) => ({ default: m.JobsPage })));
 const AuditPage = lazy(() => import("./AuditPage").then((m) => ({ default: m.AuditPage })));
 const AboutPage = lazy(() => import("./AboutPage").then((m) => ({ default: m.AboutPage })));
+const FeedbackPage = lazy(() =>
+  import("./FeedbackPage").then((m) => ({ default: m.FeedbackPage })),
+);
+// The settings page rides the same lane: an internal page, not a boot
+// surface — its tab loads it on first open (PERFORMANCE-BUDGETS).
+const SettingsPage = lazy(() =>
+  import("./browser/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
 
 function DestinationView({ destination }: { destination: Destination }) {
   const navigate = useTabs((s) => s.navigate);
@@ -71,6 +78,8 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <AuditPage />;
     case "about":
       return <AboutPage />;
+    case "feedback":
+      return <FeedbackPage />;
     case "missing":
       return <MissingPage url={destination.url} />;
   }

@@ -183,6 +183,16 @@ export function ToolBar() {
             >
               Connections…
             </button>
+            <button
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                setMenuOpen(false);
+                useTabs.getState().navigate({ kind: "feedback" });
+              }}
+            >
+              Send feedback
+            </button>
             <div className={styles.divider} />
             <div className={styles.menuStatus}>
               <span className={styles.pulseDot} style={{ background: statusColor }} aria-hidden />
