@@ -1,14 +1,16 @@
-// The log feed engine (ADR-0020): one file-backed, live-joined line feed
+// The log feed engine (ADR-0020, corrected P0): one live-joined line feed
 // that every structured view plays by the same rules — the Logs workspace
-// tab and the console (embedded and the dedicated §27 tab) alike. The
-// machinery was extracted verbatim from LogViewer so console behavior can
-// never fork from log behavior: one seam discipline (stripLiveOverlap),
-// one paging cursor, one reconnect re-seed, one bounded buffer.
+// tab and the console (embedded and the dedicated §27 tab) alike. One
+// seam discipline (stripLiveOverlap), one paging cursor, one reconnect
+// re-seed, one bounded buffer.
 //
-// §30 lives here, not in the views: pages load by byte offset (event
-// cursor), live lines buffer while the operator is scrolled away, and the
-// state stays bounded no matter how chatty the server is — the file holds
-// the full history (ADR-0006), the feed only holds what is on screen.
+// The live source is the daemon's ingested PROCESS OUTPUT (stdout/stderr
+// → parse → ring → stream) and never a file. Subscribing without a
+// cursor, the daemon hands the ring's tail (last ~500 ingested lines) as
+// the opening batch — real output, available before any log file exists.
+// The file (logs/latest.log, written by the server) is only the DEEP
+// history: paged in on scroll-up, consulted on reconnect, and its
+// absence is a stated state (historyAvailable: false), not an error.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { rangeLogs, subscribeLogs } from "./actions";
@@ -66,25 +68,33 @@ export function stripLiveOverlap(history: LogLine[], live: LogLine[]): LogLine[]
 }
 
 export interface LogFeedState {
-  /** History pages + live lines, in order. Null until the tail resolves. */
+  /** History pages + live lines, in order. Null until the seed resolves. */
   lines: LogLine[] | null;
   /** Index in `lines` where the live section begins (the seam marker). */
   liveStart: number;
-  /** startOffset of the oldest loaded page; 0 = the file has no older lines. */
+  /** startOffset of the oldest loaded page; 0 = no older history pages. */
   cursor: number;
+  /** False when the server has written no log file yet: the console is
+   *  live output alone, and the view says so once instead of failing. */
+  historyAvailable: boolean;
   loadingOlder: boolean;
   error: ProtocolErrorObject | null;
   /** Live lines waiting while the operator scrolled away from the bottom. */
   newCount: number;
+  /** Lines the daemon's bounded queue dropped while the operator was
+   *  connected — stated, never silently swallowed. */
+  missed: number;
 }
 
 export const INITIAL_FEED: LogFeedState = {
   lines: null,
   liveStart: 0,
   cursor: 0,
+  historyAvailable: true,
   loadingOlder: false,
   error: null,
   newCount: 0,
+  missed: 0,
 };
 
 /** The feed every structured log view renders from. Owns the stream, the
@@ -132,9 +142,11 @@ export function useLogFeed(serverId: string) {
             lines: [...tail.lines, ...joined],
             liveStart: tail.lines.length,
             cursor: tail.startOffset,
+            historyAvailable: tail.historyAvailable,
             loadingOlder: false,
             error: null,
             newCount: 0,
+            missed: 0,
           });
           return tail.lines;
         })
@@ -152,8 +164,11 @@ export function useLogFeed(serverId: string) {
     [serverId],
   );
 
-  // Live stream first (live-only cursor: no ring replay to duplicate the
-  // pages), buffered until the seam opens; then the file tail seeds.
+  // Live stream first. Subscribing WITHOUT a cursor, the daemon replays
+  // its ingested ring tail as the opening batch — process output the
+  // server produced before the client even connected, available whether
+  // or not a log file exists. Those lines buffer until the seam opens;
+  // then the (optional) file history seeds and the overlap is stripped.
   useEffect(() => {
     let disposed = false;
     let disposeStream: (() => void) | null = null;
@@ -166,7 +181,16 @@ export function useLogFeed(serverId: string) {
       serverId,
       {
         onPayload: (notification) => {
-          if (isDisposed() || notification.payload.kind !== "logs") return;
+          if (isDisposed()) return;
+          if (notification.payload.kind === "missed") {
+            // The daemon's bounded queue dropped lines while the operator
+            // was connected. Stated in the view, never silently swallowed;
+            // the file holds what the buffer could not (ADR-0006).
+            const missed = notification.payload.missed;
+            setState((s) => ({ ...s, missed: s.missed + missed }));
+            return;
+          }
+          if (notification.payload.kind !== "logs") return;
           if (!seamOpen) {
             pending.push(...notification.payload.batch);
             return;
@@ -174,10 +198,9 @@ export function useLogFeed(serverId: string) {
           appendLive(notification.payload.batch);
         },
         onRegistered: () => {
-          // A resubscribe (reconnect) may have missed lines while the
-          // transport was down; the file holds them (ADR-0006), so the
-          // history re-seeds from the tail and the seam re-opens. The
-          // first registration is the mount flow, handled below.
+          // A resubscribe (reconnect) replays the ring from the daemon's
+          // buffer; the file holds anything older (ADR-0006). Re-seed so
+          // the seam re-opens against fresh history.
           if (!seamOpen || isDisposed()) return;
           seamOpen = false;
           const live = stateRef.current.lines?.slice(stateRef.current.liveStart) ?? [];
@@ -193,9 +216,8 @@ export function useLogFeed(serverId: string) {
             });
         },
       },
-      // Live-only: a logs cursor skips the daemon's ring replay, which
-      // would duplicate the file-backed pages.
-      { file: "latest.log", offset: 0 },
+      // No initial cursor: the ring tail arrives as the opening batch
+      // (replay of what the daemon already ingested from the process).
     )
       .then(async (subscription) => {
         if (isDisposed()) {
@@ -204,10 +226,9 @@ export function useLogFeed(serverId: string) {
         }
         disposeStream = () => subscription.dispose();
 
-        // The tail read is the seam: everything buffered before it seeds
-        // the history (overlap stripped inside); anything that arrived
-        // during the read is deduped against the fresh history and
-        // appended; from then on the stream is purely live.
+        // The seed is the seam: everything buffered before it (ring tail
+        // included) merges against the file history — overlap stripped
+        // inside; from then on the stream is purely live.
         const history = await seedHistory([...pending]);
         pending.length = 0;
         const residual = stripLiveOverlap(history ?? [], [...pending]);

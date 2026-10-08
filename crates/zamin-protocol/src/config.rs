@@ -48,7 +48,10 @@ pub struct EffectiveSettingsView {
     pub min_memory_mb: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_memory_mb: Option<u32>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Always serialized, even empty: a list field is always a list on
+    /// the wire. Omitting it made older clients crash reading `.join`
+    /// off `undefined` — the Startup tab's whole-tab crash (P0, fixed).
+    #[serde(default)]
     pub extra_jvm_args: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub java_path: Option<String>,

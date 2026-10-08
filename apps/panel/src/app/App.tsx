@@ -8,8 +8,10 @@
 
 import { Suspense, lazy, useEffect, useMemo } from "react";
 import type { Destination } from "../state/destinations";
+import { destinationLabel } from "../state/destinations";
+import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
+import { isBookmarked, useBookmarks } from "../state/bookmarks";
 import { sortedServers, useServers } from "../state/servers";
-import { useBookmarks } from "../state/bookmarks";
 import { bootWindow, tabDestination, tabKeyOf, useTabs } from "../state/tabs";
 import { startUpdates } from "../state/updates";
 import { useUi } from "../state/ui";
@@ -129,75 +131,61 @@ export function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const mod = event.ctrlKey || event.metaKey;
-      const tabsApi = useTabs.getState();
-      if (mod && !event.shiftKey && event.key.toLowerCase() === "k") {
-        // The palette keeps its §53 journey.
-        event.preventDefault();
-        setPaletteOpen(!useUi.getState().paletteOpen);
-        return;
-      }
-      if (mod && event.shiftKey && event.key.toLowerCase() === "b") {
-        // §55: the bookmark bar toggles like a browser's.
-        event.preventDefault();
-        useBookmarks.getState().toggleBar();
-        return;
-      }
-      if (mod && event.key.toLowerCase() === "t") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          // §90: reopen the most recently closed tab.
-          tabsApi.reopen();
-        } else {
-          tabsApi.newTab();
-        }
-        return;
-      }
-      if (mod && event.key.toLowerCase() === "w") {
-        event.preventDefault();
-        const id = useTabs.getState().activeId;
-        if (id) tabsApi.close(id);
-        return;
-      }
-      if (mod && event.key.toLowerCase() === "l") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("zamin:focus-address"));
-        return;
-      }
-      if (event.key === "F6") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("zamin:focus-address"));
-        return;
-      }
-      if (mod && event.key.toLowerCase() === "r") {
-        event.preventDefault();
-        tabsApi.reload();
-        return;
-      }
-      if (event.altKey && event.key === "ArrowLeft") {
-        event.preventDefault();
-        tabsApi.back();
-        return;
-      }
-      if (event.altKey && event.key === "ArrowRight") {
-        event.preventDefault();
-        tabsApi.forward();
-        return;
-      }
-      if (mod && event.key === "Tab") {
-        event.preventDefault();
-        const list = useTabs.getState().tabs;
-        if (list.length < 2) return;
-        const currentId = useTabs.getState().activeId;
-        const index = list.findIndex((t) => t.id === currentId);
-        const step = event.shiftKey ? -1 : 1;
-        const next = list[(index + step + list.length) % list.length];
-        if (next) tabsApi.setActive(next.id);
-      }
+      // The browser keyboard contract (ADR-0032): Chromium's command
+      // table (chrome_command_ids.h) decided in one pure function and
+      // executed here against the stores. The destination model beneath
+      // it stays ZaminPanel's — Ctrl+T opens a new-tab page (§6).
+      const target = event.target as (HTMLElement & { isContentEditable: boolean }) | null;
+      const api: BrowserKeyApi = {
+        newTab: () => useTabs.getState().newTab(),
+        reopenClosedTab: () => useTabs.getState().reopen(),
+        closeActiveTab: () => {
+          const id = useTabs.getState().activeId;
+          if (id) useTabs.getState().close(id);
+        },
+        cycleTab: (step) => {
+          const list = useTabs.getState().tabs;
+          if (list.length < 2) return;
+          const index = list.findIndex((t) => t.id === useTabs.getState().activeId);
+          const next = list[(index + step + list.length) % list.length];
+          if (next) useTabs.getState().setActive(next.id);
+        },
+        selectTabIndex: (index) => {
+          const list = useTabs.getState().tabs;
+          const tab = index === "last" ? list[list.length - 1] : list[index];
+          if (tab) useTabs.getState().setActive(tab.id);
+        },
+        focusAddressBar: () =>
+          window.dispatchEvent(new CustomEvent("zamin:focus-address")),
+        reload: () => useTabs.getState().reload(),
+        goBack: () => useTabs.getState().back(),
+        goForward: () => useTabs.getState().forward(),
+        bookmarkActive: () => {
+          const store = useBookmarks.getState();
+          const entries = Object.values(useServers.getState().servers);
+          const current = tabs.find((t) => t.id === useTabs.getState().activeId);
+          if (!current) return;
+          const destination = tabDestination(current);
+          if (isBookmarked(store.items, destination)) store.removeDestination(destination);
+          else store.add(destination, destinationLabel(destination, entries));
+        },
+        toggleBookmarksBar: () => useBookmarks.getState().toggleBar(),
+        togglePalette: () => setPaletteOpen(!useUi.getState().paletteOpen),
+        paletteOpen: () => useUi.getState().paletteOpen,
+      };
+      const verdict = handleBrowserKey(
+        event,
+        {
+          isContentEditable: target?.isContentEditable ?? false,
+          tagIsInput: target?.tagName === "INPUT" || target?.tagName === "TEXTAREA",
+        },
+        api,
+      );
+      if (verdict.handled) event.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setPaletteOpen]);
+  }, [setPaletteOpen, tabs]);
 
   // The content key: the TAB's own id (two views of one server stay
   // isolated, §51), its destination, and a reload token — a new value

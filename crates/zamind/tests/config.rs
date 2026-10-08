@@ -42,6 +42,15 @@ async fn config_get_defaults_and_provenance() {
     assert_eq!(got["provenance"]["stopTimeoutSecs"], "global");
     assert_eq!(got["provenance"]["port"], "global");
 
+    // A list field is ALWAYS a list on the wire — even empty. Omitting
+    // it made an installed client crash reading `.join` off undefined:
+    // the Startup tab's whole-tab crash (P0). The wire no longer lies
+    // by absence, whatever the field's value is.
+    let empty_args = got["effective"]["extraJvmArgs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("extraJvmArgs must ride the wire even empty"));
+    assert!(empty_args.is_empty(), "no jvm args configured yet");
+
     // Unknown server: typed, not a silent empty answer.
     let err = client
         .request(methods::CONFIG_GET, json!({ "serverId": "ghost" }))

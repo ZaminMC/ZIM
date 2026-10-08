@@ -64,4 +64,10 @@ pub struct LogRangeResult {
     /// boundary. Pass it as `beforeOffset` to page further back; when it
     /// is 0 the file has no older lines.
     pub start_offset: u64,
+    /// False when the server has not written `logs/latest.log` yet (or it
+    /// was removed between runs): the answer is honest emptiness, NOT an
+    /// error. The live console is the process output stream and never
+    /// depended on this file; a missing history is stated once, not
+    /// spammed (P0: "no log file found" is not a broken console).
+    pub history_available: bool,
 }

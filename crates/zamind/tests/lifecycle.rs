@@ -493,20 +493,27 @@ async fn logs_range_tails_the_file_backed_history() {
     assert_eq!(all["lines"].as_array().expect("lines array").len(), 50);
     assert_eq!(all["olderAvailable"], false);
 
-    // Parsed fields ride along (level/thread), tsMs stays 0 for file-backed
+    // Parsed fields ride along (level/thread); tsMs stays 0 for file-backed
     // lines — the ingestion time never existed (protocol spec §9).
     assert_eq!(all["lines"][0]["level"], "info");
     assert_eq!(all["lines"][0]["thread"], "Server thread");
     assert_eq!(all["lines"][0]["tsMs"], 0);
 
-    // Missing log file → a typed FS_NOT_FOUND, not a silent empty result.
+    // A missing log file is NOT a broken console (P0): the server simply
+    // has no history yet. The historical read answers honestly empty with
+    // historyAvailable: false — the live stream is the console, and this
+    // is a state, not an error the client would spam.
     let empty_root = make_server_root("root-log-range-empty");
     register_server(&mut client, "fresh", &empty_root).await;
-    let error = client
+    let no_history = client
         .request(methods::LOGS_RANGE, json!({"serverId": "fresh"}))
         .await
-        .expect_err("no log file yet");
-    assert_eq!(error["code"], "FS_NOT_FOUND");
+        .expect("missing history is an honest empty, not an error");
+    assert_eq!(no_history["lines"].as_array().expect("lines").len(), 0);
+    assert_eq!(no_history["historyAvailable"], false);
+    assert_eq!(no_history["olderAvailable"], false);
+    // And the file-backed read of a server WITH a log says so:
+    assert_eq!(all["historyAvailable"], true);
 
     // Unregistered server → SERVER_NOT_FOUND.
     let error = client

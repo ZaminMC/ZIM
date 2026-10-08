@@ -80,7 +80,9 @@ Implemented for the daemon's first release; the file set is specified now, imple
 | `players` | `players.list` (Server List Ping: online/max, the server's name sample, latency, version, MOTD) |
 | `streams` | `streams.subscribe`, `streams.unsubscribe` |
 
-- `logs.range` is the file-backed historical read: the tail of the server's own `logs/latest.log`, through the rooted filesystem (ADR-0006's catch-up path).
+- `logs.range` is the file-backed historical read: the tail of the server's own `logs/latest.log`, through the rooted filesystem (ADR-0006's catch-up path). **A missing log file is not an error**: the result is honestly empty with `historyAvailable: false` (P0 correction — the live console is the process-output stream, which never needed the file; the historical read states its absence instead of failing the client into a "no log file found" loop).
+- `server.list` summaries carry the **address half** each server answers on: `port` (the layered config's desired override, else `server.properties`' boot authority, ADR-0007) and `bindAddress` (`server.properties`' `server-ip`; absent = all interfaces). The address bar resolves `host:port` joins against exactly this — a server id is an identifier, never an address (P0 correction).
+- `config.get`/`config.set` results **always** serialize `effective.extraJvmArgs`, even empty — a list field is always a list on the wire (P0 correction: omitting it crashed an installed client reading `.join` off `undefined`, taking the whole Startup tab down).
 
 ```json
 → {"jsonrpc":"2.0","id":10,"method":"logs.range",

@@ -239,21 +239,71 @@ impl Engine {
         }
     }
 
+    /// `server.properties` is Minecraft's file (ADR-0007): the daemon
+    /// reads the boot authority (`server-port`) and the bind address
+    /// (`server-ip`) and never writes them behind the server's back.
+    /// Shared by `network.status` and the fleet summary's address half
+    /// (the P0 address resolver's registry source).
+    fn read_properties_address(root: &Path) -> (Option<u16>, Option<String>) {
+        std::fs::read_to_string(root.join("server.properties"))
+            .ok()
+            .map(|content| {
+                let mut port = None;
+                let mut bind = None;
+                for line in content.lines() {
+                    if let Some(v) = line.trim().strip_prefix("server-port=") {
+                        port = v.trim().parse::<u16>().ok();
+                    } else if let Some(v) = line.trim().strip_prefix("server-ip=") {
+                        bind = Some(v.trim().to_owned());
+                    }
+                }
+                (port, bind)
+            })
+            .unwrap_or((None, None))
+    }
+
     pub async fn list_servers(&self) -> Vec<ServerSummary> {
-        let entries: Vec<(ServerId, String)> = {
+        let entries: Vec<(ServerId, String, PathBuf)> = {
             let registry = self.registry_lock();
             registry
                 .all()
-                .map(|e| (e.server_id.clone(), e.display_name.clone()))
+                .map(|e| (e.server_id.clone(), e.display_name.clone(), e.root.clone()))
                 .collect()
         };
+        let data_dir = self.inner.data_dir.clone();
+        // The address half of the summary is read per server (one small
+        // properties file at most); the fleet is small, and the address
+        // bar resolves against exactly this (P0 §13/§14).
+        let addresses = tokio::task::spawn_blocking(move || {
+            let global =
+                zamin_core::config::load_global(&data_dir.join("config.toml")).unwrap_or_default();
+            entries
+                .into_iter()
+                .map(|(server_id, display_name, root)| {
+                    let per = zamin_core::config::load_server(
+                        &data_dir
+                            .join("servers")
+                            .join(server_id.as_str())
+                            .join("config.toml"),
+                    )
+                    .unwrap_or_default();
+                    let desired = zamin_core::config::layer(&global.defaults, &per.settings).port;
+                    let (properties_port, bind) = Self::read_properties_address(&root);
+                    (server_id, display_name, desired.or(properties_port), bind)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
         let mut out = Vec::new();
-        for (server_id, display_name) in entries {
+        for (server_id, display_name, port, bind_address) in addresses {
             let state = self.describe_state(&server_id).await;
             out.push(ServerSummary {
                 server_id: server_id.to_string(),
                 display_name,
                 state,
+                port,
+                bind_address,
             });
         }
         out
@@ -864,22 +914,8 @@ impl Engine {
 
             // server.properties is Minecraft's file (ADR-0007); the
             // daemon reads the boot authority and never writes it behind
-            // the server's back.
-            let properties = std::fs::read_to_string(root.join("server.properties"))
-                .ok()
-                .map(|content| {
-                    let mut port = None;
-                    let mut bind = None;
-                    for line in content.lines() {
-                        if let Some(v) = line.trim().strip_prefix("server-port=") {
-                            port = v.trim().parse::<u16>().ok();
-                        } else if let Some(v) = line.trim().strip_prefix("server-ip=") {
-                            bind = Some(v.trim().to_owned());
-                        }
-                    }
-                    (port, bind)
-                })
-                .unwrap_or((None, None));
+            // the server's back (shared with the fleet summary's address).
+            let properties = Self::read_properties_address(&root);
 
             // Other registered servers claiming the same desired port.
             let mut conflicts = Vec::new();
@@ -1044,9 +1080,8 @@ impl Engine {
                 .map(|e| e.root.clone())
                 .ok_or_else(|| not_found(server_id))?
         };
-        let server_id = server_id.to_string();
         let result = tokio::task::spawn_blocking(move || {
-            range_of_latest_log(&root, &server_id, max_lines, before_offset)
+            range_of_latest_log(&root, max_lines, before_offset)
         })
         .await
         .map_err(|e| EngineError::Internal(format!("log read task failed: {e}")))?;
@@ -3596,7 +3631,6 @@ fn patch_stamped_port(root: &Path, port: u16) {
 /// overlong line is the one unbounded case and is served whole.
 fn range_of_latest_log(
     root: &Path,
-    server_id: &str,
     max_lines: u32,
     before_offset: Option<u64>,
 ) -> Result<zamin_protocol::logs::LogRangeResult, ProtocolError> {
@@ -3607,11 +3641,20 @@ fn range_of_latest_log(
 
     let fs = zamin_core::fsops::RootedFs::open(root).map_err(|e| to_protocol(&e))?;
     let path = fs.resolve(FILE).map_err(|e| to_protocol(&e))?;
+    // No file yet is NOT an error: a server that has never written its
+    // log simply has no history. The live console rides the process
+    // output stream; this answer is the historical read, and it answers
+    // honestly empty (historyAvailable: false) instead of a typed
+    // failure the client rendered as a broken console (P0). Real
+    // filesystem failures below remain typed errors.
     if !path.is_file() {
-        return Err(ProtocolError::new(
-            ErrorCode::FsNotFound,
-            format!("Server {server_id} has no log file yet ({FILE} does not exist in its root)."),
-        ));
+        return Ok(LogRangeResult {
+            file: FILE.to_owned(),
+            lines: Vec::new(),
+            older_available: false,
+            start_offset: 0,
+            history_available: false,
+        });
     }
 
     let mut file = std::fs::File::open(&path)
@@ -3655,6 +3698,7 @@ fn range_of_latest_log(
             lines: Vec::new(),
             older_available: false,
             start_offset: 0,
+            history_available: true,
         });
     }
 
@@ -3734,6 +3778,7 @@ fn range_of_latest_log(
         lines,
         older_available: start_offset > 0,
         start_offset,
+        history_available: true,
     })
 }
 

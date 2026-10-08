@@ -78,13 +78,30 @@ pub async fn endpoint_ready(endpoint: &Endpoint) -> bool {
 
 /// Spawn the daemon without arguments — defaults are already correct
 /// (per-user endpoint, XDG/Known-Folders data dir).
+///
+/// Windows: `zamind` is a console-subsystem binary; spawned by this GUI
+/// process without CREATE_NO_WINDOW it would allocate a brand-new
+/// console — the mysterious CMD window on every first launch. The flag
+/// detaches the child from any console allocation; its stdout/stderr are
+/// null anyway. This is the same mechanism the daemon itself uses when
+/// it spawns server processes (zamin-core platform/windows.rs, ADR-0005),
+/// applied one level up.
 pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW — a daemon is a background service, not a
+        // terminal session.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn()?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });

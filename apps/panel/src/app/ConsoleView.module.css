@@ -288,3 +288,11 @@
   color: var(--danger);
   font-size: var(--text-s);
 }
+
+/* The honest state note (P0): missing history is a state, said once. */
+.note {
+  margin: 0;
+  padding: 2px 10px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}

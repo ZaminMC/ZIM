@@ -31,7 +31,8 @@ export function LogViewer({ serverId }: { serverId: string }) {
   const [search, setSearch] = useState("");
 
   const { state, listRef, markBottom, loadOlder, jumpToLive, retrySeed } = useLogFeed(serverId);
-  const { lines, liveStart, cursor, loadingOlder, error, newCount } = state;
+  const { lines, liveStart, cursor, loadingOlder, error, newCount, historyAvailable, missed } =
+    state;
 
   const visible = useMemo(() => {
     if (lines === null) return null;
@@ -99,7 +100,18 @@ export function LogViewer({ serverId }: { serverId: string }) {
                 {loadingOlder ? "Loading…" : "Load older lines"}
               </button>
             ) : null}
-            {!error && cursor === 0 && lines !== null && lines.length > 0 ? (
+            {!error && missed > 0 ? (
+              <p className={styles.note} role="status">
+                {missed} line{missed === 1 ? "" : "s"} were missed while the daemon's buffer
+                overflowed — older lines live in the log file.
+              </p>
+            ) : null}
+            {!error && !historyAvailable ? (
+              <p className={styles.note} role="status">
+                No saved history yet — this view is the live process output.
+              </p>
+            ) : null}
+            {!error && cursor === 0 && historyAvailable && lines !== null && lines.length > 0 ? (
               <p className={styles.startOfLog}>beginning of the log file</p>
             ) : null}
             {visible.filter(({ index }) => index !== liveStart).length === 0 && !error ? (

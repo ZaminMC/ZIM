@@ -548,8 +548,26 @@ export async function setPublishReview(
 
 // --- server configuration surfaces (§7g, ADR-0019) --------------------------
 
+/** The wire boundary's shape guard (P0 lesson): a daemon the panel was
+ *  not built for (remote-profile version skew) must degrade at this
+ *  edge — never inside a view. Lists arrive as lists, whatever an older
+ *  or newer peer omits. */
+function normalizeConfigGet(result: ConfigGetResult): ConfigGetResult {
+  return {
+    ...result,
+    effective: {
+      ...result.effective,
+      extraJvmArgs: Array.isArray(result.effective.extraJvmArgs)
+        ? result.effective.extraJvmArgs
+        : [],
+    },
+  };
+}
+
 export async function getServerConfig(serverId: string): Promise<ConfigGetResult> {
-  return client.request<ConfigGetResult>("config.get", { serverId });
+  return normalizeConfigGet(
+    await client.request<ConfigGetResult>("config.get", { serverId }),
+  );
 }
 
 /** Tri-state over the wire: omitted keys keep, null clears, values set. */
@@ -557,7 +575,9 @@ export async function setServerConfig(
   serverId: string,
   payload: ConfigSetPayload,
 ): Promise<ConfigGetResult> {
-  return client.request<ConfigSetResult>("config.set", { serverId, ...payload });
+  return normalizeConfigGet(
+    await client.request<ConfigSetResult>("config.set", { serverId, ...payload }),
+  );
 }
 
 export async function getNetworkStatus(serverId: string): Promise<NetworkStatusResult> {

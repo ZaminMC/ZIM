@@ -29,6 +29,7 @@ function page(startOffset: number, lines: string[], olderAvailable = true): LogR
     lines: lines.map((line) => ({ tsMs: 0, level: "info", thread: "Server thread", line })),
     olderAvailable,
     startOffset,
+    historyAvailable: true,
   };
 }
 
@@ -87,6 +88,7 @@ describe("LogViewer", () => {
       ],
       olderAvailable: true,
       startOffset: 400,
+      historyAvailable: true,
     });
     render(<LogViewer serverId="smp" />);
 

@@ -119,7 +119,7 @@ export function ConsoleView({
     };
   }, [copyMenuOpen]);
 
-  const { lines, liveStart, cursor, loadingOlder, error, newCount } = state;
+  const { lines, liveStart, cursor, loadingOlder, error, newCount, historyAvailable, missed } = state;
 
   // §29: filtering is a view over the intact buffer — the feed keeps every
   // line, the chips only choose which rows render.
@@ -270,6 +270,17 @@ export function ConsoleView({
                 </button>
               </div>
             ) : null}
+            {!error && missed > 0 ? (
+              <p className={styles.note} role="status">
+                {missed} line{missed === 1 ? "" : "s"} were missed while the daemon's buffer
+                overflowed — older lines live in the log file.
+              </p>
+            ) : null}
+            {!error && !historyAvailable ? (
+              <p className={styles.note} role="status">
+                No saved history yet — this console is the live process output.
+              </p>
+            ) : null}
             {!error && cursor > 0 ? (
               <button
                 type="button"
@@ -280,7 +291,7 @@ export function ConsoleView({
                 {loadingOlder ? "Loading…" : "Load older lines"}
               </button>
             ) : null}
-            {!error && cursor === 0 && lines !== null && lines.length > 0 ? (
+            {!error && cursor === 0 && historyAvailable && lines !== null && lines.length > 0 ? (
               <p className={styles.startOfLog}>beginning of the log file</p>
             ) : null}
             {visible.filter(({ index }) => index !== liveStart).length === 0 && !error ? (

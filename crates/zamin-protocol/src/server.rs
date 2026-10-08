@@ -49,6 +49,20 @@ pub struct ServerSummary {
     pub server_id: String,
     pub display_name: String,
     pub state: ServerState,
+    /// The address the server answers on: the layered config's desired
+    /// port override, else the boot authority in `server.properties`
+    /// (ADR-0007). None = the server has no known port yet — the address
+    /// bar cannot resolve it, and says so instead of guessing.
+    /// The address resolver consumes this (P0: `0:25565` must reach the
+    /// server that owns the port; a server id is an identifier, never an
+    /// address).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// `server.properties`'s `server-ip` — the interface the server binds.
+    /// None/empty = all interfaces; a specific value must equal the typed
+    /// host for the address to resolve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind_address: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

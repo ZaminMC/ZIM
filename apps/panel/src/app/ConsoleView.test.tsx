@@ -3,11 +3,13 @@
 // contextual menu, §26's composer rides the ordinary stdin path, and §27's
 // icon hands the console to a dedicated tab exactly once per click.
 
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConsoleView, copyTextFor } from "./ConsoleView";
 import { useServers } from "../state/servers";
-import type { LogLine, LogRangeResult } from "../protocol/types";
+import type { LogLine, LogRangeResult, StreamNotification } from "../protocol/types";
+
+type PayloadHandler = (notification: StreamNotification) => void;
 
 const mocks = vi.hoisted(() => ({
   sendStdin: vi.fn(),
@@ -26,12 +28,16 @@ const rangeLogsMock = vi.mocked(rangeLogs);
 const subscribeLogsMock = vi.mocked(subscribeLogs);
 const sendStdinMock = mocks.sendStdin;
 
+/** Capture the stream handler's onPayload so tests push batches manually. */
+let liveHandler: PayloadHandler | null = null;
+
 function page(startOffset: number, lines: string[], olderAvailable = true): LogRangeResult {
   return {
     file: "logs/latest.log",
     lines: lines.map((text) => ({ tsMs: 0, level: "info", thread: "Server thread", line: text })),
     olderAvailable,
     startOffset,
+    historyAvailable: true,
   };
 }
 
@@ -57,9 +63,13 @@ beforeEach(() => {
   mocks.clipboardWrite.mockReset();
   mocks.clipboardWrite.mockResolvedValue(undefined);
   rangeLogsMock.mockReset();
+  liveHandler = null;
   subscribeLogsMock.mockReset();
-  subscribeLogsMock.mockImplementation(() =>
-    Promise.resolve({ dispose: () => {}, result: null }),
+  subscribeLogsMock.mockImplementation(
+    (_serverId: string, handler: { onPayload: PayloadHandler }) => {
+      liveHandler = handler.onPayload;
+      return Promise.resolve({ dispose: () => {}, result: null });
+    },
   );
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText: mocks.clipboardWrite },
@@ -84,6 +94,7 @@ describe("console filters (§29)", () => {
       ],
       olderAvailable: true,
       startOffset: 4096,
+      historyAvailable: true,
     });
     seedRegistry("running");
     render(<ConsoleView serverId="alpha" />);
@@ -123,6 +134,7 @@ describe("copy control (§28)", () => {
       lines: [line("info", "done line"), line("warn", "warn line"), line("error", "error line")],
       olderAvailable: false,
       startOffset: 0,
+      historyAvailable: true,
     });
     seedRegistry("running");
     render(<ConsoleView serverId="alpha" />);
@@ -229,5 +241,42 @@ describe("dedicated tab (§27)", () => {
     // The dedicated tab itself does not carry the icon.
     rerender(<ConsoleView serverId="alpha" variant="dedicated" />);
     expect(screen.queryByRole("button", { name: "Open console in new tab" })).toBeNull();
+  });
+});
+
+describe("no log file, no broken console (P0)", () => {
+  it("a missing log file is a stated state and the live stream is the console", async () => {
+    // The daemon's honest answer for a server that has never written
+    // logs/latest.log: empty history, historyAvailable: false.
+    rangeLogsMock.mockResolvedValue({
+      file: "logs/latest.log",
+      lines: [],
+      olderAvailable: false,
+      startOffset: 0,
+      historyAvailable: false,
+    });
+    seedRegistry("running");
+    render(<ConsoleView serverId="alpha" />);
+
+    // The note appears once — no error, no retry loop, no alert.
+    await waitFor(() =>
+      expect(screen.getByText(/No saved history yet/)).toBeTruthy(),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    // And the console still works: live output renders without any file.
+    act(() => {
+      liveHandler?.({
+        stream: "logs",
+        seq: 1,
+        payload: {
+          kind: "logs",
+          batch: [{ tsMs: 1, level: "info", line: "live output without any file" }],
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByText("live output without any file")).toBeTruthy(),
+    );
   });
 });

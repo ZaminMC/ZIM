@@ -53,6 +53,15 @@ export interface ServerSummary {
   serverId: string;
   displayName: string;
   state: ServerState;
+  /** The address the server answers on: the layered config's desired
+   *  port override, else server.properties' boot authority (ADR-0007).
+   *  Absent = unknown — the address bar cannot resolve it and says so
+   *  instead of guessing (P0 §13: a server id is an identifier, an
+   *  address is a destination). */
+  port?: number;
+  /** server.properties' server-ip: the interface the server binds.
+   *  Absent/empty = all interfaces. */
+  bindAddress?: string;
 }
 
 export interface ServerDetails {
@@ -308,6 +317,10 @@ export interface LogRangeResult {
   /** Byte offset where the first returned line starts — a line boundary.
    *  Pass it as beforeOffset to page further back; 0 = nothing older. */
   startOffset: number;
+  /** False when the server has written no log file yet: the historical
+   *  read is honestly empty, and the console runs on live output alone.
+   *  A missing history is a state, never an error (P0). */
+  historyAvailable: boolean;
 }
 
 // --- metrics (§6, ADR-0006 ring-backed history) ---

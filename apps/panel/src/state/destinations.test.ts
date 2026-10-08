@@ -174,6 +174,47 @@ describe("resolveJoin", () => {
     );
     expect(resolveJoin({ host: "elsewhere", port: 25565 }, both, "localhost")).toBeNull();
   });
+
+  it("resolves the founder's addresses against a bind-all server (P0 §14)", () => {
+    const survival = [
+      entry("survival", { displayName: "Survival", port: 25565 }),
+    ];
+    // The directive's own list — every local alias reaches the same
+    // server, because a bind-all server answers them all:
+    expect(resolveJoin({ host: "localhost", port: 25565 }, survival, "localhost")?.serverId).toBe(
+      "survival",
+    );
+    expect(resolveJoin({ host: "0", port: 25565 }, survival, "localhost")?.serverId).toBe(
+      "survival",
+    );
+    expect(resolveJoin({ host: "127.0.0.1", port: 25565 }, survival, "localhost")?.serverId).toBe(
+      "survival",
+    );
+    expect(resolveJoin({ host: "0.0.0.0", port: 25565 }, survival, "localhost")?.serverId).toBe(
+      "survival",
+    );
+    // A bare port (the bar's shorthand) resolves too.
+    expect(resolveJoin({ port: 25565 }, survival, "localhost")?.serverId).toBe("survival");
+  });
+
+  it("a specifically bound server answers its own address (P0 §14)", () => {
+    const entries = [
+      entry("boxed", { displayName: "Boxed", port: 25565, bindAddress: "192.168.100.2" }),
+    ];
+    expect(
+      resolveJoin({ host: "192.168.100.2", port: 25565 }, entries, "localhost")?.serverId,
+    ).toBe("boxed");
+    // A local alias is NOT the bound address: unknown stays unknown.
+    expect(resolveJoin({ host: "localhost", port: 25565 }, entries, "localhost")).toBeNull();
+  });
+
+  it("an unknown external destination stays unknown — nothing invented (P0 §16)", () => {
+    const survival = [entry("survival", { displayName: "Survival", port: 25565 })];
+    // A LAN address no managed server binds: the honest miss.
+    expect(resolveJoin({ host: "192.168.100.2", port: 25565 }, survival, "localhost")).toBeNull();
+    // And a different port is nobody's.
+    expect(resolveJoin({ host: "example.com", port: 25565 }, survival, "localhost")).toBeNull();
+  });
 });
 
 describe("searchServers", () => {

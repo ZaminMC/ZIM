@@ -292,19 +292,51 @@ function normalizeHost(host: string | undefined): string | undefined {
   return unbracketed;
 }
 
-/** Resolve a join request against the registry: the port is the match;
- *  a typed host only agrees or disagrees with this window's own hint. */
+/** The local aliases a typed host may use for "this machine" — §7's
+ *  join dialect, including the founder's own `0` shorthand for
+ *  bind-all. A remote profile's box address resolves the same way:
+ *  the host hint is the box itself. */
+function isLocalAlias(host: string, hint: string): boolean {
+  const normalized = host.toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "0" ||
+    normalized === "0.0.0.0" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::" ||
+    normalized === "::1" ||
+    normalized === hint.toLowerCase()
+  );
+}
+
+/** Resolve a join request against the registry (P0 §13–§14). The port is
+ *  the match; the host must agree with the server's bind: an all- or
+ *  unset-bind server answers this machine's aliases, a specifically
+ *  bound server answers its own address. Nothing is invented — an
+ *  unknown destination stays unknown (§16). */
 export function resolveJoin(
   request: { host?: string; port: number },
   entries: ServerEntry[],
   host: string,
 ): ServerEntry | null {
-  const matches = entries.filter((e) => e.port === request.port);
+  const typedHost = request.host;
+  const bindSays = (entry: ServerEntry): boolean => {
+    const bind = entry.bindAddress?.trim() ?? "";
+    if (bind === "" || bind === "0.0.0.0" || bind === "::" || bind === "*") {
+      // All interfaces: this machine's own aliases reach it.
+      return typedHost === undefined || isLocalAlias(typedHost, host);
+    }
+    if (typedHost === undefined) return true;
+    return bind.toLowerCase() === typedHost.toLowerCase();
+  };
+  const matches = entries.filter((e) => e.port === request.port && bindSays(e));
   if (matches.length === 0) return null;
   if (matches.length === 1) return matches[0] ?? null;
-  // Several servers share the port (possible across boxes in future
-  // remote fleets): prefer an exact host match, else say nothing yet.
-  const exact = matches.find((e) => joinAddress(e, host) === `${request.host ?? host}:${request.port}`);
+  // Several servers agree (possible across boxes in future remote
+  // fleets): prefer the exact host spelling, else say nothing yet.
+  const exact = matches.find(
+    (e) => joinAddress(e, host) === `${request.host ?? host}:${request.port}`,
+  );
   return exact ?? null;
 }
 
