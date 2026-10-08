@@ -372,31 +372,9 @@ jobs:
         env:
           CHANGELOG: ${{ needs.version.outputs.changelog }}
           AUTO: ${{ needs.version.outputs.auto }}
-        run: |
-          if [ "$AUTO" != "true" ] || [ -z "$CHANGELOG" ]; then
-            echo "(manual dispatch — static notes)" > changelog.md
-          else
-            {
-              echo "## What's in this build"
-              echo ""
-              while IFS= read -r line; do
-                [ -z "$line" ] && continue
-                case "$line" in
-                  feat:*) echo "- **added** ${line#feat: }" ;;
-                  feat(*)*|*feat(*):*) echo "- **added** $line" ;;
-                  fix:*) echo "- **fixed** ${line#fix: }" ;;
-                  fix(*)*|*fix(*):*) echo "- **fixed** $line" ;;
-                  perf:*) echo "- **faster** ${line#perf: }" ;;
-                  perf(*)*|*perf(*):*) echo "- **faster** $line" ;;
-                  test:*|test(*)*) echo "- ${line}" ;;
-                  *) echo "- ${line}" ;;
-                esac
-              done <<< "$CHANGELOG"
-              echo ""
-              echo "*Channel: development pre-release (ADR-0029). Installed builds update themselves through the built-in updater.*"
-            } > changelog.md
-          fi
-          cat changelog.md
+        run: node scripts/packaging/write-changelog.mjs
+      - name: Show the changelog
+        run: cat changelog.md
 
       - name: Publish the versioned pre-release (assets + manifest)
         run: |
