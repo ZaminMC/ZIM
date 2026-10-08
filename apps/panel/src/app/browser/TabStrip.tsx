@@ -26,6 +26,7 @@ import {
   IconBolt,
   IconClose,
   IconDashboard,
+  IconDownload,
   IconExtension,
   IconFeedback,
   IconGear,
@@ -64,6 +65,8 @@ function tabTitle(tab: Tab, entries: ServerEntry[]): string {
       return "Feedback";
     case "extensions":
       return "Extensions";
+    case "downloads":
+      return "Downloads";
     case "missing":
       return dest.url;
   }
@@ -94,6 +97,8 @@ function TabIcon({ tab, entries }: { tab: Tab; entries: ServerEntry[] }) {
       return <IconFeedback size={13} />;
     case "extensions":
       return <IconExtension size={13} />;
+    case "downloads":
+      return <IconDownload size={13} />;
     case "missing":
       return <IconBolt size={13} />;
   }

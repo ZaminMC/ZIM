@@ -39,6 +39,7 @@ export function buildCommands(
     about: () => void;
     feedback: () => void;
     extensions: () => void;
+    downloads: () => void;
   },
 ): Command[] {
   const commands: Command[] = [
@@ -53,6 +54,7 @@ export function buildCommands(
       { id: "page-about", label: "Open About ZaminPanel", hint: "zaminpanel://about/", run: pages.about },
       { id: "page-feedback", label: "Send feedback — file an issue", hint: "zaminpanel://feedback/", run: pages.feedback },
       { id: "page-extensions", label: "Open Extensions — installed addons and their permissions", hint: "zaminpanel://extensions/", run: pages.extensions },
+      { id: "page-downloads", label: "Open Downloads — the release channel's versions", hint: "zaminpanel://downloads/", run: pages.downloads },
     );
   }
   if (integration?.autostart.available) {
@@ -187,6 +189,10 @@ export function Palette() {
           extensions: () => {
             close(false);
             navigate({ kind: "extensions" });
+          },
+          downloads: () => {
+            close(false);
+            navigate({ kind: "downloads" });
           },
         },
       ),

@@ -272,10 +272,17 @@ describe("the evidence pages (§58/§72/§73, ADR-0026)", () => {
     });
   });
 
-  it("keeps unknown internal pages honest — a new page name is still missing", () => {
+  it("a reserved URL that becomes real stops being missing (§58, ADR-0029: downloads)", () => {
     expect(parseAddressInput("zaminpanel://downloads/")).toEqual({
       kind: "internal",
-      destination: { kind: "missing", url: "zaminpanel://downloads/" },
+      destination: { kind: "downloads" },
+    });
+  });
+
+  it("keeps unknown internal pages honest — a new page name is still missing", () => {
+    expect(parseAddressInput("zaminpanel://marketplace/")).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "zaminpanel://marketplace/" },
     });
   });
 });

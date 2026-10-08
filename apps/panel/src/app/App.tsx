@@ -50,6 +50,11 @@ const FeedbackPage = lazy(() =>
 const ExtensionsPage = lazy(() =>
   import("./ExtensionsPage").then((m) => ({ default: m.ExtensionsPage })),
 );
+// §58's reserved future URL, live now that a versioned channel exists
+// (ADR-0029) — the downloads room rides its own lazy chunk.
+const DownloadsPage = lazy(() =>
+  import("./DownloadsPage").then((m) => ({ default: m.DownloadsPage })),
+);
 // The settings page rides the same lane: an internal page, not a boot
 // surface — its tab loads it on first open (PERFORMANCE-BUDGETS).
 const SettingsPage = lazy(() =>
@@ -87,6 +92,8 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <FeedbackPage />;
     case "extensions":
       return <ExtensionsPage />;
+    case "downloads":
+      return <DownloadsPage />;
     case "missing":
       return <MissingPage url={destination.url} />;
   }

@@ -427,7 +427,11 @@ scheme is the founder's:
 The fixed `dev` tag remains the **manifest anchor**: the one URL the
 installed fleet polls, rewritten in place each release — same address,
 fresh contents (ADR-0029). The repo with the sources stays private; the
-channel is what users touch.
+channel is what users touch. Inside the panel, `zaminpanel://downloads/`
+(§58's reserved URL, live now the channel is versioned) lists the
+published pre-releases with their signed assets and marks the installed
+build; the CLI stays terminal-shaped and the channel page stays one
+link away.
 
 Installed dev builds keep themselves current: the panel asks the
 channel on boot and every six hours, verifies the minisign signature

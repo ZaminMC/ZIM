@@ -50,7 +50,12 @@ const BUDGETS = {
   // 19 → 20 KB at ADR-0031: the extensions room's own stylesheet — a
   // lazy-chunk file (~0.76 KB gzip) for the §56/§57 inventory page; the
   // entry stylesheet was untouched by the slice.
-  totalCssGzip: 20 * 1024,
+  // 20 → 21 KB, same batch: the §58 downloads room joined (its own lazy
+  // chunk), and the internal pages' chrome was factored into one shared
+  // lazy stylesheet (internalPage.module.css) — the next room's CSS
+  // cost drops to its page-specific rules alone. Entry untouched
+  // throughout: the boot path's CSS line did not move.
+  totalCssGzip: 21 * 1024,
   // The entry stylesheet's own line (the cold start's CSS), kept
   // explicit so a chrome-only regression cannot hide inside the total.
   entryCssGzip: 11 * 1024,

@@ -47,7 +47,7 @@ sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
 Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
 perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
 entry ≤ 96 KB, any single chunk ≤ 96 KB, total JS ≤ 184 KB, total CSS
-≤ 20 KB with the entry stylesheet's own line held at ≤ 11 KB. The cold-start payload was cut with code splitting: the entry
+≤ 21 KB with the entry stylesheet's own line held at ≤ 11 KB. The cold-start payload was cut with code splitting: the entry
 chunk went from 147 KB to 68 KB gzip by splitting the console and the
 three operator modals into their own chunks; the console loads when the
 tab first renders, not at boot. The ADR-0019 raise (170 → 184 KB JS,
@@ -86,7 +86,13 @@ CSS) bought the extensions room's own stylesheet — a lazy-chunk file
 (~0.76 KB gzip) for the §56/§57 inventory page: rows, permission chips
 split by family, and the problems panel; the entry stylesheet was
 untouched by the slice, and the growth loads when the page opens, never
-at boot. Boot progress is
+at boot. The downloads room (§58's reserved URL, live now that a
+versioned channel exists — ADR-0029) took the line to 21 KB in the same
+batch: its page-specific rules ride their own lazy chunk, and the
+internal pages' chrome (page, heading, notes, evidence rows) was
+factored into one shared lazy stylesheet, `internalPage.module.css`, so
+the next room pays only its own rules. The entry stylesheet's line did
+not move in either raise. Boot progress is
 measurable in the running app through the `panel:boot-start` →
 `panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
 recorded from browser smoke runs rather than guessed.

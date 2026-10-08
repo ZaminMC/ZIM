@@ -10,12 +10,13 @@ import { listExtensions } from "../state/actions";
 import { describeError, type DescribedError } from "../state/errors";
 import type { ExtensionProblem, ExtensionView, ExtensionsListResult } from "../protocol/types";
 import { ErrorNote } from "../ui/ErrorNote";
+import shared from "./internalPage.module.css";
 import styles from "./ExtensionsPage.module.css";
 
 function ExtensionRow({ extension }: { extension: ExtensionView }) {
   return (
-    <li className={styles.row}>
-      <div className={styles.rowHead}>
+    <li className={shared.row}>
+      <div className={shared.rowHead}>
         <span className={styles.name}>{extension.name}</span>
         <span className={styles.version}>v{extension.version}</span>
         <span className={styles.id}>{extension.id}</span>
@@ -69,9 +70,9 @@ export function ExtensionsPage() {
 
   if (error) {
     return (
-      <div className={styles.page}>
-        <header className={styles.head}>
-          <h1 className={styles.title}>Extensions</h1>
+      <div className={shared.page}>
+        <header className={shared.head}>
+          <h1 className={shared.title}>Extensions</h1>
         </header>
         <ErrorNote error={error} />
       </div>
@@ -79,28 +80,28 @@ export function ExtensionsPage() {
   }
 
   return (
-    <div className={styles.page}>
-      <header className={styles.head}>
-        <h1 className={styles.title}>Extensions</h1>
-        <p className={styles.subtitle}>
+    <div className={shared.page}>
+      <header className={shared.head}>
+        <h1 className={shared.title}>Extensions</h1>
+        <p className={shared.subtitle}>
           Typed addons with declared permissions. Deny-by-default: a permission an extension does
           not claim is never granted.
         </p>
       </header>
 
-      {loading ? <p className={styles.note}>Asking the daemon for its inventory…</p> : null}
+      {loading ? <p className={shared.note}>Asking the daemon for its inventory…</p> : null}
 
       {result !== null && !loading ? (
         <>
           {result.extensions.length === 0 && result.problems.length === 0 ? (
-            <p className={styles.note}>
+            <p className={shared.note}>
               No extensions installed. Extension folders live in{" "}
-              <code className={styles.path}>{result.directory}</code>; each one carries a{" "}
-              <code className={styles.path}>zamin-extension.toml</code> manifest.
+              <code className={shared.mono}>{result.directory}</code>; each one carries a{" "}
+              <code className={shared.mono}>zamin-extension.toml</code> manifest.
             </p>
           ) : null}
 
-          <ul className={styles.list} aria-label="Installed extensions">
+          <ul className={shared.list} aria-label="Installed extensions">
             {result.extensions.map((extension) => (
               <ExtensionRow key={extension.id} extension={extension} />
             ))}

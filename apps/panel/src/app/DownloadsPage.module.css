@@ -1,0 +1,68 @@
+/* The downloads room's own rules (§58, ADR-0029): version rows, chips,
+   asset links. The shared chrome comes from internalPage.module.css. */
+
+.version {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-m);
+  font-weight: 600;
+}
+
+.installedChip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: var(--text-xs);
+}
+
+.preChip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--text-xs);
+}
+
+.when {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.releaseName {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.assets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  transition: color var(--speed-fast) var(--ease);
+}
+
+.asset:hover {
+  color: var(--accent-strong);
+}
+
+.installer {
+  color: var(--accent);
+}
+
+.assetSize {
+  margin-left: 6px;
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+}
