@@ -1,27 +1,36 @@
 # Release (development channel): build the installers, sign them with the
 # updater key, and publish them to the PUBLIC releases repo
-# (ZaminMC/ZaminPanel-Releases) under the fixed `dev` tag — the URL the
-# panel's update lane reads (ADR-0024). The code repo stays private; the
-# channel must not.
+# (ZaminMC/ZaminPanel-Releases) as VERSIONED PRE-RELEASES — vMAJOR.MINOR.PATCH
+# (ADR-0029) — while the fixed `dev` tag keeps its role as the update
+# manifest anchor: the one URL the installed fleet polls
+# (…/releases/download/dev/latest.json), rewritten in place every release.
+# The code repo stays private; the channel must not.
 #
-# Version discipline: a dev build's version is 0.1.<run number>, stamped at
-# build time — the updater only offers an update when the manifest's
-# version is greater than the installed one, so every run must increase.
-#
-# The proof of done (real installs on clean Win11 + Ubuntu VMs) stays the
-# bundle lane's manual step; this workflow adds the signing and the
-# publication the bundle lane deliberately does not do.
+# Version discipline (ADR-0029):
+#   v0.1.0  first usable engine          v1.0.0  production release
+#   v0.2.0  major subsystem additions    v1.1.0  backwards-compatible features
+#   v0.9.0  feature complete / compat    v1.1.1  bug fix
+# A version is published at most once: the updater offers an update only
+# when the manifest's version is GREATER than the installed one, so
+# re-publishing the same version silently no-ops for the fleet. This
+# workflow refuses a downgrade or an overwrite unless `allow_republish`
+# is set (for re-rolling a broken release); the honest fix is always
+# "bump the patch".
 
 name: Release (dev)
 
 on:
   workflow_dispatch:
-  # The registration hop: a workflow that exists only on a non-default
-  # branch cannot be dispatched until GitHub has seen it run once — a tag
-  # push (dev-run-N on develop) runs it and registers it; from then on the
-  # dispatch button works too.
-  push:
-    tags: ["dev-run-*"]
+    inputs:
+      version:
+        description: "Release version (MAJOR.MINOR.PATCH, e.g. 0.2.0 — a leading v is accepted)"
+        required: true
+        type: string
+      allow_republish:
+        description: "Permit overwriting an existing v-tag / non-increasing version (re-roll a broken release)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-dev
@@ -29,7 +38,7 @@ concurrency:
 
 env:
   RELEASES_REPO: ZaminMC/ZaminPanel-Releases
-  RELEASE_TAG: dev
+  ANCHOR_TAG: dev
 
 jobs:
   version:
@@ -39,7 +48,16 @@ jobs:
       version: ${{ steps.stamp.outputs.version }}
     steps:
       - id: stamp
-        run: echo "version=0.1.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          VERSION="${VERSION_INPUT#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be MAJOR.MINOR.PATCH (optionally v-prefixed), got '$VERSION_INPUT'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION"
 
   linux:
     name: AppImage + portable tar.gz, signed
@@ -209,11 +227,13 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish the dev release + updater manifest
+    name: Publish the versioned pre-release + refresh the manifest anchor
     runs-on: ubuntu-latest
     needs: [version, linux, windows]
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_TAG: v${{ needs.version.outputs.version }}
+      ALLOW_REPUBLISH: ${{ inputs.allow_republish }}
       GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -224,29 +244,78 @@ jobs:
           path: assets
           merge-multiple: true
 
+      - name: Refuse a downgrade or an overwrite (updater honesty)
+        run: |
+          set -euo pipefail
+          export GH_REPO="$RELEASES_REPO"
+          if [ "$ALLOW_REPUBLISH" = "true" ]; then
+            echo "allow_republish set — the guard steps aside."
+            exit 0
+          fi
+          # The anchor manifest carries the last published version.
+          OLD=$(curl -fsSL \
+            "https://github.com/$RELEASES_REPO/releases/download/$ANCHOR_TAG/latest.json" \
+            | node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).version' \
+            || echo "0.0.0")
+          echo "last published: $OLD — this run: $VERSION"
+          if [ "$VERSION" = "$OLD" ]; then
+            echo "::error::v$VERSION is already published — the updater compares versions, so a re-publish would no-op for the fleet. Bump the patch (or set allow_republish to re-roll)."
+            exit 1
+          fi
+          HIGHEST=$(printf '%s\n' "$OLD" "$VERSION" | sort -V | tail -n 1)
+          if [ "$HIGHEST" != "$VERSION" ]; then
+            echo "::error::v$VERSION is LOWER than the published v$OLD — the updater would (correctly) ignore it. Bump the version."
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::release $RELEASE_TAG already exists — bump the version (or set allow_republish to re-roll it)."
+            exit 1
+          fi
+
       - name: Generate the updater manifest (latest.json)
         run: |
           node scripts/packaging/make-updater-json.mjs \
             --version "$VERSION" \
-            --notes "Development build $VERSION from commit $GITHUB_SHA (develop). Auto-update picks this up in-app." \
+            --notes "ZaminPanel v$VERSION (development pre-release) from commit $GITHUB_SHA (develop). Auto-update picks this up in-app." \
             --base-url "https://github.com/$RELEASES_REPO/releases/download/$RELEASE_TAG" \
             --out latest.json \
             --entry "windows-x86_64=$(find assets -name '*-setup.exe' | head -n 1)" \
             --entry "linux-x86_64=$(find assets -name '*.AppImage' | head -n 1)"
 
-      - name: Replace the dev release (assets + manifest)
+      - name: Publish the versioned pre-release (assets + manifest)
         run: |
           set -euo pipefail
           export GH_REPO="$RELEASES_REPO"
-          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           gh release create "$RELEASE_TAG" \
-            --title "ZaminPanel development build $VERSION" \
-            --notes "Development build $VERSION from commit ${GITHUB_SHA::7} on the develop branch.
+            --title "ZaminPanel v$VERSION — development pre-release" \
+            --notes "Development pre-release v$VERSION from commit ${GITHUB_SHA::7} on the develop branch.
 
-          Installers: the NSIS setup (Windows) and the AppImage (Linux) are signed — the panel verifies them before applying an update. The portable archives (zip / tar.gz) carry the daemon and CLI without installing anything.
+          Installers: the NSIS setup (Windows 10/11) and the AppImage (Linux) are signed — the panel verifies them before applying an update. The portable archives (zip / tar.gz) carry the daemon and CLI without installing anything. Older builds update themselves to this release through the built-in updater.
 
-          The app checks this release's latest.json on boot and every six hours; with \`Install updates automatically\` on (default), the download and install run by themselves and only the restart asks." \
+          This channel is pre-release software; versions follow vMAJOR.MINOR.PATCH (ADR-0029)." \
             --prerelease \
             assets/* latest.json
           echo "--- published ---"
           gh release view "$RELEASE_TAG" --json assets,url --jq '{url, assets: [.assets[].name]}'
+
+      - name: Refresh the manifest anchor (the fixed dev tag)
+        run: |
+          set -euo pipefail
+          export GH_REPO="$RELEASES_REPO"
+          # The anchor keeps ONE asset: the manifest, rewritten in place.
+          # Its URL never changes, so an installed fleet never needs a new
+          # endpoint — it just reads a manifest that now points at v$VERSION.
+          gh release upload "$ANCHOR_TAG" latest.json --clobber
+          gh release view "$ANCHOR_TAG" --json assets --jq '.assets[].name' \
+            | while read -r asset; do
+                if [ "$asset" != "latest.json" ]; then
+                  gh release delete-asset "$ANCHOR_TAG" "$asset" --yes
+                fi
+              done
+          gh release edit "$ANCHOR_TAG" \
+            --title "Update manifest — development channel" \
+            --notes "This entry anchors the in-app update lane: its latest.json is the manifest every installed build polls (on boot and every six hours). It currently offers v$VERSION.
+
+          The installers themselves live in the versioned pre-releases (vMAJOR.MINOR.PATCH) — see the repo's releases page."
+          echo "--- anchor refreshed ---"
+          gh release view "$ANCHOR_TAG" --json assets --jq '[.assets[].name]'
