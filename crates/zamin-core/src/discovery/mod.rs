@@ -142,8 +142,17 @@ pub fn read_port(properties: &[u8]) -> Option<u16> {
 /// hidden entries and the staging area never are. The walk is bounded by
 /// depth and entry budget; the report carries both truths.
 pub fn scan_roots(roots: &[PathBuf]) -> ScanReport {
+    scan_roots_with_budget(roots, SCAN_ENTRY_BUDGET)
+}
+
+/// The scan with an explicit budget — the daemon always pays the full
+/// one; tests pass a small one so proving "the walk stops and says so"
+/// costs tens of entries, not thousands hammering the filesystem while
+/// the suite's other tests run (a Windows CI lesson: a 4,000-directory
+/// burst next to mock HTTP servers is interference, not evidence).
+pub fn scan_roots_with_budget(roots: &[PathBuf], entry_budget: u64) -> ScanReport {
     let mut report = ScanReport::default();
-    let mut budget = SCAN_ENTRY_BUDGET;
+    let mut budget = entry_budget;
     for root in roots {
         if report.truncated {
             break;

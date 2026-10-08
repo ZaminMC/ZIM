@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{classify_jar, read_port, scan_roots, DiscoveredKind, SCAN_ENTRY_BUDGET};
+use super::{classify_jar, read_port, scan_roots, scan_roots_with_budget, DiscoveredKind};
 use crate::server::marker::write_marker;
 use crate::server::registry::tempdir;
 use crate::server::ServerId;
@@ -191,7 +191,12 @@ fn the_budget_cuts_the_walk_and_says_so() {
     // not scanned and `truncated` is the report's word for it.
     let temp = tempdir::scoped("discovery-budget");
     let root = temp.path.clone();
-    let count = u32::try_from(SCAN_ENTRY_BUDGET).unwrap() + 10;
+    // The budget rides the call, so the proof costs 80 entries instead of
+    // thousands hammering the filesystem while the suite's other tests run
+    // (a Windows CI lesson: a 4,000-directory burst next to mock HTTP
+    // servers is interference, not evidence).
+    let budget: u64 = 64;
+    let count = budget + 16;
     for i in 0..count {
         fs::create_dir_all(root.join(format!("srv{i}"))).unwrap();
         fs::write(
@@ -200,7 +205,7 @@ fn the_budget_cuts_the_walk_and_says_so() {
         )
         .unwrap();
     }
-    let report = scan_roots(&[root]);
+    let report = scan_roots_with_budget(&[root], budget);
     assert!(report.truncated);
     assert!(report.found.len() < count as usize);
     // Every candidate is still honest: a directory with its port read.
