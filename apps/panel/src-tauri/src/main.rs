@@ -24,7 +24,7 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::sync::mpsc;
 use zamin_ipc::Endpoint;
 

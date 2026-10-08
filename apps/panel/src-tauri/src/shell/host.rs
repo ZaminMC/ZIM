@@ -17,8 +17,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tauri::webview::Bounds;
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, Window};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window};
 
 use crate::shell::bookmarks::Bookmarks;
 use crate::shell::commands as cmd;
@@ -139,8 +138,8 @@ impl ShellState {
             .unwrap_or_default();
         let mut inner = self.lock();
         inner.session_path = Some(session_path);
-        inner.bookmarks_path = Some(bookmarks_path);
         inner.bookmarks = Bookmarks::load(&bookmarks_path);
+        inner.bookmarks_path = Some(bookmarks_path);
         inner.bookmarks.bar_visible = session.bar_visible;
         // v1 restore: the primary window's strip only (divergence
         // documented — tear-off windows keep their strips for their
@@ -274,8 +273,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     let Some(host_window) = app.get_window(window_label) else {
         return Ok(()); // window gone mid-sync; nothing to lay out
     };
-    let scale = host_window.scale_factor();
-    let size = host_window.inner_size().to_logical(scale);
+    let size = host_window
+        .inner_size()?
+        .to_logical(host_window.scale_factor().unwrap_or(1.0));
 
     let (snap, header, create_tab) = {
         let mut inner = state.lock();
@@ -286,7 +286,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
             let active_id = strip.active;
             active_id
                 .and_then(|id| strip.tabs.iter().find(|t| t.id == id))
-                .filter(|_| app.get_webview(tab_label(window_label, active_id.unwrap_or(0))).is_none())
+                .filter(|_| app.get_webview(&tab_label(window_label, active_id.unwrap_or(0))).is_none())
                 .map(|t| (t.id, t.destination().clone(), t.reload))
         };
         let snap = snapshot(&inner, window_label);
@@ -294,7 +294,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         (snap, header, create_tab)
     };
 
-    let content_bounds = Bounds {
+    let content_bounds = Rect {
         position: LogicalPosition::new(0.0, header as f64).into(),
         size: LogicalSize::new(
             size.width as f64,
@@ -305,7 +305,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     // Show the active tab's webview at its slot; hide the rest.
     for tab in &snap.tabs {
-        let Some(webview) = app.get_webview(tab_label(window_label, tab.id)) else { continue };
+        let Some(webview) = app.get_webview(&tab_label(window_label, tab.id)) else { continue };
         if tab.active {
             let _ = webview.set_bounds(content_bounds.clone());
             webview.show();
@@ -318,10 +318,16 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     // first focus — a restored session's inactive tabs stay cold).
     if let Some((id, destination, reload)) = create_tab {
         let label = tab_label(window_label, id);
-        let webview = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into()))
-            .build(&host_window)
+        let webview = host_window
+            .add_child(
+                tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into())),
+                LogicalPosition::new(0.0, header as f64),
+                LogicalSize::new(
+                    size.width as f64,
+                    (size.height as f64 - header as f64).max(0.0),
+                ),
+            )
             .map_err(|e| format!("could not create the tab webview: {e}"))?;
-        let _ = webview.set_bounds(content_bounds.clone());
         let payload = serde_json::json!({
             "tab_id": id, "destination": destination, "reload": reload,
             "can_back": false, "can_forward": false,
@@ -332,8 +338,8 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     // The chrome webview: the header band. Content webviews are created
     // later and stack ABOVE the primary, so the chrome shrinks itself to
     // the header and the content owns the rest of the window.
-    if let Some(chrome) = app.get_webview(chrome_label(window_label)) {
-        let _ = chrome.set_bounds(Bounds {
+    if let Some(chrome) = app.get_webview(&chrome_label(window_label)) {
+        let _ = chrome.set_bounds(Rect {
             position: LogicalPosition::new(0.0, 0.0).into(),
             size: LogicalSize::new(size.width as f64, header as f64).into(),
         });
@@ -909,8 +915,15 @@ fn spawn_tearoff(
         ((screen_x - 120.0).max(0.0)) as f64,
         ((screen_y - 20.0).max(0.0)) as f64,
     ));
-    tauri::webview::WebviewBuilder::new(chrome_label(&label), WebviewUrl::App("chrome.html".into()))
-        .build(&window)
+    window
+        .add_child(
+            tauri::webview::WebviewBuilder::new(
+                chrome_label(&label),
+                WebviewUrl::App("chrome.html".into()),
+            ),
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(1100.0, 83.0),
+        )
         .map_err(|e| format!("tear-off chrome failed: {e}"))?;
     // The content webview is created by sync() once the tear-off's chrome
     // reports its size (shell_boot).
