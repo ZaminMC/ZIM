@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MetricsView } from "./MetricsView";
 
 vi.mock("../state/metrics", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../state/metrics")>()),
+  ...(await importOriginal()),
   useServerMetrics: vi.fn(),
 }));
 
@@ -69,8 +69,8 @@ describe("MetricsView", () => {
     // The meters exist and are honest about their share.
     const meters = screen.getAllByRole("meter");
     expect(meters.length).toBe(3);
-    expect(meters[1].getAttribute("aria-valuenow")).toBe("13"); // 512 MiB of 4 GiB
-    expect(meters[2].getAttribute("aria-valuenow")).toBe("15"); // 3 of 20
+    expect(meters[1]?.getAttribute("aria-valuenow")).toBe("13"); // 512 MiB of 4 GiB
+    expect(meters[2]?.getAttribute("aria-valuenow")).toBe("15"); // 3 of 20
   });
 
   it("renders without a ceiling instead of inventing one", () => {
@@ -85,8 +85,10 @@ describe("MetricsView", () => {
     // Whatever ceilings the host does not own (here: the heap, the ping)
     // render no meter track — the CPU meter exists only because jsdom
     // publishes a real hardwareConcurrency.
-    const labels = screen.queryAllByRole("meter").map((m) => m.getAttribute("aria-label"));
-    expect(labels.every((label) => label?.startsWith("CPU"))).toBe(true);
+    const labels = screen
+      .queryAllByRole("meter")
+      .map((m) => m.getAttribute("aria-label") ?? "");
+    expect(labels.every((label) => label.startsWith("CPU"))).toBe(true);
   });
 
   it("keeps the sparklines fed from the store window", () => {

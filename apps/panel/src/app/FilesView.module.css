@@ -246,3 +246,103 @@
 .search:focus {
   outline: 1px solid var(--accent);
 }
+
+/* §33 Compose: the friendly view over the properties AST. */
+.modeSwitch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+
+.modeTab,
+.modeTabActive {
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.modeTabActive {
+  background: var(--accent-weak, var(--surface-2));
+  color: var(--text);
+}
+
+.compose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+
+.composeRow {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) 1fr;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.composeLabel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--text-s);
+}
+
+.composeKey {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.composeInput {
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  max-width: 420px;
+}
+
+.composeInput:focus {
+  outline: 1px solid var(--accent);
+}
+
+.toggle {
+  padding: 6px 14px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  max-width: 420px;
+}
+
+.toggle[aria-checked="true"] {
+  background: var(--accent-weak, var(--surface-2));
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.composeNote,
+.reloadNote {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+
+.reloadNote {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

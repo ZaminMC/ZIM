@@ -24,6 +24,17 @@ import type {
   FilesListResult,
   FilesSearchResult,
 } from "../protocol/types";
+import {
+  parseProperties,
+  serializeProperties,
+  setPropertyValue,
+  humanizeKey,
+  controlFor,
+} from "./editor/properties";
+import type { PropertyLine } from "./editor/properties";
+import { reloadPlanFor } from "./editor/reload";
+import { restartServer } from "../state/actions";
+import { useServers } from "../state/servers";
 import { describeError } from "../state/errors";
 import { Button } from "../ui/Button";
 import { useDeferredWindow } from "../ui/deferred";
@@ -84,6 +95,10 @@ export function FilesView({ serverId }: { serverId: string }) {
   const [draft, setDraft] = useState("");
   const [saved, setSaved] = useState("");
   const [busy, setBusy] = useState(false);
+  // §33's two modes: Compose is the friendly view over the properties
+  // AST; Source is the raw file. Source is always one click away, for
+  // every file, forever.
+  const [composeMode, setComposeMode] = useState(false);
 
   // Search (the whole-root walk) is a view over its own state: the box's
   // text, the debounced query actually sent, and the bounded answer.
@@ -233,7 +248,7 @@ export function FilesView({ serverId }: { serverId: string }) {
         .then(() => refresh(dir))
         .catch((cause: unknown) => {
           const described = describeError(cause);
-          setError({ message: `${note}: ${described.title}`, code: described.code });
+          setError({ message: `${note}: described.title`, code: described.code });
         })
         .finally(() => setBusy(false));
     },
@@ -286,7 +301,7 @@ export function FilesView({ serverId }: { serverId: string }) {
       setError(null);
       void readWholeFile(serverId, join(dir, entry.name))
         .then((bytes) => {
-          const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
+          const blob = new Blob([bytes], { type: "application/octet-stream" });
           const url = URL.createObjectURL(blob);
           const anchor = document.createElement("a");
           anchor.href = url;
@@ -319,7 +334,7 @@ export function FilesView({ serverId }: { serverId: string }) {
         .then(() => refresh(dir))
         .catch((cause: unknown) => {
           const described = describeError(cause);
-          setError({ message: `upload failed: ${described.title}`, code: described.code });
+          setError({ message: `upload failed: described.title`, code: described.code });
         })
         .finally(() => setBusy(false));
     },
@@ -327,6 +342,65 @@ export function FilesView({ serverId }: { serverId: string }) {
   );
 
   const dirty = draft !== saved;
+
+  // §35: the plan comes from the path, not from guessing. A restart
+  // needs the server to actually be running — otherwise the save alone
+  // is the whole story (the next boot applies it anyway).
+  const running = useServers((state) => state.servers[serverId]?.state === "running");
+  const plan = useMemo(
+    () => (openPath === null ? { restartable: false } : reloadPlanFor(openPath)),
+    [openPath],
+  );
+
+  // The compose AST is rebuilt from the draft whenever mode or file
+  // changes — one parser, one truth; edits go through setPropertyValue
+  // so a compose keystroke can never reserialize untouched lines.
+  const [composeFile, setComposeFile] = useState<{ path: string; lines: PropertyLine[] } | null>(null);
+  useEffect(() => {
+    if (!composeMode || openPath === null) {
+      setComposeFile(null);
+      return;
+    }
+    setComposeFile({ path: openPath, lines: parseProperties(draft) });
+    // draft intentionally not a dependency: the AST owns the view state
+    // while compose mode is active, the draft updates through it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composeMode, openPath]);
+
+  const composeEdit = useCallback(
+    (key: string, value: string) => {
+      setComposeFile((current) => {
+        if (current === null) return current;
+        const lines = setPropertyValue(current.lines, key, value);
+        setDraft(serializeProperties(lines));
+        return { ...current, lines };
+      });
+    },
+    [],
+  );
+
+  // Save, then the confirmed restart: two promises, one honest order —
+  // the bytes are on the daemon before anything asks a player to wait.
+  const saveAndRestart = useCallback(() => {
+    if (openPath === null) return;
+    if (!window.confirm(`Restart ${serverId} now? The new settings apply at boot, and players will be disconnected.`)) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const bytes = new TextEncoder().encode(draft);
+    void writeWholeFile(serverId, openPath, bytes)
+      .then(() => {
+        setSaved(draft);
+        return restartServer(serverId);
+      })
+      .then(() => refresh(dir))
+      .catch((cause: unknown) => {
+        const described = describeError(cause);
+        setError({ message: `described.title`, code: described.code });
+      })
+      .finally(() => setBusy(false));
+  }, [serverId, openPath, draft, dir, refresh]);
 
   // The listing renders in slices: the first commit paints the window,
   // the rest lands over idle frames (see ui/deferred.ts). A refreshed
@@ -367,18 +441,102 @@ export function FilesView({ serverId }: { serverId: string }) {
             <span className={dirty ? styles.dirty : styles.clean}>
               {dirty ? "unsaved changes" : "saved"}
             </span>
+            {openPath.toLowerCase().endsWith(".properties") ? (
+              <div className={styles.modeSwitch} role="tablist" aria-label="Editor mode">
+                <button
+                  role="tab"
+                  aria-selected={!composeMode}
+                  className={composeMode ? styles.modeTab : styles.modeTabActive}
+                  onClick={() => setComposeMode(false)}
+                >
+                  Source
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={composeMode}
+                  className={composeMode ? styles.modeTabActive : styles.modeTab}
+                  onClick={() => setComposeMode(true)}
+                >
+                  Compose
+                </button>
+              </div>
+            ) : null}
+            {plan.explain ? (
+              <span className={styles.reloadNote} title={plan.explain}>
+                {plan.explain}
+              </span>
+            ) : null}
             <Button variant="primary" onClick={save} disabled={busy || !dirty}>
               Save
             </Button>
-            <Button onClick={() => setOpenPath(null)}>Close</Button>
+            {plan.restartable && running ? (
+              <Button variant="primary" onClick={saveAndRestart} disabled={busy}>
+                Save &amp; Restart
+              </Button>
+            ) : null}
+            <Button onClick={() => { setOpenPath(null); setComposeMode(false); }}>Close</Button>
           </div>
-          <textarea
-            className={styles.editorArea}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            spellCheck={false}
-            aria-label={`Editing ${openPath}`}
-          />
+          {composeMode && composeFile !== null ? (
+            <div className={styles.compose} aria-label={`Compose view for ${openPath}`}>
+              {composeFile.lines
+                .filter((line) => line.kind === "pair")
+                .map((line) => {
+                  const control = controlFor(line.value ?? "");
+                  const label = humanizeKey(line.key ?? "");
+                  return (
+                    <div key={line.key} className={styles.composeRow}>
+                      <label className={styles.composeLabel} htmlFor={`compose-${line.key}`}>
+                        {label}
+                        <span className={styles.composeKey}>{line.key}</span>
+                      </label>
+                      {control === "boolean" ? (
+                        <button
+                          id={`compose-${line.key}`}
+                          type="button"
+                          role="switch"
+                          aria-checked={(line.value ?? "") === "true"}
+                          className={styles.toggle}
+                          onClick={() =>
+                            composeEdit(line.key ?? "", (line.value ?? "") === "true" ? "false" : "true")
+                          }
+                        >
+                          {(line.value ?? "") === "true" ? "ON" : "OFF"}
+                        </button>
+                      ) : control === "number" ? (
+                        <input
+                          id={`compose-${line.key}`}
+                          type="number"
+                          className={styles.composeInput}
+                          value={line.value ?? ""}
+                          onChange={(event) => composeEdit(line.key ?? "", event.target.value)}
+                        />
+                      ) : (
+                        <input
+                          id={`compose-${line.key}`}
+                          type="text"
+                          className={styles.composeInput}
+                          value={line.value ?? ""}
+                          onChange={(event) => composeEdit(line.key ?? "", event.target.value)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              {composeFile.lines.some((line) => line.kind !== "pair") ? (
+                <p className={styles.composeNote}>
+                  Comments and blank lines are preserved exactly — Source shows and edits them.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <textarea
+              className={styles.editorArea}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              spellCheck={false}
+              aria-label={`Editing ${openPath}`}
+            />
+          )}
         </div>
       ) : (
         <>

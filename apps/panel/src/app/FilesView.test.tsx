@@ -18,6 +18,7 @@ vi.mock("../state/actions", () => ({
   writeWholeFile: vi.fn(),
   copyFilesEntry: vi.fn(),
   searchFiles: vi.fn(),
+  restartServer: vi.fn(),
 }));
 
 import {
@@ -27,10 +28,12 @@ import {
   mkdir,
   readWholeFile,
   renameEntry,
+  restartServer,
   searchFiles,
   writeWholeFile,
 } from "../state/actions";
 import { ProtocolRequestError } from "../protocol/client";
+import { useServers } from "../state/servers";
 
 const listFilesMock = listFiles as ReturnType<typeof vi.fn>;
 const readWholeFileMock = readWholeFile as ReturnType<typeof vi.fn>;
@@ -39,6 +42,7 @@ const mkdirMock = mkdir as ReturnType<typeof vi.fn>;
 const renameEntryMock = renameEntry as ReturnType<typeof vi.fn>;
 const deleteEntryMock = deleteEntry as ReturnType<typeof vi.fn>;
 const copyFilesEntryMock = copyFilesEntry as ReturnType<typeof vi.fn>;
+const restartServerMock = restartServer as ReturnType<typeof vi.fn>;
 const searchFilesMock = searchFiles as ReturnType<typeof vi.fn>;
 
 type TestEntry = ReturnType<typeof entryOf>;
@@ -64,6 +68,13 @@ beforeEach(() => {
   deleteEntryMock.mockReset().mockResolvedValue(undefined);
   copyFilesEntryMock.mockReset().mockResolvedValue({ path: "x", files: 1, bytes: 1 });
   searchFilesMock.mockReset().mockResolvedValue({ hits: [], truncated: false, scanned: 0 });
+  restartServerMock.mockReset().mockResolvedValue({ serverId: "smp", state: "running", requestId: "r" });
+  useServers.setState({
+    servers: {
+      smp: { serverId: "smp", displayName: "SMP", state: "running" },
+    },
+    crashes: {},
+  });
 });
 
 afterEach(cleanup);
@@ -220,6 +231,88 @@ describe("FilesView", () => {
     fireEvent.click(screen.getByRole("button", { name: "download" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("use a backup"));
     expect(readWholeFileMock).not.toHaveBeenCalled();
+  });
+
+  it("compose mode edits one value through the AST and saves only it", async () => {
+    const raw = [
+      "# Minecraft server properties",
+      "server-port=25565",
+      "online-mode=true",
+      "motd=Hello World",
+    ].join("\n");
+    listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: raw.length })]));
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode(raw));
+    writeWholeFileMock.mockResolvedValue(undefined);
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+
+    // Source is the default; Compose is one click away and renders the
+    // friendly controls.
+    fireEvent.click(screen.getByRole("tab", { name: "Compose" }));
+    await waitFor(() => expect(screen.getByText("Server Port")).toBeTruthy());
+
+    // The boolean reads its own bytes: a real switch.
+    const onlineMode = screen.getByRole("switch", { name: /online-mode/ });
+    expect(onlineMode.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(onlineMode);
+    expect(screen.getByRole("switch", { name: /online-mode/ }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("unsaved changes")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(writeWholeFileMock).toHaveBeenCalled());
+    const savedBytes = vi.mocked(writeWholeFile).mock.calls[0]?.[2];
+    if (!savedBytes) throw new Error("the save never wrote the file");
+    const saved = new TextDecoder().decode(savedBytes);
+    // One pair changed; the header comment and every other line survived.
+    expect(saved).toContain("# Minecraft server properties");
+    expect(saved).toContain("server-port=25565");
+    expect(saved).toContain("online-mode=false");
+    expect(saved).toContain("motd=Hello World");
+  });
+
+  it("save and restart is offered for boot files, behind its confirm", async () => {
+    const raw = "online-mode=true\n";
+    listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: raw.length })]));
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode(raw));
+    writeWholeFileMock.mockResolvedValue(undefined);
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+
+    // The honest sentence rides the bar.
+    expect(screen.getByText(/read at boot/)).toBeTruthy();
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save & Restart" }));
+    await waitFor(() => expect(restartServerMock).toHaveBeenCalledWith("smp"));
+    // The bytes landed first, then the restart — one honest order.
+    expect(writeWholeFileMock).toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("a stopped server gets the save, not a restart button", async () => {
+    useServers.setState({
+      servers: {
+        ...useServers.getState().servers,
+        smp: { serverId: "smp", displayName: "SMP", state: "stopped" },
+      },
+    });
+    const raw = "online-mode=true\n";
+    listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: raw.length })]));
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode(raw));
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+
+    expect(screen.getByText(/read at boot/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save & Restart" })).toBeNull();
   });
 
   it("surfaces typed errors from the daemon", async () => {
