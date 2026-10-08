@@ -45,9 +45,12 @@ fn build_tar(top: &str, java_body: &str) -> Vec<u8> {
         b"JAVA_VERSION=21\n",
         0o644,
     );
+    // The platform's own exe name, exactly as build_zip does: the layout
+    // contract is bin/<java_exe_name()> on every OS (a real Adoptium
+    // tar.gz only ships on Linux, but the extractor's rule is one rule).
     add(
         &mut builder,
-        &format!("{top}/bin/java"),
+        &format!("{top}/bin/{}", crate::platform::java_exe_name()),
         java_body.as_bytes(),
         0o755,
     );
