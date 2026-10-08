@@ -16,6 +16,12 @@ name: Release (dev)
 
 on:
   workflow_dispatch:
+  # The registration hop: a workflow that exists only on a non-default
+  # branch cannot be dispatched until GitHub has seen it run once — a tag
+  # push (dev-run-N on develop) runs it and registers it; from then on the
+  # dispatch button works too.
+  push:
+    tags: ["dev-run-*"]
 
 concurrency:
   group: release-dev
