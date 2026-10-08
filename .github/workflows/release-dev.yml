@@ -388,6 +388,7 @@ jobs:
           set -euo pipefail
           export GH_REPO="$RELEASES_REPO"
           gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
             --title "ZaminPanel v$VERSION — development pre-release" \
             --notes-file changelog.md \
             --prerelease \
