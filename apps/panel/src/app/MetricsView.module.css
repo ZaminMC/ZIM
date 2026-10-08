@@ -99,3 +99,54 @@
   color: var(--text-dim);
   font-size: var(--text-xs);
 }
+
+/* The current/allowed meters (§31): the head is the stat pair, the track
+   is the allowance, the fill is the honest share of it. */
+.meter {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meterHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.allowed {
+  color: var(--text-dim);
+  font-weight: normal;
+}
+
+.meterTrack {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3, var(--surface));
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.cpuBar {
+  background: var(--accent);
+}
+
+.rssBar {
+  background: var(--accent-2, var(--accent));
+}
+
+.playersBar {
+  background: var(--accent-3, var(--accent));
+}
