@@ -361,7 +361,7 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0020
+- [ADRs](docs/adr/) — accepted decisions 0001–0030
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
 
 ## Install (Phase 7)
@@ -395,9 +395,23 @@ lanes; the remaining §23 proof (clean VM installs) is manual by design.
 
 Installers for the **development** line publish to the public
 [ZaminPanel-Releases](https://github.com/ZaminMC/ZaminPanel-Releases/releases)
-repo under the fixed `dev` tag (ADR-0024) — the NSIS setup for Windows,
-the AppImage for Linux, portable archives alongside. The repo with the
-sources stays private; the channel is what users touch.
+repo as **versioned pre-releases** — `vMAJOR.MINOR.PATCH`, one entry per
+release, marked Pre-Release until v1.0.0 (ADR-0029). The versioning
+scheme is the founder's:
+
+| Version | Meaning |
+|---|---|
+| v0.1.x | first usable engine (the early rolling dev builds) |
+| v0.2.0 | major subsystem additions |
+| v0.9.0 | feature complete / compatibility testing |
+| v1.0.0 | production release |
+| v1.1.0 | backwards-compatible features |
+| v1.1.1 | bug fix |
+
+The fixed `dev` tag remains the **manifest anchor**: the one URL the
+installed fleet polls, rewritten in place each release — same address,
+fresh contents (ADR-0029). The repo with the sources stays private; the
+channel is what users touch.
 
 Installed dev builds keep themselves current: the panel asks the
 channel on boot and every six hours, verifies the minisign signature
@@ -405,13 +419,15 @@ against the committed public key before anything is applied, and — with
 "Install updates automatically" on, the default — downloads and installs
 by itself. Only the restart asks. Turn either automatic off under
 `zaminpanel://settings/` → Updates; [Check for updates now] is there
-for the impatient. The version of a dev build is `0.1.<run number>`, so
-every published run is strictly newer than the one before it.
+for the impatient. A version is published once: the release workflow
+refuses a downgrade or a re-publish, because the updater compares
+versions and would (correctly) ignore one.
 
 Re-publishing is one button: the `Release (dev)` workflow
 ([.github/workflows/release-dev.yml](.github/workflows/release-dev.yml))
-builds both lanes, signs, regenerates `latest.json` (the updater's one
-manifest), and replaces the `dev` release's assets.
+takes the version, builds both lanes, signs, regenerates `latest.json`
+pointing at the versioned tag, publishes the pre-release, and rewrites
+the anchor's manifest.
 
 ## Remote (Phase 8)
 
