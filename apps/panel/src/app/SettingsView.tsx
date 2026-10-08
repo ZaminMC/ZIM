@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getServer, getServerConfig, setServerConfig } from "../state/actions";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import { useServers } from "../state/servers";
 import type { ConfigGetResult } from "../protocol/types";
 import { Button } from "../ui/Button";
@@ -17,7 +19,7 @@ export function SettingsView({ serverId }: { serverId: string }) {
   const [view, setView] = useState<ConfigGetResult | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [keepDraft, setKeepDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const upsert = useServers((s) => s.upsert);
@@ -30,7 +32,7 @@ export function SettingsView({ serverId }: { serverId: string }) {
         setKeepDraft(result.effective.backupKeep.toString());
         setError(null);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title));
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, [serverId]);
 
   useEffect(() => {
@@ -48,12 +50,15 @@ export function SettingsView({ serverId }: { serverId: string }) {
     setNotice(null);
     const name = nameDraft.trim();
     if (name === "") {
-      setError("The server name must not be empty.");
+      setError({ title: "The server name must not be empty.", remediation: [] });
       return;
     }
     const keep = Number(keepDraft.trim());
     if (!Number.isInteger(keep) || keep < 1) {
-      setError("Backup retention must be a whole number of at least 1.");
+      setError({
+          title: "Backup retention must be a whole number of at least 1.",
+          remediation: [],
+        });
       return;
     }
     const payload: Parameters<typeof setServerConfig>[1] = { settings: {} };
@@ -77,7 +82,7 @@ export function SettingsView({ serverId }: { serverId: string }) {
           .then((details) => upsert(details))
           .catch(() => {});
       })
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -85,7 +90,7 @@ export function SettingsView({ serverId }: { serverId: string }) {
     return (
       <section className={styles.settings} aria-label="Server settings">
         <div className={styles.alert} role="alert">
-          {error}
+          <ErrorNote error={error} />
         </div>
       </section>
     );
@@ -107,7 +112,7 @@ export function SettingsView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
+          <ErrorNote error={error} />
         </div>
       ) : null}
       {notice && !error ? (
