@@ -31,5 +31,10 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # Newer toolchains: `cargo test --workspace` no longer links bin-only
+      # crates that carry no test targets (fake-mc-server among them), so
+      # the CLI e2e harness finds no binaries to drive — build first.
+      - name: Build the workspace bins
+        run: cargo build --workspace
       - name: Tests
         run: cargo test --workspace
