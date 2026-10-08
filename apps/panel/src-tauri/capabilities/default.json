@@ -4,9 +4,9 @@
   "description": "Window defaults. The host exposes only its own commands plus the notification, updater, process, opener (feedback's browser routes), and clipboard (feedback's screenshot handoff) plugins (the webview owns the taxonomy \u2014 notifications, update decisions, feedback composition alike); everything else stays core:default.",
   "windows": [
     "main",
-    "main-chrome",
+    "main-frame",
     "win-*",
-    "*-chrome",
+    "*-frame",
     "tab-*"
   ],
   "permissions": [
@@ -19,9 +19,9 @@
   ],
   "webviews": [
     "main",
-    "main-chrome",
+    "main-frame",
     "win-*",
-    "*-chrome",
+    "*-frame",
     "tab-*"
   ]
 }

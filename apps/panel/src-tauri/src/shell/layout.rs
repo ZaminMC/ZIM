@@ -1,4 +1,4 @@
-// The chrome's layout law — ported from Chromium, not approximated.
+// The frame's layout law — ported from Chromium, not approximated.
 //
 // Every constant cites its upstream file (chromium/chromium @ main,
 // mirrored in docs/browser-shell/chromium-ref/). The porting spec is
@@ -69,7 +69,7 @@ pub fn min_inactive_width() -> f32 {
     MIN_INACTIVE_INTERIOR - SEPARATOR_W + tab_overlap()
 }
 
-/// The chrome band's height above the content webviews.
+/// The frame band's height above the content webviews.
 pub fn header_height(bookmarks_bar_visible: bool) -> f32 {
     let strip = TAB_HEIGHT + STRIP_PADDING;
     let toolbar = LOCATION_BAR_H + 2.0 * TOOLBAR_PAD_Y;
@@ -77,8 +77,8 @@ pub fn header_height(bookmarks_bar_visible: bool) -> f32 {
     strip + toolbar + bookmarks
 }
 
-/// One laid-out slot — what the chrome layer renders. The model owns the
-/// geometry (single source of truth; the chrome is a view of it).
+/// One laid-out slot — what the frame layer renders. The model owns the
+/// geometry (single source of truth; the frame is a view of it).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Slot {
     pub id: u32,

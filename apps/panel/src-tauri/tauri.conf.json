@@ -15,7 +15,7 @@
       {
         "label": "main",
         "title": "ZaminPanel",
-        "url": "chrome.html",
+        "url": "frame.html",
         "decorations": false,
         "width": 1280,
         "height": 800,

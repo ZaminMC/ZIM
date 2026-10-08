@@ -281,16 +281,17 @@ function UpdatesSection() {
         <div className={styles.rowMain}>
           <span className={styles.rowName}>Channel — Development</span>
           <span className={styles.rowDetail}>
-            Installers and the update manifest live in the public{" "}
+            Installers and the update manifest live on this project's
+            public{" "}
             <a
               className={styles.channelLink}
-              href="https://github.com/ZaminMC/ZaminPanel-Releases/releases"
+              href="https://github.com/ZaminMC/ZaminPanel/releases"
               target="_blank"
               rel="noreferrer"
             >
-              ZaminPanel-Releases
+              ZaminPanel releases
             </a>{" "}
-            repo, signed before they are offered.
+            page, signed before they are offered.
           </span>
         </div>
       </div>

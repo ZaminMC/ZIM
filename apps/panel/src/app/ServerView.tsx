@@ -47,7 +47,7 @@ import { BackupsView } from "./BackupsView";
 import styles from "./ServerView.module.css";
 
 // The three configuration surfaces (§37–39, ADR-0019) lazy-load: the
-// workspace chrome must not pay for forms a tab may never open. The
+// workspace frame must not pay for forms a tab may never open. The
 // console needs no lazy load since ADR-0020 — it is the structured view,
 // with no heavy terminal dependency behind it.
 const NetworkView = lazy(() =>

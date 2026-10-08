@@ -87,7 +87,7 @@
   }
 }
 
-/* Ghost (ADR-0015): the browser chrome's borderless control. */
+/* Ghost (ADR-0015): the browser's borderless frame control. */
 .ghost {
   border-color: transparent;
   background: transparent;

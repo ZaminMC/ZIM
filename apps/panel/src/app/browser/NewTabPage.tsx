@@ -24,7 +24,7 @@ import styles from "./NewTabPage.module.css";
 const ACTIVE_STATES = new Set(["running", "starting", "adopting"]);
 
 /** The one address-commit path for the new tab's input (§22): the same
- *  dialects the chrome omnibox speaks. The host's model stays the single
+ *  dialects the frame omnibox speaks. The host's model stays the single
  *  authority for identity — this lands navigation through the tab lane. */
 function commitAddress(text: string, entries: ServerEntry[], host: string) {
   const request = parseAddressInput(text);

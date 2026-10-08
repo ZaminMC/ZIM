@@ -1,16 +1,26 @@
 // The shell host — where the model meets the window system.
 //
-// Architecture (ADR-0033): the chrome webview (the window's primary
-// webview, chrome.html) is the VIEW of the shell; every tab's content is
-// its OWN webview positioned below the chrome band — Chromium's
+// Architecture (ADR-0033): the frame webview (the window's primary
+// webview, frame.html) is the VIEW of the shell; every tab's content is
+// its OWN webview positioned below the frame band — Chromium's
 // WebContents-per-tab model, adapted: the Tauri multi-webview host stands
 // in for the Views window, and the tab webview stands in for WebContents.
 // The model (tabs.rs) is authoritative; both layers render from snapshots.
 //
-// Every command is a browser command in Chromium's ID space (commands.rs);
+// Every command is a browser command in the ported ID space (commands.rs);
 // the drag session ports TabDragController's detach magnetism (15 DIP
 // vertical, touch 50) with a drop-based tear-off adaptation documented in
 // the porting spec §3.
+//
+// THE RE-ENTRANCY LAW (this bit is not style, it is correctness): a
+// webview must never be born synchronously on the main/UI thread while
+// that thread is inside an IPC callback or a window-event callback — on
+// Windows WebView2 the controller creation cannot complete inside its own
+// event loop turn, `shell_boot` never answers, and the frame dies as a
+// blank white window. Every command that can reach [`sync`] (and so may
+// create a tab webview) is therefore `async fn`: it runs on the async
+// runtime, and `add_child` reaches a FREE event loop through the proxy.
+// The window-event relayout is deferred the same way (main.rs).
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -102,7 +112,7 @@ struct ShellInner {
     bookmarks_path: Option<PathBuf>,
     drag: DragSession,
     next_window: u32,
-    /// The chrome's viewport width (reported on boot/resize; it sizes the
+    /// The frame's viewport width (reported on boot/resize; it sizes the
     /// layout law).
     strip_width: f32,
 }
@@ -229,14 +239,14 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
     }
 }
 
-/// The chrome webview's label for a window: the configured main window's
+/// The frame webview's label for a window: the configured main window's
 /// primary webview shares the window's label; runtime tear-off windows
-/// name theirs "<window>-chrome".
-fn chrome_label(window: &str) -> String {
+/// name theirs "<window>-frame".
+fn frame_label(window: &str) -> String {
     if window == "main" {
         "main".into()
     } else {
-        format!("{window}-chrome")
+        format!("{window}-frame")
     }
 }
 
@@ -254,9 +264,9 @@ fn parse_tab_label(label: &str) -> Option<(String, TabId)> {
 fn window_label_of(webview: &tauri::Webview) -> String {
     let label = webview.label();
     if let Some((window, _)) = parse_tab_label(label) {
-        return window;
+        return window.to_owned();
     }
-    if let Some(window) = label.strip_suffix("-chrome") {
+    if let Some(window) = label.strip_suffix("-frame") {
         return window.to_owned();
     }
     label.to_owned()
@@ -266,7 +276,7 @@ fn window_label_of(webview: &tauri::Webview) -> String {
 // Synchronization — the model's decisions, applied to windows
 // ---------------------------------------------------------------------------
 
-/// The one sync: layout the chrome band, position/visibility for every
+/// The one sync: layout the frame band, position/visibility for every
 /// tab webview, push snapshots, persist the session. Every mutation
 /// funnels here — the model changes, then this applies it.
 pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(), String> {
@@ -336,15 +346,15 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         let _ = app.emit_to(&label, "shell://tab", &payload);
     }
 
-    // The chrome webview: the header band. Content webviews are created
-    // later and stack ABOVE the primary, so the chrome shrinks itself to
+    // The frame webview: the header band. Content webviews are created
+    // later and stack ABOVE the primary, so the frame shrinks itself to
     // the header and the content owns the rest of the window.
-    if let Some(chrome) = app.get_webview(&chrome_label(window_label)) {
-        let _ = chrome.set_bounds(Rect {
+    if let Some(frame) = app.get_webview(&frame_label(window_label)) {
+        let _ = frame.set_bounds(Rect {
             position: LogicalPosition::new(0.0, 0.0).into(),
             size: LogicalSize::new(size.width as f64, header as f64).into(),
         });
-        let _ = app.emit_to(chrome_label(window_label), "shell://snapshot", &snap);
+        let _ = app.emit_to(frame_label(window_label), "shell://snapshot", &snap);
     }
     Ok(())
 }
@@ -376,11 +386,11 @@ fn emit_tab_state(app: &AppHandle, state: &ShellState, window_label: &str) {
 }
 
 /// Window resized — geometry is model-visible state (the layout law runs
-/// in the model, so the chrome must be told).
-pub fn relayout_window(app: &AppHandle, state: &ShellState, window: &Window) {
-    let label = window.label().to_owned();
-    if let Err(e) = sync(app, state, &label) {
-        tracing::debug!("relayout of {label} failed: {e}");
+/// in the model, so the frame must be told). Deferred onto the async
+/// runtime by main.rs's event hook — see the re-entrancy law above.
+pub fn relayout_window(app: &AppHandle, state: &ShellState, window_label: &str) {
+    if let Err(e) = sync(app, state, window_label) {
+        tracing::debug!("relayout of {window_label} failed: {e}");
     }
 }
 
@@ -392,8 +402,10 @@ fn window_for(app: &AppHandle, label: &str) -> Result<Window, String> {
     app.get_window(label).ok_or_else(|| format!("window {label} vanished"))
 }
 
+/// Boot: the frame asks for the world. Async per the re-entrancy law —
+/// the first tab webview is born inside this call's `sync`.
 #[tauri::command]
-pub fn shell_boot(
+pub async fn shell_boot(
     window: tauri::Webview,
     state: State<'_, ShellState>,
     app: AppHandle,
@@ -443,7 +455,7 @@ pub fn shell_tab_hello(
 /// A content webview navigates (ServerView → Fleet, §61 singleton
 /// identity: an existing resting tab of the same identity is focused).
 #[tauri::command]
-pub fn shell_tab_navigate(
+pub async fn shell_tab_navigate(
     window: tauri::Webview,
     destination: Destination,
     state: State<'_, ShellState>,
@@ -491,7 +503,7 @@ fn destination_identity(d: &Destination) -> String {
 
 /// Tab-local verbs the content layer drives: back / forward / reload.
 #[tauri::command]
-pub fn shell_tab_action(
+pub async fn shell_tab_action(
     window: tauri::Webview,
     action: String,
     state: State<'_, ShellState>,
@@ -523,9 +535,11 @@ pub fn shell_tab_action(
     sync(&app, &state, &window_name)
 }
 
-/// The chrome's command dispatch — one entry point, Chromium's ID space.
+/// The frame's command dispatch — one entry point, the ported ID space.
+/// Async per the re-entrancy law: NEW_TAB (and restore/duplicate) can
+/// create a tab webview inside `sync`.
 #[tauri::command]
-pub fn shell_command(
+pub async fn shell_command(
     window: tauri::Webview,
     id: u32,
     arg: Option<serde_json::Value>,
@@ -699,8 +713,8 @@ pub fn shell_command(
             window_for(&app, &window_name)?.close().map_err(|e| e.to_string())?;
         }
         Some(cmd::FOCUS_LOCATION) => {
-            let _ = app.emit_to(chrome_label(&window_name), "shell://focus-address", ());
-            return Ok(()); // chrome-local; no model change, no sync
+            let _ = app.emit_to(frame_label(&window_name), "shell://focus-address", ());
+            return Ok(()); // frame-local; no model change, no sync
         }
         _ => {}
     }
@@ -714,9 +728,10 @@ pub fn shell_omnibox_classify(text: String) -> crate::shell::omnibox::AddressReq
     crate::shell::omnibox::classify(&text)
 }
 
-/// The omnibox commit: classify, then drive the model.
+/// The omnibox commit: classify, then drive the model. Async per the
+/// re-entrancy law (a query can create a tab webview inside `sync`).
 #[tauri::command]
-pub fn shell_omnibox_commit(
+pub async fn shell_omnibox_commit(
     window: tauri::Webview,
     text: String,
     state: State<'_, ShellState>,
@@ -776,7 +791,7 @@ pub fn shell_omnibox_commit(
     Ok(outcome)
 }
 
-/// Bookmarks for the chrome layer.
+/// Bookmarks for the frame layer.
 #[tauri::command]
 pub fn shell_bookmarks(state: State<'_, ShellState>) -> Result<Bookmarks, String> {
     let inner = state.lock();
@@ -784,7 +799,7 @@ pub fn shell_bookmarks(state: State<'_, ShellState>) -> Result<Bookmarks, String
 }
 
 #[tauri::command]
-pub fn shell_bookmark_remove(
+pub async fn shell_bookmark_remove(
     window: tauri::Webview,
     id: String,
     state: State<'_, ShellState>,
@@ -795,9 +810,11 @@ pub fn shell_bookmark_remove(
     sync(&app, &state, &window_name)
 }
 
-/// The drag session — chrome pointer events in, model decisions out.
+/// The drag session — frame pointer events in, model decisions out.
+/// Async per the re-entrancy law: a detached drop spawns a whole WINDOW
+/// (plus its frame webview) from the tear-off path.
 #[tauri::command]
-pub fn shell_drag(
+pub async fn shell_drag(
     window: tauri::Webview,
     phase: String,
     tab_id: Option<TabId>,
@@ -889,7 +906,7 @@ pub fn shell_drag(
     }
 }
 
-/// A tear-off: a new window with its own chrome and the detached tab.
+/// A tear-off: a new window with its own frame and the detached tab.
 fn spawn_tearoff(
     app: &AppHandle,
     state: &ShellState,
@@ -919,23 +936,23 @@ fn spawn_tearoff(
     window
         .add_child(
             tauri::webview::WebviewBuilder::new(
-                chrome_label(&label),
-                WebviewUrl::App("chrome.html".into()),
+                frame_label(&label),
+                WebviewUrl::App("frame.html".into()),
             ),
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(1100.0, 83.0),
         )
-        .map_err(|e| format!("tear-off chrome failed: {e}"))?;
-    // The content webview is created by sync() once the tear-off's chrome
+        .map_err(|e| format!("tear-off frame failed: {e}"))?;
+    // The content webview is created by sync() once the tear-off's frame
     // reports its size (shell_boot).
     sync(app, state, &label)
 }
 
-/// The chrome layer reports its window size on resize (belt and braces
+/// The frame layer reports its window size on resize (belt and braces
 /// with the native Resized event, which misses webview-level relayouts
-/// during live drags on some platforms).
+/// during live drags on some platforms). Async per the re-entrancy law.
 #[tauri::command]
-pub fn shell_window_resized(
+pub async fn shell_window_resized(
     window: Window,
     width: f64,
     height: f64,

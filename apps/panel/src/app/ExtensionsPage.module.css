@@ -1,5 +1,5 @@
 /* The extensions room's own rules (ADR-0031): permission chips split
-   by family, problems named. The shared chrome (page, head, title,
+   by family, problems named. The shared frame (page, head, title,
    rows) comes from internalPage.module.css. */
 
 .name {

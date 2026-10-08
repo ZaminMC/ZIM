@@ -160,7 +160,7 @@ export function IconPuzzle(p: IconProps) {
   );
 }
 
-// --- browser chrome marks (ADR-0015) -----------------------------------------
+// --- browser frame marks (ADR-0015) ------------------------------------------
 
 export function IconArrowLeft(p: IconProps) {
   return (

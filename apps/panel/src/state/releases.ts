@@ -1,5 +1,5 @@
 // The release channel's read side (ADR-0029): the versioned pre-releases
-// the panel ships in, read straight from the public releases repo's API.
+// the panel ships in, read straight from the main repo's public releases API.
 // No token rides along (the repo is public; the anonymous budget is the
 // honest cost), the installed version is marked where the host answered
 // for it, and every failure — rate limit, network, shape — is a typed
@@ -17,7 +17,7 @@ export interface PublishedRelease {
 }
 
 const RELEASES_API =
-  "https://api.github.com/repos/ZaminMC/ZaminPanel-Releases/releases?per_page=10";
+  "https://api.github.com/repos/ZaminMC/ZaminPanel/releases?per_page=10";
 
 function parseRelease(raw: unknown): PublishedRelease | null {
   if (typeof raw !== "object" || raw === null) return null;

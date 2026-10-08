@@ -110,7 +110,7 @@ export function stopUpdates(): void {
 
 // --- the copy (§81: every state is a human sentence) -------------------------
 
-/** The one sentence a phase renders. The chrome banner shows only what the
+/** The one sentence a phase renders. The frame banner shows only what the
  *  operator must act on; the Settings updates rows show every phase —
  *  including the quiet ones. */
 export function updatesSentence(phase: UpdatePhase): string {

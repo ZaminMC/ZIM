@@ -151,7 +151,7 @@ impl Tab {
 pub struct Group {
     pub id: GroupId,
     pub label: String,
-    /// Index into the chrome's six-color palette.
+    /// Index into the frame's six-color palette.
     pub color: u8,
     pub collapsed: bool,
 }

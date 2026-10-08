@@ -1,5 +1,5 @@
 // The shell — ADR-0033's Phase 1: a Chromium-derived browser model in
-// Rust, one webview per tab, the chrome layer as its view.
+// Rust, one webview per tab, the frame layer as its view.
 pub mod bookmarks;
 pub mod commands;
 pub mod host;

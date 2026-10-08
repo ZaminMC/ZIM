@@ -1,12 +1,12 @@
 // The CONTENT layer of the browser shell (ADR-0033 Phase 1). This
 // document is what a tab webview loads — one destination at a time, told
-// by the Rust model, never owning the strip. The chrome (tab strip,
-// toolbar, bookmarks bar) lives in its own webview (chrome.html) and is
+// by the Rust model, never owning the strip. The frame (tab strip,
+// toolbar, bookmarks bar) lives in its own webview (frame.html) and is
 // this app's VIEW of the model, not its sibling renderer.
 //
 // Crash isolation (§51, P0.2 criterion 7) keeps its two layers: a crashed
 // VIEW is a recoverable page inside this tab (TabBoundary), and a crashed
-// TAB is its own webview process — the chrome and the other tabs are
+// TAB is its own webview process — the frame and the other tabs are
 // untouched by construction.
 
 import { Suspense, lazy, useEffect, useState } from "react";

@@ -1,7 +1,7 @@
 /* Browser shell (ADR-0015): tab strip on top, tool bar under it, one
-   destination at a time below. Compact chrome — §5: navigation never
+   destination at a time below. Compact frame — §5: navigation never
    wastes vertical space. §54: the shell has a second presentation — the
-   strip becomes a left rail and the chrome stacks beside it. */
+   strip becomes a left rail and the frame stacks beside it. */
 
 .shell {
   display: flex;
@@ -17,7 +17,7 @@
   flex-direction: row;
 }
 
-/* The chrome column beside a vertical rail: tool bar, bookmarks bar,
+/* The frame column beside a vertical rail: tool bar, bookmarks bar,
    update notice, and the content share it; the strip owns the left. */
 .column {
   display: flex;

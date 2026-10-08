@@ -1,5 +1,5 @@
 /* The downloads room's own rules (§58, ADR-0029): version rows, chips,
-   asset links. The shared chrome comes from internalPage.module.css. */
+   asset links. The shared frame comes from internalPage.module.css. */
 
 .version {
   color: var(--text);

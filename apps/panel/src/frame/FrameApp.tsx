@@ -1,32 +1,35 @@
-// The chrome layer (ADR-0033 Phase 1): the VIEW of the Rust shell model.
-// This document is the window's chrome — tab strip, toolbar, omnibox,
-// bookmarks bar, window controls — and nothing else. Content lives in its
-// own webview per tab. Every metric and interaction here renders from the
-// host's snapshot: the layout law runs in the model (shell/layout.rs);
-// this layer is deliberately dumb geometry and pointer reporting.
+// The frame (ADR-0033 Phase 1): the VIEW of the Rust shell model. This
+// document is the window's frame band — tab strip, toolbar, omnibox,
+// bookmarks bar, window controls — and nothing else. Content lives in
+// its own webview per tab. Every metric and interaction here renders
+// from the host's snapshot: the layout law runs in the model
+// (shell/layout.rs); this layer is deliberately dumb geometry and
+// pointer reporting.
 //
-// Ported behaviors (citations in shell/):
+// Ported behaviors (upstream citations live in shell/ and the porting
+// ledger):
 // - tab slots from the width law (tab_width_constraints.cc),
 // - drag: start→move→drop into the ported TabDragController (15 DIP
 //   detach magnetism; reorder by slot centers),
-// - commands: Chromium's ID space (chrome_command_ids.h) via one dispatch,
+// - commands: the ported command ID space (chrome_command_ids.h) via
+//   one dispatch,
 // - omnibox: the model classifies on every keystroke (autocomplete_input).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  bootChrome,
+  bootFrame,
   isTauri,
   omniboxClassify,
   omniboxCommit,
   onSnapshot,
   onFocusAddress,
-  reportChromeSize,
+  reportFrameSize,
   shellCommand,
   shellDrag,
   type Snapshot,
-} from "./chromeIpc";
+} from "./frameIpc";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
-import "./chrome.css";
+import "./frame.css";
 
 const CMD = {
   RELOAD: 33002,
@@ -63,7 +66,7 @@ const GROUP_COLOR_VARS = [
   "var(--group-slate)",
 ];
 
-export function ChromeApp() {
+export function FrameApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const omniboxRef = useRef<HTMLInputElement | null>(null);
@@ -72,29 +75,56 @@ export function ChromeApp() {
   const [omniboxText, setOmniboxText] = useState<string | null>(null);
   const [joinNote, setJoinNote] = useState<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  // The boot must never fail silently: a white window teaches nothing.
+  // Three spaced retries, then an honest error panel with a manual retry.
+  const [bootError, setBootError] = useState<string | null>(null);
 
   const selectSlotIndex = useCallback((slotIndex: number) => {
     void shellCommand(CMD.SELECT_TAB_0 + slotIndex);
   }, []);
 
-  // Boot + the snapshot lane (the model pushes every change).
+  const boot = useCallback((attempt = 0) => {
+    bootFrame()
+      .then((first) => {
+        if (first) {
+          setSnap(first);
+          setBootError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (attempt < 2) {
+          window.setTimeout(() => boot(attempt + 1), 250 * (attempt + 1));
+        } else {
+          setBootError(
+            error instanceof Error
+              ? error.message
+              : typeof error === "string" && error !== ""
+                ? error
+                : "the shell did not answer",
+          );
+        }
+      });
+  }, []);
+
+  // Boot + the snapshot lane (the model pushes every change; a pushed
+  // snapshot also rescues a frame whose boot answer was lost).
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void bootChrome().then((boot) => {
-      if (!disposed && boot) setSnap(boot);
-    });
+    boot();
     void onSnapshot((next) => {
-      if (!disposed) setSnap(next);
+      if (disposed) return;
+      setSnap(next);
+      setBootError(null);
     }).then((off) => {
       if (disposed) off();
       else unlisten = off;
     });
-    // The model needs the chrome's true width for the layout law.
+    // The model needs the frame's true width for the layout law.
     const report = () => {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
-        void reportChromeSize(rect.width, rect.height);
+        void reportFrameSize(rect.width, rect.height);
       }
     };
     report();
@@ -104,7 +134,7 @@ export function ChromeApp() {
       unlisten?.();
       window.removeEventListener("resize", report);
     };
-  }, []);
+  }, [boot]);
 
   // FOCUS_LOCATION → focus the omnibox; its resting text rides snapshots.
   useEffect(() => {
@@ -125,7 +155,7 @@ export function ChromeApp() {
     setJoinNote(null);
   }, [snap?.address, snap?.active]);
 
-  // The update lane (ADR-0024): the chrome owns the pill now.
+  // The update lane (ADR-0024): the frame owns the pill now.
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
@@ -160,7 +190,7 @@ export function ChromeApp() {
     }
   }, []);
 
-  // The browser keyboard contract (ADR-0032), chrome side.
+  // The browser keyboard contract (ADR-0032), frame side.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as (HTMLElement & { isContentEditable: boolean }) | null;
@@ -205,15 +235,29 @@ export function ChromeApp() {
     const onResize = () => {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
-        void reportChromeSize(rect.width, rect.height);
+        void reportFrameSize(rect.width, rect.height);
       }
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  if (bootError) {
+    return (
+      <div className="frame frame-error" role="alert">
+        <div className="frame-error-box">
+          <p className="frame-error-title">The shell did not boot</p>
+          <p className="frame-error-detail">{bootError}</p>
+          <button className="frame-error-retry" onClick={() => { setBootError(null); boot(); }}>
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!snap) {
-    return <div className="chrome chrome-boot">…</div>;
+    return <div className="frame frame-boot">…</div>;
   }
 
   const stripUsedEnd = snap.slots.length
@@ -250,7 +294,7 @@ export function ChromeApp() {
   };
 
   return (
-    <div className="chrome" style={{ height: snap.header_height }}>
+    <div className="frame" style={{ height: snap.header_height }}>
       {/* Tab strip row — Chromium's 35+6 band; drag region on the bare
           strip, tabs above it. */}
       <div
@@ -407,7 +451,7 @@ export function ChromeApp() {
                 }
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  void import("./chromeIpc").then(({ isTauri }) => {
+                  void import("./frameIpc").then(({ isTauri }) => {
                     if (isTauri()) {
                       void import("@tauri-apps/api/core").then(({ invoke }) =>
                         invoke("shell_bookmark_remove", { id: bookmark.id }),

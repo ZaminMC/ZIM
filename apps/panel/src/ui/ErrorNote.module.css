@@ -1,5 +1,5 @@
 /* The error note (§81): the shared inner body of an error alert. The
- * owning view keeps its own alert chrome; this carries the sentence, the
+ * owning view keeps its own alert frame; this carries the sentence, the
  * remediation ("what to do next"), and the technical details behind a
  * disclosure — available, never forced. */
 

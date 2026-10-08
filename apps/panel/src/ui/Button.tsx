@@ -1,6 +1,6 @@
 // Design-system button (STYLE-GUIDE: the design system is src/ui/).
-// Variants: default surface, primary (accent), danger, ghost (chrome —
-// the browser frame's borderless controls, ADR-0015). `busy` swaps the
+// Variants: default surface, primary (accent), danger, ghost (frame —
+// the browser's borderless controls, ADR-0015). `busy` swaps the
 // label for a spinner while keeping width stable. Native button
 // attributes (aria-label, tabIndex, …) pass through untouched.
 

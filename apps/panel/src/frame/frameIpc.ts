@@ -1,6 +1,6 @@
-// The chrome layer's IPC bridge — typed front for the shell host's
-// commands and events (shell/host.rs). Everything here is the VIEW side
-// of ADR-0033: the model is authoritative, this only speaks for it.
+// The frame's IPC bridge — typed front for the shell host's commands
+// and events (shell/host.rs). Everything here is the VIEW side of
+// ADR-0033: the model is authoritative, this only speaks for it.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -60,7 +60,7 @@ export interface Snapshot {
 
 // -- Commands -----------------------------------------------------------------
 
-/** A browser command (Chromium's ID space, shell/commands.rs). */
+/** A browser command (the ported command ID space, shell/commands.rs). */
 export const shellCommand = (id: number, arg?: Record<string, unknown>): Promise<void> =>
   isTauri() ? invoke("shell_command", { id, arg: arg ?? null }) : Promise.resolve();
 
@@ -82,10 +82,10 @@ export const omniboxCommit = (text: string): Promise<CommitOutcome> =>
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
   isTauri() ? invoke("shell_omnibox_classify", { text }) : Promise.resolve(null);
 
-export const bootChrome = (): Promise<Snapshot | null> =>
+export const bootFrame = (): Promise<Snapshot | null> =>
   isTauri() ? invoke<Snapshot>("shell_boot") : Promise.resolve(null);
 
-export const reportChromeSize = (width: number, height: number): Promise<void> =>
+export const reportFrameSize = (width: number, height: number): Promise<void> =>
   isTauri() ? invoke("shell_window_resized", { width, height }) : Promise.resolve();
 
 /** The drag session — phase events into the ported TabDragController. */

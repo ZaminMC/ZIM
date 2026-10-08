@@ -23,7 +23,7 @@ function releaseOf(tag: string, over: Partial<PublishedRelease> = {}): Published
     name: `ZaminPanel ${tag} — development pre-release`,
     publishedAt: "2026-10-08T17:00:00Z",
     prerelease: true,
-    htmlUrl: `https://github.com/ZaminMC/ZaminPanel-Releases/releases/tag/${tag}`,
+    htmlUrl: `https://github.com/ZaminMC/ZaminPanel/releases/tag/${tag}`,
     assets: [
       {
         name: `ZaminPanel_${tag.replace(/^v/, "")}_x64-setup.exe`,

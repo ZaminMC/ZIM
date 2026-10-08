@@ -1,6 +1,6 @@
 // The browser command registry — Chromium's ID space (chrome/app/
 // chrome_command_ids.h), mirrored so the keyboard contract (ADR-0032),
-// the chrome layer, and the tests cite ONE table. IDs marked ⓩ are
+// the frame layer, and the tests cite ONE table. IDs marked ⓩ are
 // ZaminPanel-local because modern Chromium has no single IDC for the
 // verb; the local numbering keeps clear of upstream's blocks.
 
@@ -54,12 +54,12 @@ pub const NAVIGATE_ACTIVE: u32 = 50004;
 /// ⓩ Local: toggle the active tab's group collapse.
 pub const TOGGLE_GROUP_COLLAPSE: u32 = 50005;
 /// ⓩ Local: navigate the active tab back (upstream routes through the
-/// navigator; this build numbers the chrome verbs locally).
+/// navigator; this build numbers the frame verbs locally).
 pub const NAV_BACK: u32 = 50006;
 /// ⓩ Local: navigate the active tab forward.
 pub const NAV_FORWARD: u32 = 50007;
 
-/// Window-control verbs for the chrome's caption buttons — no upstream
+/// Window-control verbs for the frame's caption buttons — no upstream
 /// command IDs (Views owns them natively); ZaminPanel-local numbering.
 pub const WINDOW_MINIMIZE: u32 = 50010;
 pub const WINDOW_TOGGLE_MAXIMIZE: u32 = 50011;

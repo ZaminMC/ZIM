@@ -1,4 +1,4 @@
-/* The internal pages' shared chrome (ADR-0025's rule, applied to the
+/* The internal pages' shared frame (ADR-0025's rule, applied to the
    §58 room family: one body, not bespoke copies per page). About,
    Extensions, and Downloads compose these classes with their own
    module for the page-specific parts. The file rides the shared lazy

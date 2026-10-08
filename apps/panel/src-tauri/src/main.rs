@@ -211,19 +211,25 @@ fn main() {
         .manage(ShellState::new())
         // The shell (ADR-0033): restore the session before any webview
         // asks; the restored primary tab's webview is created lazily by
-        // sync once the chrome reports its size.
+        // sync once the frame reports its size.
         .setup(|app| {
             let handle = app.handle().clone();
             app.state::<ShellState>().restore(&handle);
             Ok(())
         })
         // Geometry is model-visible: every window resize re-runs the
-        // layout law so the chrome band and tab webviews stay exact.
+        // layout law so the frame band and tab webviews stay exact. The
+        // relayout rides the async runtime — the event loop's own callback
+        // must never birth a webview (the re-entrancy law, shell/host.rs:
+        // on Windows it deadlocks the boot IPC and whites the window).
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Resized(_) = event {
                 let app = window.app_handle().clone();
-                let state: tauri::State<ShellState> = app.state();
-                shell::host::relayout_window(&app, &state, window);
+                let label = window.label().to_owned();
+                tauri::async_runtime::spawn(async move {
+                    let state = app.state::<ShellState>();
+                    shell::host::relayout_window(&app, &state, &label);
+                });
             }
         })
         .invoke_handler(tauri::generate_handler![

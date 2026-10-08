@@ -3,7 +3,7 @@
 // sentence; the "what to do next" rides it when the protocol typed one;
 // and the technical details (code, structured context) stay available
 // behind [View details] instead of either vanishing or shouting. The
-// owning view keeps its alert chrome (class, role, verbs); this renders
+// owning view keeps its alert frame (class, role, verbs); this renders
 // only the content, so no surface re-decides the shape and every surface
 // grows the disclosure at once.
 

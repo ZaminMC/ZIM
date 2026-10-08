@@ -1,7 +1,7 @@
 // Tabs — the CONTENT-side navigation shim for ADR-0033 Phase 1.
 //
 // The AUTHORITATIVE strip lives in the Rust host (src-tauri/src/shell/);
-// the chrome webview renders it and the operator drives it there. This
+// the frame webview renders it and the operator drives it there. This
 // store is the same vocabulary the content views already speak
 // (navigate/newTab/close/reload/…), with two modes:
 //   • desktop (Tauri): every mutation is FORWARDED to the host command
@@ -83,8 +83,8 @@ const CMD = {
   TOGGLE_MUTE: 50003,
 } as const;
 
-/** Desktop host present? (mirror of chrome/chromeIpc's probe; kept local
- *  so the store has no import cycle with the chrome layer). */
+/** Desktop host present? (mirror of frame/frameIpc's probe; kept local
+ *  so the store has no import cycle with the frame layer). */
 const onHost = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
