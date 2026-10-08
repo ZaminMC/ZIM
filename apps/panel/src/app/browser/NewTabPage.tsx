@@ -6,23 +6,44 @@
 // transition that eventually lives here is a reserved room.
 
 import { useEffect, useState } from "react";
-import { parseAddressInput, joinAddress, searchServers } from "../../state/destinations";
+import { parseAddressInput, resolveJoin, joinAddress, searchServers } from "../../state/destinations";
 import { registerServer } from "../../state/actions";
 import type { DiscoveredServer } from "../../protocol/types";
-import { sortedServers, useServers } from "../../state/servers";
+import { sortedServers, useServers, type ServerEntry } from "../../state/servers";
 import { useTabs } from "../../state/tabs";
 import { useUi } from "../../state/ui";
 import { Button } from "../../ui/Button";
 import { StatusChip } from "../../ui/StatusChip";
 import { StatusDot } from "../../ui/StatusDot";
 import { IconPlus, IconServer } from "../../ui/icons";
-import { commitAddress } from "./commitAddress";
 import { MachineDiscovery, slugFromPath } from "./machineDiscovery";
 import { describeError } from "../../state/errors";
 import { ErrorNote } from "../../ui/ErrorNote";
 import styles from "./NewTabPage.module.css";
 
 const ACTIVE_STATES = new Set(["running", "starting", "adopting"]);
+
+/** The one address-commit path for the new tab's input (§22): the same
+ *  dialects the chrome omnibox speaks. The host's model stays the single
+ *  authority for identity — this lands navigation through the tab lane. */
+function commitAddress(text: string, entries: ServerEntry[], host: string) {
+  const request = parseAddressInput(text);
+  switch (request.kind) {
+    case "internal":
+      useTabs.getState().navigate(request.destination);
+      return { kind: "navigated" } as const;
+    case "join": {
+      const hit = resolveJoin(request, entries, host);
+      if (!hit) return { kind: "join-miss", port: request.port } as const;
+      useTabs.getState().navigate({ kind: "server", serverId: hit.serverId });
+      return { kind: "navigated" } as const;
+    }
+    case "query":
+      useTabs.getState().newTab(request.text);
+      return { kind: "query", text: request.text } as const;
+  }
+}
+
 
 export function NewTabPage() {
   const query = useTabs((s) => s.discoveryQuery);

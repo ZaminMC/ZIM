@@ -1,0 +1,306 @@
+/* The chrome layer's face — Chromium's chrome, rebuilt to the ported
+   law (shell/layout.rs cites each constant's upstream file). The theme
+   variables come from tokens.css; dark theme follows the app palette. */
+
+:root {
+  --group-sky: #8ab4f8;
+  --group-grass: #81c995;
+  --group-amber: #fdd663;
+  --group-rose: #f28b82;
+  --group-violet: #c58af9;
+  --group-slate: #9aa0a6;
+}
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: transparent;
+}
+
+.chrome {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--chrome-bg, #dee1e6);
+  color: var(--chrome-fg, #202124);
+  user-select: none;
+}
+
+.chrome-boot { opacity: 0; }
+
+/* -- Tab strip: 35 + 6 band (TAB_HEIGHT + STRIP_PADDING) ----------------- */
+
+.strip {
+  position: relative;
+  height: 41px; /* TAB_HEIGHT 35 + STRIP_PADDING 6 */
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+}
+
+.tab {
+  position: absolute;
+  bottom: 0;
+  height: 35px; /* TAB_HEIGHT */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px; /* CONTENT_INSET_X */
+  box-sizing: border-box;
+  cursor: default;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 10px 10px 0 0; /* CORNER_TOP */
+  transition: background 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.tab-inactive { background: transparent; }
+.tab-inactive:hover { background: color-mix(in srgb, var(--chrome-fg, #202124) 8%, transparent); }
+.tab-active {
+  background: var(--chrome-surface, #ffffff);
+  box-shadow: 0 -1px 2px rgb(0 0 0 / 8%);
+}
+
+/* The active tab melts into the toolbar: bottom corner extensions,
+   radius 12 (CORNER_BOTTOM). */
+.tab-active::before,
+.tab-active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  pointer-events: none;
+}
+.tab-active::before { left: -12px; border-bottom-right-radius: 12px; }
+.tab-active::after { right: -12px; border-bottom-left-radius: 12px; }
+
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-pinned .tab-title {
+  font-weight: 600;
+}
+
+.tab-muted::before { content: "🔇"; font-size: 10px; }
+
+.tab-close {
+  flex: none;
+  width: 16px;  /* CLOSE_BUTTON */
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  padding: 0;
+  cursor: default;
+}
+.tab-close:hover { background: color-mix(in srgb, var(--chrome-fg, #202124) 14%, transparent); }
+
+/* Separators between inactive tabs: 2 × 20 (SEPARATOR_W × SEPARATOR_H). */
+.tab-inactive + .tab-inactive::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  width: 2px;
+  height: 20px;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--chrome-fg, #202124) 22%, transparent);
+}
+
+.tab-group-underline {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--tab-group-color, var(--group-sky));
+}
+
+.tab-dragging {
+  z-index: 3;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 22%);
+  transition: none;
+}
+
+.tab-closing { opacity: 0; }
+
+.new-tab {
+  position: absolute;
+  bottom: 0;
+  width: 36px; /* NEW_TAB_BUTTON_W */
+  height: 35px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  border-radius: 10px 10px 0 0;
+  cursor: default;
+}
+.new-tab:hover { background: color-mix(in srgb, var(--chrome-fg, #202124) 8%, transparent); }
+
+.window-controls {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 35px;
+  display: flex;
+}
+.window-controls button {
+  width: 46px;
+  height: 35px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+.window-controls button:hover { background: color-mix(in srgb, var(--chrome-fg, #202124) 10%, transparent); }
+.window-controls .window-close:hover { background: #e81123; color: #fff; }
+
+/* -- Toolbar: 34 location bar + 2×4 padding ------------------------------ */
+
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 42px; /* LOCATION_BAR_H 34 + 2×TOOLBAR_PAD_Y 4 */
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.tool {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  cursor: default;
+}
+.tool:hover:not(:disabled) { background: color-mix(in srgb, var(--chrome-fg, #202124) 9%, transparent); }
+.tool:disabled { opacity: 0.35; }
+
+.omnibox {
+  flex: 1;
+  height: 34px; /* LOCATION_BAR_H */
+  border: none;
+  border-radius: 17px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  font-size: 13px;
+  background: var(--chrome-omnibox, #f1f3f4);
+  color: var(--chrome-fg, #202124);
+  outline: none;
+}
+.omnibox:focus {
+  background: var(--chrome-surface, #ffffff);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 18%);
+}
+
+.omnibox-note {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.75;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+/* -- Bookmarks bar -------------------------------------------------------- */
+
+.bookmarks {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px; /* BOOKMARKS_BAR_H */
+  padding: 0 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.bookmark {
+  flex: none;
+  max-width: 180px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+.bookmark:hover { background: color-mix(in srgb, var(--chrome-fg, #202124) 9%, transparent); }
+
+.bookmarks-empty {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+/* -- Context menu / update pill ------------------------------------------- */
+
+.context {
+  position: fixed;
+  z-index: 9;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--chrome-surface, #ffffff);
+  color: var(--chrome-fg, #202124);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 24%);
+}
+.context button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: default;
+}
+.context button:hover { background: color-mix(in srgb, var(--chrome-fg, #202124) 9%, transparent); }
+
+.update-pill {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 9;
+  border: none;
+  border-radius: 14px;
+  padding: 8px 14px;
+  font-size: 12px;
+  background: var(--group-grass, #81c995);
+  color: #102010;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 24%);
+  cursor: pointer;
+}
+
+/* Reduced motion floor (ADR-0030): no stylesheet can outrun it. */
+@media (prefers-reduced-motion: reduce) {
+  .tab, .tab * { transition: none !important; }
+}

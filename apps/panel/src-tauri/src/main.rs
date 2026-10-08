@@ -30,6 +30,9 @@ use zamin_ipc::Endpoint;
 
 mod autostart;
 mod daemon_ensure;
+mod shell;
+
+use shell::host::ShellState;
 
 /// One live daemon connection and the tasks moving its frames.
 struct Connected {
@@ -205,13 +208,43 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(HostState::default())
+        .manage(ShellState::new())
+        // The shell (ADR-0033): restore the session before any webview
+        // asks; the restored primary tab's webview is created lazily by
+        // sync once the chrome reports its size.
+        .setup(|app| {
+            let handle = app.handle().clone();
+            app.state::<ShellState>().restore(&handle);
+            Ok(())
+        })
+        // Geometry is model-visible: every window resize re-runs the
+        // layout law so the chrome band and tab webviews stay exact.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Resized(_) = event {
+                let app = window.app_handle().clone();
+                let state: tauri::State<ShellState> = app.state();
+                shell::host::relayout_window(&app, &state, window);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             daemon_connect,
             daemon_send,
             daemon_close,
             daemon_ensure,
             autostart_get,
-            autostart_set
+            autostart_set,
+            shell::host::shell_boot,
+            shell::host::shell_snapshot,
+            shell::host::shell_tab_hello,
+            shell::host::shell_tab_navigate,
+            shell::host::shell_tab_action,
+            shell::host::shell_command,
+            shell::host::shell_omnibox_classify,
+            shell::host::shell_omnibox_commit,
+            shell::host::shell_bookmarks,
+            shell::host::shell_bookmark_remove,
+            shell::host::shell_drag,
+            shell::host::shell_window_resized
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ZaminPanel host");

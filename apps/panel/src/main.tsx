@@ -1,14 +1,11 @@
-import "./boot/windowBoot";
+// The CONTENT document's boot (ADR-0033): one tab's workspace. The
+// chrome (strip/toolbar/omnibox/bookmarks) boots from chrome.html —
+// this document is what a tab webview loads, one destination at a time.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import "./tokens.css";
 
-// Cold-start measurement marks (PERFORMANCE-BUDGETS, Panel): module eval
-// → first React commit. Read with
-// `performance.getEntriesByName("panel:boot-start" | "panel:interactive")`
-// in a browser or the Tauri webview inspector; the smoke run records the
-// numbers in the budgets doc.
 performance.mark("panel:boot-start");
 
 const rootElement = document.getElementById("root");
@@ -20,9 +17,6 @@ createRoot(rootElement).render(
   </StrictMode>,
 );
 
-// The first commit flushes after paint scheduling; requestAnimationFrame
-// after render is the closest honest "interactive" point without adding
-// dependencies.
 requestAnimationFrame(() => {
   performance.mark("panel:interactive");
   try {

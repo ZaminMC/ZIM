@@ -13,7 +13,10 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "ZaminPanel",
+        "url": "chrome.html",
+        "decorations": false,
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -26,7 +29,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "appimage"],
+    "targets": [
+      "nsis",
+      "appimage"
+    ],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
@@ -38,7 +44,10 @@
     "category": "Game",
     "shortDescription": "A polished workspace for running and managing Minecraft servers.",
     "longDescription": "ZaminPanel is a desktop panel and CLI workspace for running, managing, and developing Minecraft servers. The resident daemon keeps servers alive independent of the panel; the New Server flow downloads and creates servers from the software catalog; backups, restore, crash recovery, logs, files, and players ride the same protocol.",
-    "externalBin": ["binaries/zamind", "binaries/zamin"],
+    "externalBin": [
+      "binaries/zamind",
+      "binaries/zamin"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser"
