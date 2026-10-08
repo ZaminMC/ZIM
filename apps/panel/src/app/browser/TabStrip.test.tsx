@@ -135,11 +135,47 @@ describe("the §48 menu", () => {
     seed([tab([{ kind: "servers" }]), tab([server("alpha")])]);
     render(<TabStrip />);
     openMenuOn(tabByTitle("Alpha"));
-    for (const reserved of ["Mute", "Share tab with Dutchmen", "Show tabs vertically"]) {
-      expect((menuItem(reserved) as HTMLButtonElement).disabled).toBe(true);
-    }
+    // ADR-0026: §53 mute and §54 vertical are machinery now; the agent
+    // room stays reserved until its runtime arrives.
+    expect((menuItem("Share tab with Dutchmen") as HTMLButtonElement).disabled).toBe(true);
+    expect((menuItem("Mute tab") as HTMLButtonElement).disabled).toBe(false);
+    expect((menuItem("Show tabs vertically") as HTMLButtonElement).disabled).toBe(false);
     // ADR-0018: the window verb is machinery now, not a reserved room.
     expect((menuItem("Move tab to new window") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("§53: mute is a verb, the tab shows its posture, unmute is a verb back", () => {
+    seed([tab([server("alpha")]), tab([{ kind: "servers" }])]);
+    render(<TabStrip />);
+    expect(screen.queryByRole("img", { name: "Muted" })).toBeNull();
+    openMenuOn(tabByTitle("Alpha"));
+    fireEvent.click(menuItem("Mute tab"));
+    const muted = useTabs.getState().tabs.find((t) => tabKeyOf(t) === "server:alpha")!;
+    expect(muted.muted).toBe(true);
+    // The state is visible without any interaction beyond the flip.
+    expect(screen.getByRole("img", { name: "Muted" })).toBeTruthy();
+    openMenuOn(tabByTitle("Alpha"));
+    fireEvent.click(menuItem("Unmute tab"));
+    expect(
+      useTabs.getState().tabs.find((t) => tabKeyOf(t) === "server:alpha")!.muted,
+    ).toBeFalsy();
+    expect(screen.queryByRole("img", { name: "Muted" })).toBeNull();
+  });
+
+  it("§54: the vertical toggle flips the strip's presentation, not its tabs", () => {
+    seed([tab([{ kind: "servers" }]), tab([server("alpha")])]);
+    render(<TabStrip />);
+    expect(screen.getByRole("tablist").getAttribute("aria-orientation")).toBe("horizontal");
+    openMenuOn(tabByTitle("Alpha"));
+    fireEvent.click(menuItem("Show tabs vertically"));
+    expect(useTabs.getState().verticalStrip).toBe(true);
+    expect(screen.getByRole("tablist").getAttribute("aria-orientation")).toBe("vertical");
+    // The same tab objects are still the strip's children.
+    expect(useTabs.getState().tabs.map(tabKeyOf)).toEqual(["servers", "server:alpha"]);
+    openMenuOn(tabByTitle("Alpha"));
+    fireEvent.click(menuItem("Use horizontal strip"));
+    expect(useTabs.getState().verticalStrip).toBe(false);
+    expect(screen.getByRole("tablist").getAttribute("aria-orientation")).toBe("horizontal");
   });
 });
 

@@ -1,0 +1,144 @@
+/* The audit page (§72 read side): a trail, not a dashboard. Dense rows,
+   monospace commands, one honest outcome chip per line (§75). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-l);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--text-faint);
+}
+
+.alert {
+  border: 1px solid var(--danger-border, rgba(244, 113, 116, 0.35));
+  border-radius: var(--radius-m);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+}
+
+.tableHead,
+.row {
+  display: grid;
+  grid-template-columns: 150px minmax(160px, 1.4fr) minmax(80px, 1fr) 90px minmax(110px, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.tableHead {
+  padding: 0 var(--space-3);
+  font-size: var(--text-s);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-s);
+}
+
+.row:nth-child(odd) {
+  background: var(--surface-2);
+}
+
+.when {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.method {
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outcome {
+  justify-self: start;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.outcomeOk {
+  color: var(--success);
+  border-color: var(--success-border, rgba(70, 212, 131, 0.35));
+}
+
+.outcomeError {
+  color: var(--danger);
+  border-color: var(--danger-border, rgba(244, 113, 116, 0.35));
+}
+
+.client {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+}
+
+.empty {
+  color: var(--text-faint);
+  margin: var(--space-4) 0;
+}
+
+.malformed {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning-border, rgba(245, 185, 61, 0.35));
+  border-radius: var(--radius-m);
+  color: var(--warning);
+  font-size: var(--text-s);
+  background: var(--warning-soft);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--text-faint);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}

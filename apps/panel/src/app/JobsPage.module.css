@@ -1,0 +1,174 @@
+/* The jobs page (§73): rows are evidence — kind, id, server, state,
+   progress, times — compact and readable, never dashboard-like (§75). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-l);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--text-faint);
+}
+
+.alert {
+  border: 1px solid var(--danger-border, rgba(244, 113, 116, 0.35));
+  border-radius: var(--radius-m);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+.row[data-state="failed"] {
+  border-color: var(--danger-border, rgba(244, 113, 116, 0.35));
+}
+
+.rowMain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.kind {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.jobId {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.server {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.state {
+  font-size: var(--text-s);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.state_running {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.state_succeeded {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.state_failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.state_cancelled {
+  color: var(--text-faint);
+}
+
+.cancel {
+  white-space: nowrap;
+}
+
+.progressRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.meter {
+  flex: 1;
+  max-width: 320px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width var(--speed-fast) var(--ease);
+}
+
+.progressText {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.whenRow {
+  display: flex;
+  gap: var(--space-4);
+  font-size: var(--text-s);
+  color: var(--text-faint);
+}
+
+.jobError {
+  font-size: var(--text-s);
+}
+
+.empty {
+  color: var(--text-faint);
+  margin: var(--space-4) 0;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--text-faint);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}

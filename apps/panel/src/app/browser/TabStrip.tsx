@@ -22,14 +22,18 @@ import {
 import { Button } from "../../ui/Button";
 import { StatusDot } from "../../ui/StatusDot";
 import {
+  IconAudit,
   IconBolt,
   IconClose,
   IconDashboard,
   IconGear,
+  IconInfo,
+  IconJobs,
   IconPlus,
   IconSearch,
   IconServer,
   IconTerminal,
+  IconVolumeMuted,
 } from "../../ui/icons";
 import styles from "./TabStrip.module.css";
 
@@ -48,6 +52,12 @@ function tabTitle(tab: Tab, entries: ServerEntry[]): string {
       const name = entries.find((e) => e.serverId === dest.serverId)?.displayName ?? dest.serverId;
       return `${name} console`;
     }
+    case "jobs":
+      return "Jobs";
+    case "audit":
+      return "Audit log";
+    case "about":
+      return "About ZaminPanel";
     case "missing":
       return dest.url;
   }
@@ -68,6 +78,12 @@ function TabIcon({ tab, entries }: { tab: Tab; entries: ServerEntry[] }) {
     }
     case "console":
       return <IconTerminal size={13} />;
+    case "jobs":
+      return <IconJobs size={13} />;
+    case "audit":
+      return <IconAudit size={13} />;
+    case "about":
+      return <IconInfo size={13} />;
     case "missing":
       return <IconBolt size={13} />;
   }
@@ -80,10 +96,18 @@ interface TabMenu {
 }
 
 /** Which side of a tab a drop would land on — the pointer against the
- *  tab's own midpoint. Used by dragover (the indicator) and drop (the
- *  math), so the two can never disagree. */
-function sideOf(el: HTMLElement, clientX: number): "before" | "after" {
+ *  tab's own midpoint, along the strip's axis (§54: a vertical rail
+ *  splits above/below, a horizontal strip before/after). Used by
+ *  dragover (the indicator) and drop (the math), so the two can never
+ *  disagree. */
+function sideOf(
+  el: HTMLElement,
+  clientX: number,
+  clientY: number,
+  vertical: boolean,
+): "before" | "after" {
   const rect = el.getBoundingClientRect();
+  if (vertical) return clientY < rect.top + rect.height / 2 ? "before" : "after";
   return clientX < rect.left + rect.width / 2 ? "before" : "after";
 }
 
@@ -109,6 +133,9 @@ export function TabStrip() {
   const reorder = useTabs((s) => s.reorder);
   const moveToNewWindow = useTabs((s) => s.moveToNewWindow);
   const restoreMoved = useTabs((s) => s.restoreMoved);
+  const toggleMute = useTabs((s) => s.toggleMute);
+  const vertical = useTabs((s) => s.verticalStrip);
+  const toggleVertical = useTabs((s) => s.toggleVerticalStrip);
   const serverMap = useServers((s) => s.servers);
   const entries = Object.values(serverMap);
   const [menu, setMenu] = useState<TabMenu | null>(null);
@@ -150,8 +177,16 @@ export function TabStrip() {
   const groupIds = Object.keys(groups);
 
   return (
-    <div className={styles.strip}>
-      <div className={styles.tabs} role="tablist" aria-label="Open tabs">
+    <div
+      className={`${styles.strip} ${vertical ? styles.stripVertical : ""}`}
+      aria-orientation={vertical ? "vertical" : "horizontal"}
+    >
+      <div
+        className={`${styles.tabs} ${vertical ? styles.tabsVertical : ""}`}
+        role="tablist"
+        aria-label="Open tabs"
+        aria-orientation={vertical ? "vertical" : "horizontal"}
+      >
         {tabs.map((tab, index) => {
           const active = tab.id === activeId;
           const group = tab.groupId ? groups[tab.groupId] : undefined;
@@ -224,8 +259,12 @@ export function TabStrip() {
                 } ${group ? `${styles.groupMember} ${styles[`group_${group.color}`]}` : ""} ${
                   dropHint?.id === tab.id
                     ? dropHint.side === "before"
-                      ? styles.dropBefore
-                      : styles.dropAfter
+                      ? vertical
+                        ? styles.dropAbove
+                        : styles.dropBefore
+                      : vertical
+                        ? styles.dropBelow
+                        : styles.dropAfter
                     : ""
                 }`}
                 draggable
@@ -260,7 +299,7 @@ export function TabStrip() {
                   if (dragId === null || dragId === tab.id) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
-                  const side = sideOf(e.currentTarget, e.clientX);
+                  const side = sideOf(e.currentTarget, e.clientX, e.clientY, vertical);
                   setDropHint((prev) =>
                     prev?.id === tab.id && prev.side === side ? prev : { id: tab.id, side },
                   );
@@ -271,7 +310,9 @@ export function TabStrip() {
                   const base = tabs.findIndex((t) => t.id === tab.id);
                   if (dragId !== null && dragId !== tab.id && base !== -1) {
                     const insertion =
-                      sideOf(e.currentTarget, e.clientX) === "after" ? base + 1 : base;
+                      sideOf(e.currentTarget, e.clientX, e.clientY, vertical) === "after"
+                        ? base + 1
+                        : base;
                     reorder(dragId, insertion);
                   }
                   dragIdRef.current = null;
@@ -288,6 +329,18 @@ export function TabStrip() {
                 {!tab.pinned ? (
                   <>
                     <span className={styles.title}>{tabTitle(tab, entries)}</span>
+                    {tab.muted ? (
+                      // §53: the tab shows its audio posture the moment it
+                      // is set — the indicator IS the state, not a control.
+                      <span
+                        className={styles.mutedMark}
+                        aria-label="Muted"
+                        role="img"
+                        title="This tab is muted"
+                      >
+                        <IconVolumeMuted size={12} />
+                      </span>
+                    ) : null}
                     <button
                       className={styles.close}
                       aria-label={`Close ${tabTitle(tab, entries)}`}
@@ -308,7 +361,7 @@ export function TabStrip() {
       </div>
       <Button
         variant="ghost"
-        className={styles.newButton}
+        className={`${styles.newButton} ${vertical ? styles.newButtonVertical : ""}`}
         onClick={() => newTab()}
         aria-label="New tab (Ctrl+T)"
         title="New tab (Ctrl+T)"
@@ -367,11 +420,14 @@ export function TabStrip() {
           </button>
           <button
             role="menuitem"
-            className={`${styles.menuItem} ${styles.menuItemReserved}`}
-            disabled
-            title="Planned — audio controls land with their real machinery"
+            className={styles.menuItem}
+            onClick={() => {
+              toggleMute(menu.id);
+              setMenu(null);
+            }}
+            title="The tab's audio posture — audio surfaces consult it before they make a sound"
           >
-            Mute
+            {menuTab.muted ? "Unmute tab" : "Mute tab"}
           </button>
           <div className={styles.divider} />
           {menuTab.pinned ? (
@@ -503,11 +559,15 @@ export function TabStrip() {
           <div className={styles.divider} />
           <button
             role="menuitem"
-            className={`${styles.menuItem} ${styles.menuItemReserved}`}
-            disabled
-            title="Planned — the vertical strip lands with its real machinery"
+            aria-checked={vertical}
+            className={styles.menuItem}
+            onClick={() => {
+              toggleVertical();
+              setMenu(null);
+            }}
+            title="§54 — the same tabs, rendered as a rail on the left"
           >
-            Show tabs vertically
+            {vertical ? "Use horizontal strip" : "Show tabs vertically"}
           </button>
           <div className={styles.divider} />
           <button

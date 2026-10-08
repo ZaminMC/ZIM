@@ -47,7 +47,7 @@ sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
 Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
 perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
 entry ≤ 96 KB, any single chunk ≤ 96 KB, total JS ≤ 184 KB, total CSS
-≤ 16 KB. The cold-start payload was cut with code splitting: the entry
+≤ 18 KB with the entry stylesheet's own line held at ≤ 11 KB. The cold-start payload was cut with code splitting: the entry
 chunk went from 147 KB to 68 KB gzip by splitting the console and the
 three operator modals into their own chunks; the console loads when the
 tab first renders, not at boot. The ADR-0019 raise (170 → 184 KB JS,
@@ -70,7 +70,13 @@ duty; the desktop plugin APIs stay lazy chunks, so the growth is the
 panel's own decisions, not the OS calls. The ADR-0025 raise (15 → 16 KB CSS)
 bought ui/ErrorNote's single stylesheet — one shared error body (sentence,
 remediation, [View details] disclosure) rendering at fourteen call sites,
-instead of bespoke error CSS per view. Boot progress is
+instead of bespoke error CSS per view. The ADR-0026 raise (16 → 18 KB CSS)
+bought the evidence pages — jobs (§73), audit (§72), about (§58) — whose
+stylesheets ride their own lazy chunks (a page's CSS loads when the page
+opens, never at boot), plus the vertical rail's rules in the strip's chrome
+stylesheet (§54). The entry stylesheet's growth in that slice was the mute
+indicator alone; a new explicit entry-CSS line (≤ 11 KB) now holds the cold
+start's CSS so a chrome-only regression cannot hide inside the total. Boot progress is
 measurable in the running app through the `panel:boot-start` →
 `panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
 recorded from browser smoke runs rather than guessed.

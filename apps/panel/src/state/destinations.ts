@@ -31,6 +31,22 @@ export interface ConsoleDestination {
 export interface SettingsDestination {
   kind: "settings";
 }
+/** §73: the jobs page — every long-running daemon operation (backups,
+ *  restores, publishes, installs) with its live state, progress, and its
+ *  cancel verb. One per window; the daemon's history is authoritative. */
+export interface JobsDestination {
+  kind: "jobs";
+}
+/** §72: the audit page — the daemon's append-only trail of every mutating
+ *  command and handshake, read back newest-first. */
+export interface AuditDestination {
+  kind: "audit";
+}
+/** §58: about — version, channel, and the panel's reserved rooms, stated
+ *  rather than guessed. */
+export interface AboutDestination {
+  kind: "about";
+}
 /** A typed request for an internal page that does not exist. The shell
  *  answers it honestly (§58: an unknown internal page is a real
  *  destination request, never silently a web search) — an error page,
@@ -47,6 +63,9 @@ export type Destination =
   | ServerDestination
   | ConsoleDestination
   | SettingsDestination
+  | JobsDestination
+  | AuditDestination
+  | AboutDestination
   | MissingPageDestination;
 
 /** A tab's stable identity. Derived from the destination on purpose: one
@@ -56,6 +75,9 @@ export type TabKey = string;
 export const SERVERS_TAB: TabKey = "servers";
 export const NEW_TAB: TabKey = "new";
 export const SETTINGS_TAB: TabKey = "settings";
+export const JOBS_TAB: TabKey = "jobs";
+export const AUDIT_TAB: TabKey = "audit";
+export const ABOUT_TAB: TabKey = "about";
 export const serverTab = (serverId: string): TabKey => `server:${serverId}`;
 export const consoleTab = (serverId: string): TabKey => `console:${serverId}`;
 
@@ -71,6 +93,12 @@ export function tabKey(destination: Destination): TabKey {
       return serverTab(destination.serverId);
     case "console":
       return consoleTab(destination.serverId);
+    case "jobs":
+      return JOBS_TAB;
+    case "audit":
+      return AUDIT_TAB;
+    case "about":
+      return ABOUT_TAB;
     case "missing":
       return `missing:${destination.url}`;
   }
@@ -85,6 +113,12 @@ export function destinationUrl(destination: Destination): string {
       return "zaminpanel://new";
     case "settings":
       return "zaminpanel://settings/";
+    case "jobs":
+      return "zaminpanel://jobs/";
+    case "audit":
+      return "zaminpanel://audit/";
+    case "about":
+      return "zaminpanel://about/";
     case "server":
       return `zaminpanel://server/${destination.serverId}`;
     case "console":
@@ -106,6 +140,15 @@ export function restingAddress(
   if (destination.kind === "servers") return destinationUrl(destination);
   if (destination.kind === "new") return "";
   if (destination.kind === "settings" || destination.kind === "missing") {
+    return destinationUrl(destination);
+  }
+  if (
+    destination.kind === "jobs" ||
+    destination.kind === "audit" ||
+    destination.kind === "about"
+  ) {
+    // The evidence pages rest at their internal URLs — they are ZaminPanel
+    // pages, not a server's join address.
     return destinationUrl(destination);
   }
   if (destination.kind === "console") {
@@ -159,6 +202,9 @@ export function parseAddressInput(text: string): AddressRequest {
     if (page === "servers") return { kind: "internal", destination: { kind: "servers" } };
     if (page === "new") return { kind: "internal", destination: { kind: "new" } };
     if (page === "settings") return { kind: "internal", destination: { kind: "settings" } };
+    if (page === "jobs") return { kind: "internal", destination: { kind: "jobs" } };
+    if (page === "audit") return { kind: "internal", destination: { kind: "audit" } };
+    if (page === "about") return { kind: "internal", destination: { kind: "about" } };
     if (page === "server" && internal[2]) {
       return { kind: "internal", destination: { kind: "server", serverId: internal[2] } };
     }
@@ -235,6 +281,12 @@ export function destinationLabel(destination: Destination, entries: ServerEntry[
       return "Servers";
     case "settings":
       return "Settings";
+    case "jobs":
+      return "Jobs";
+    case "audit":
+      return "Audit log";
+    case "about":
+      return "About ZaminPanel";
     case "new":
       return "New tab";
     case "missing":

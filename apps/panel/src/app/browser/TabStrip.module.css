@@ -243,3 +243,80 @@
   margin: 4px 6px;
   background: var(--border);
 }
+
+/* --- §53: the muted tab's indicator — the state, not a control. */
+.mutedMark {
+  display: inline-flex;
+  flex: none;
+  color: var(--warning);
+}
+
+/* --- §54: the vertical strip — the same tabs, a rail presentation. ---- */
+
+.stripVertical {
+  flex-direction: column;
+  align-items: stretch;
+  width: 216px;
+  min-width: 216px;
+  min-height: 0;
+  padding: var(--space-2) 0;
+  border-bottom: none;
+  border-right: 1px solid var(--border);
+}
+
+.tabsVertical {
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--space-2);
+}
+
+/* A vertical tab is a full-width row; the pinned head keeps its compact
+   identity as a slim icon row, first in the rail. */
+.stripVertical .tab {
+  max-width: none;
+  min-width: 0;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+
+.stripVertical .tabPinned {
+  max-width: none;
+  min-width: 0;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 4px 8px;
+}
+
+/* The insertion edge follows the axis: above/below in the rail. */
+.dropAbove::before,
+.dropBelow::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.dropAbove::before {
+  top: 0;
+  bottom: auto;
+}
+
+.dropBelow::after {
+  top: auto;
+  bottom: 0;
+}
+
+.newButtonVertical {
+  margin: 4px var(--space-2) 0;
+  width: calc(100% - 16px);
+  justify-content: center;
+}

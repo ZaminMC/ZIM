@@ -37,6 +37,12 @@ const NewServerModal = lazy(() =>
   import("./NewServerModal").then((m) => ({ default: m.NewServerModal })),
 );
 const Palette = lazy(() => import("./Palette").then((m) => ({ default: m.Palette })));
+// The evidence pages (§58/§72/§73, ADR-0026) are destinations, not boot
+// surfaces: each loads when its tab first opens, keeping the entry chunk
+// to the shell + fleet page (PERFORMANCE-BUDGETS).
+const JobsPage = lazy(() => import("./JobsPage").then((m) => ({ default: m.JobsPage })));
+const AuditPage = lazy(() => import("./AuditPage").then((m) => ({ default: m.AuditPage })));
+const AboutPage = lazy(() => import("./AboutPage").then((m) => ({ default: m.AboutPage })));
 
 function DestinationView({ destination }: { destination: Destination }) {
   const navigate = useTabs((s) => s.navigate);
@@ -59,6 +65,12 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <ServerView serverId={destination.serverId} />;
     case "console":
       return <ConsoleView serverId={destination.serverId} variant="dedicated" />;
+    case "jobs":
+      return <JobsPage />;
+    case "audit":
+      return <AuditPage />;
+    case "about":
+      return <AboutPage />;
     case "missing":
       return <MissingPage url={destination.url} />;
   }
@@ -171,18 +183,26 @@ export function App() {
   const contentKey = `${active?.id ?? "none"}:${active ? tabKeyOf(active) : "none"}:${
     active?.reloadToken ?? 0
   }`;
+  // §54: the strip's presentation is a window pref — vertical renders the
+  // rail on the left and stacks the chrome beside it. The tab objects,
+  // the mutations, and the identity rules are untouched.
+  const vertical = useTabs((s) => s.verticalStrip);
 
   return (
-    <div className={styles.shell}>
+    <div className={`${styles.shell} ${vertical ? styles.shellVertical : ""}`}>
       <TabStrip />
-      <ToolBar />
-      <BookmarksBar />
-      <UpdateNotice />
-      <main className={styles.content} key={contentKey}>
-        <TabBoundary>
-          <DestinationView destination={destination} />
-        </TabBoundary>
-      </main>
+      <div className={styles.column}>
+        <ToolBar />
+        <BookmarksBar />
+        <UpdateNotice />
+        <main className={styles.content} key={contentKey}>
+          <TabBoundary>
+            <Suspense fallback={<div className={styles.lazyFallback} /> }>
+              <DestinationView destination={destination} />
+            </Suspense>
+          </TabBoundary>
+        </main>
+      </div>
       <Suspense fallback={null}>
         {newServerOpen ? <NewServerModal /> : null}
         {paletteOpen ? <Palette /> : null}

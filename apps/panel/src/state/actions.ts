@@ -3,6 +3,8 @@
 // failures; UI layers translate, never re-parse.
 
 import type {
+  AuditListParams,
+  AuditListResult,
   BackupJobResult,
   BackupsListResult,
   CancelJobParams,
@@ -146,6 +148,16 @@ export async function restoreBackup(serverId: string, backupId: string): Promise
 
 export async function listJobs(): Promise<JobsListResult> {
   return client.request<JobsListResult>("jobs.list");
+}
+
+/** The audit's read side (ADR-0011): newest-first, paged. A read is not
+ *  itself audited — a listing floods the file without making anything
+ *  safer — so this call never lands in the trail it reads. */
+export async function listAudit(params: AuditListParams = {}): Promise<AuditListResult> {
+  const cleaned: AuditListParams = {};
+  if (params.limit !== undefined) cleaned.limit = params.limit;
+  if (params.offset !== undefined) cleaned.offset = params.offset;
+  return client.request<AuditListResult>("audit.list", cleaned);
 }
 
 export async function cancelJob(jobId: string): Promise<Job> {

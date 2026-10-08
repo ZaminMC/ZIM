@@ -18,6 +18,9 @@ interface JobsState {
   /** Drop finished jobs for a server whose view is being torn down; the
    *  daemon's own history is authoritative and bounded on its side. */
   forgetFinished: (serverId: string) => void;
+  /** §73's jobs page: upsert a `jobs.list` snapshot (the authoritative,
+   *  reconnection-proof record). Live events keep flowing on top. */
+  seedAll: (jobs: Job[]) => void;
 }
 
 export const useJobs = create<JobsState>((set) => ({
@@ -57,6 +60,17 @@ export const useJobs = create<JobsState>((set) => ({
           delete next[id];
         }
       }
+      return { jobs: next };
+    }),
+
+  /** §73's jobs page seed: the daemon's `jobs.list` snapshot is the
+   *  authoritative record (it survives reconnections and keeps the newest
+   *  50 finished jobs), so a page mount upserts every row it answers.
+   *  Live events keep flowing on top; nothing is dropped on reseed. */
+  seedAll: (jobs) =>
+    set((state) => {
+      const next = { ...state.jobs };
+      for (const job of jobs) next[job.jobId] = job;
       return { jobs: next };
     }),
 }));

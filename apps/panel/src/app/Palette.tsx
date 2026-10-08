@@ -33,10 +33,24 @@ export function buildCommands(
     autostart: AutostartStatus;
     toggleAutostart: () => void;
   },
+  pages?: {
+    jobs: () => void;
+    audit: () => void;
+    about: () => void;
+  },
 ): Command[] {
   const commands: Command[] = [
     { id: "new-server", label: "Register a new server…", run: actions.newServer },
   ];
+  if (pages) {
+    // §58's typed pages, reachable by keyboard: the palette speaks the
+    // same destinations the address bar does.
+    commands.push(
+      { id: "page-jobs", label: "Open jobs — long-running daemon operations", hint: "zaminpanel://jobs/", run: pages.jobs },
+      { id: "page-audit", label: "Open the audit log", hint: "zaminpanel://audit/", run: pages.audit },
+      { id: "page-about", label: "Open About ZaminPanel", hint: "zaminpanel://about/", run: pages.about },
+    );
+  }
   if (integration?.autostart.available) {
     // Login autostart (Phase 7): offered only where the host can deliver
     // it — a plain browser reports unavailable instead.
@@ -69,6 +83,7 @@ export function Palette() {
   const close = useUi((s) => s.setPaletteOpen);
   const openNewServer = useUi((s) => s.setNewServerOpen);
   // The palette's context is the active tab when it rests on a server.
+  const navigate = useTabs((s) => s.navigate);
   const activeTab = useTabs((s) => {
     const tab = s.tabs.find((t) => t.id === s.activeId) ?? s.tabs[0];
     const dest = tab ? tabDestination(tab) : undefined;
@@ -148,8 +163,22 @@ export function Palette() {
           },
         },
         { autostart, toggleAutostart },
+        {
+          jobs: () => {
+            close(false);
+            navigate({ kind: "jobs" });
+          },
+          audit: () => {
+            close(false);
+            navigate({ kind: "audit" });
+          },
+          about: () => {
+            close(false);
+            navigate({ kind: "about" });
+          },
+        },
       ),
-    [activeTab, activeServer?.state, autostart, close, openNewServer, setPending, toggleAutostart],
+    [activeTab, activeServer?.state, autostart, close, navigate, openNewServer, setPending, toggleAutostart],
   );
 
   const filtered = commands.filter((command) =>

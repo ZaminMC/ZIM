@@ -243,9 +243,11 @@ Ctrl+click opens a new tab, and the address bar's star adds or removes
 the current destination, one bookmark per destination, shared across
 windows, hidden when empty. Destinations are a closed type,
 never strings: `zaminpanel://servers/` (the fleet), `zaminpanel://new`
-(discovery), `zaminpanel://settings/`, and one tab per server. Identity
-discipline holds everywhere: navigating to an open destination focuses
-its tab, never duplicates it.
+(discovery), `zaminpanel://settings/`, `zaminpanel://jobs/`,
+`zaminpanel://audit/`, `zaminpanel://about/`
+([ADR-0026](docs/adr/0026-evidence-pages-strip-verbs.md)), and one tab
+per server. Identity discipline holds everywhere: navigating to an open
+destination focuses its tab, never duplicates it.
 
 The address bar speaks three dialects: internal `zaminpanel://` URLs (an
 unknown page renders an honest "No such page"), join addresses resolved
@@ -266,8 +268,14 @@ isolated tabs, never a second backend. Pinned tabs sit compact at the
 strip's head, keep their favicon, and refuse the accidental close;
 groups behave like browser groups — a collapsible, renamable, colored
 chip, never a folder — and dissolve when their last member leaves.
-Closed tabs land in a bounded most-recent-first memory; Ctrl+Shift+T (or
-the menu) reopens them. A view that throws crashes into a recoverable
+A tab's audio posture is machinery now (§53): **Mute tab** flips a state
+every audio surface must consult, the tab shows its muted mark the
+moment it is set, and the posture travels — duplicate keeps it, reopen
+restores it, the window handoff carries it. **Show tabs vertically**
+(§54) is the strip's second presentation: the same tab objects, the
+same mutations, rendered as a left rail with axis-aware drag, toggled
+from the context menu and remembered per window. Closed tabs land in a
+bounded most-recent-first memory; Ctrl+Shift+T (or the menu) reopens them. A view that throws crashes into a recoverable
 "This tab crashed" page — the strip and the other tabs never notice, and
 the recovery verb is reload, which still never touches the server
 process. Tabs drag ([ADR-0018](docs/adr/0018-window-machinery-and-drag-reorder.md)):
@@ -283,8 +291,25 @@ server behind it stays daemon-owned and untouched, because a UI window
 is only a client. Every window owns its strip under its own storage
 key, so windows coexist without clobbering each other; a blocked popup
 brings the tab home instead of swallowing it. The §48 context menu
-still keeps the remaining rooms honest: Mute, Share with Dutchmen, and
-the vertical strip are named reservations, not fakes.
+keeps the one remaining room honest: Share with Dutchmen is a named
+reservation, not a fake.
+
+The evidence pages ([ADR-0026](docs/adr/0026-evidence-pages-strip-verbs.md))
+give the operator the daemon's own record. **Jobs** (§73) lists every
+long-running operation — backups, restores, publishes, installs —
+seeded from `jobs.list` (the record survives reconnections; the daemon
+keeps the newest 50 finished jobs), live through job events, with a
+progress meter only when the daemon reports a total, the job's typed
+failure through the §81 note, and Cancel while the state can still
+change (the flip stays the daemon's, at the job's checkpoint).
+**Audit log** (§72) reads the append-only trail newest-first, paged,
+with the outcome the daemon gave, the protocol client that asked, and
+malformed lines counted in plain words — reads are not audited, so the
+page never appears in its own trail. **About** states the installed
+version the host answered for, the development channel's signing
+discipline, the connected daemon, and the reserved rooms by name —
+never a fake badge (§82). The palette carries all three as keyboard
+commands.
 
 ## Development loop
 

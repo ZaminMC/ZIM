@@ -577,6 +577,41 @@ export interface PluginsInstallResult {
   job: Job;
 }
 
+// --- audit (§72's read side, ADR-0011) -------------------------------------
+
+/** The protocol client recorded at the handshake — the actor as honestly
+ *  as the daemon can name it. */
+export interface AuditClient {
+  name: string;
+  version: string;
+}
+
+/** One audit line, read back. Mirrors the daemon's JSONL field-for-field:
+ *  `tsMs`, `method`, `serverId?`, `outcome` ("ok" or the error code),
+ *  `client?`. */
+export interface AuditEntry {
+  tsMs: number;
+  method: string;
+  serverId?: string;
+  outcome: string;
+  client?: AuditClient;
+}
+
+export interface AuditListParams {
+  limit?: number;
+  offset?: number;
+}
+
+export interface AuditListResult {
+  /** Newest first. */
+  entries: AuditEntry[];
+  /** Older entries exist beyond this page. */
+  hasMore: boolean;
+  /** Lines on disk that did not parse as audit JSON. They stay on disk;
+   *  the listing counts them instead of pretending they are not there. */
+  malformed: number;
+}
+
 // --- schedules (§7e, ADR-0014) -------------------------------------------
 
 export type ScheduleSpec =

@@ -37,7 +37,16 @@ const BUDGETS = {
   // body of every error alert (sentence, remediation, [View details]
   // disclosure) across fourteen call sites; the alternative was bespoke
   // error CSS per view, the regression the design system prevents.
-  totalCssGzip: 16 * 1024,
+  // 16 → 18 KB at ADR-0026: the evidence pages (§73 jobs, §72 audit,
+  // §58 about) each bring one stylesheet that rides their LAZY chunk —
+  // a page's CSS loads when the page opens, never at boot — and the
+  // §54 vertical rail's rules ride the strip's chrome stylesheet. The
+  // entry CSS (the boot path) is untouched by this slice; the growth is
+  // surfaces arriving, not the shell regrowing.
+  totalCssGzip: 18 * 1024,
+  // The entry stylesheet's own line (the cold start's CSS), kept
+  // explicit so a chrome-only regression cannot hide inside the total.
+  entryCssGzip: 11 * 1024,
 };
 
 function assets() {
@@ -64,6 +73,7 @@ let totalJs = 0;
 let totalCss = 0;
 let entry = 0;
 let worstJs = { file: "-", size: 0 };
+let entryCss = 0;
 
 for (const file of files) {
   const size = gzipSize(file);
@@ -74,6 +84,7 @@ for (const file of files) {
     if (size > worstJs.size) worstJs = { file, size };
   } else {
     totalCss += size;
+    if (/^index-.*\.css$/.test(file)) entryCss += size;
   }
 }
 
@@ -84,6 +95,7 @@ for (const [file, size] of rows) {
 }
 console.log(`  total js:  ${totalJs}`);
 console.log(`  total css: ${totalCss}`);
+console.log(`  entry css: ${entryCss}`);
 
 const failures = [];
 if (entry > BUDGETS.entryJsGzip) {
@@ -97,6 +109,9 @@ if (totalJs > BUDGETS.totalJsGzip) {
 }
 if (totalCss > BUDGETS.totalCssGzip) {
   failures.push(`total css ${totalCss} > ${BUDGETS.totalCssGzip} gzip`);
+}
+if (entryCss > BUDGETS.entryCssGzip) {
+  failures.push(`entry css ${entryCss} > ${BUDGETS.entryCssGzip} gzip`);
 }
 
 if (failures.length > 0) {

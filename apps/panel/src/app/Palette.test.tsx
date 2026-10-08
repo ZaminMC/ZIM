@@ -33,6 +33,30 @@ describe("buildCommands", () => {
     expect(byId("verb-kill")?.disabled).toBe(false);
   });
 
+  it("carries the evidence pages as keyboard commands (§58, ADR-0026)", () => {
+    const ran: string[] = [];
+    const commands = buildCommands(
+      null,
+      null,
+      { newServer: () => {}, lifecycle: () => {} },
+      undefined,
+      {
+        jobs: () => ran.push("jobs"),
+        audit: () => ran.push("audit"),
+        about: () => ran.push("about"),
+      },
+    );
+    const jobs = commands.find((command) => command.id === "page-jobs")!;
+    const audit = commands.find((command) => command.id === "page-audit")!;
+    const about = commands.find((command) => command.id === "page-about")!;
+    expect(jobs && audit && about).toBeTruthy();
+    jobs!.run();
+    audit!.run();
+    about!.run();
+    expect(ran).toEqual(["jobs", "audit", "about"]);
+    expect(jobs!.hint).toBe("zaminpanel://jobs/");
+  });
+
   it("hides the autostart command where the host cannot deliver it", () => {
     const commands = buildCommands(
       null,

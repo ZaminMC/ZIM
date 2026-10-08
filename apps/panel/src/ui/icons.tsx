@@ -251,3 +251,46 @@ export function IconOpenInNew(p: IconProps) {
     </svg>
   );
 }
+
+/** §53: the muted tab's indicator — a speaker with the sound struck
+ *  through. The tab shows its audio posture the moment it is set. */
+export function IconVolumeMuted(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
+      <path d="m15 9.5 5 5M20 9.5l-5 5" />
+    </svg>
+  );
+}
+
+/** §73: the jobs page's icon — stacked work with a running bar. */
+export function IconJobs(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <rect x="3" y="4" width="18" height="6" rx="1.5" />
+      <rect x="3" y="14" width="18" height="6" rx="1.5" />
+      <path d="M7 7h4M7 17h7" />
+    </svg>
+  );
+}
+
+/** §72: the audit trail's icon — lines on a shield, the evidence shape. */
+export function IconAudit(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M12 3 5 6v5c0 4.4 2.9 7.9 7 10 4.1-2.1 7-5.6 7-10V6l-7-3Z" />
+      <path d="M8.8 11.5 11 13.7l4.2-4.4" />
+    </svg>
+  );
+}
+
+/** §58: the about page's icon — the honest circle-i. */
+export function IconInfo(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 8h.01" />
+    </svg>
+  );
+}

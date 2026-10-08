@@ -843,3 +843,109 @@ describe("per-window storage (ADR-0018)", () => {
     expect(localStorage.getItem("zamin-panel.tab-handoff:h-fresh")).not.toBeNull();
   });
 });
+
+describe("mute (§53)", () => {
+  it("flips the posture in place; nothing else about the tab moves", () => {
+    seed([tab([server("alpha")]), tab([server("beta")])]);
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.getState().toggleMute(alpha.id);
+    const s = useTabs.getState();
+    expect(s.tabs[0]!.muted).toBe(true);
+    expect(s.tabs.map(tabKeyOf)).toEqual(["server:alpha", "server:beta"]);
+    expect(s.tabs[0]!.id).toBe(alpha.id);
+    useTabs.getState().toggleMute(alpha.id);
+    expect(useTabs.getState().tabs[0]!.muted).toBeFalsy();
+  });
+
+  it("an unknown id is a quiet no-op", () => {
+    seed([tab([server("alpha")])]);
+    useTabs.getState().toggleMute("ghost");
+    expect(useTabs.getState().tabs[0]!.muted).toBeFalsy();
+  });
+
+  it("duplicate carries the audio posture but not the group", () => {
+    seed([tab([server("alpha")], 0, { muted: true, groupId: "g1" }), tab([server("beta")])]);
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.setState({ groups: { g1: { label: "Lab", color: "sky", collapsed: false } } as never });
+    useTabs.getState().duplicate(alpha.id);
+    const s = useTabs.getState();
+    const clone = s.tabs.find((t) => t.id !== alpha.id)!;
+    expect(clone.muted).toBe(true);
+    expect(clone.pinned).toBe(false);
+    expect(clone.groupId).toBeUndefined();
+  });
+
+  it("close remembers the posture; reopen restores it", () => {
+    seed([tab([server("alpha")], 0, { muted: true }), tab([server("beta")])]);
+    const alpha = useTabs.getState().tabs[0]!;
+    useTabs.getState().close(alpha.id);
+    expect(useTabs.getState().recentlyClosed[0]!.muted).toBe(true);
+    useTabs.getState().reopen();
+    const revived = useTabs.getState().tabs.find((t) => tabKeyOf(t) === "server:alpha")!;
+    expect(revived.muted).toBe(true);
+  });
+
+  it("the §50 handoff carries the posture; an older slot without it still claims", () => {
+    seed([tab([server("alpha")], 0, { muted: true }), tab([server("beta")])]);
+    const alpha = useTabs.getState().tabs[0]!;
+    const handoff = useTabs.getState().moveToNewWindow(alpha.id)!;
+    // A pre-§53 slot (no muted field) claims cleanly — the field is
+    // optional on the wire on purpose.
+    expect(claimHandoff(`#handoff=${handoff}`)).toBe(true);
+    expect(useTabs.getState().tabs[0]!.muted).toBe(true);
+
+    const id = "h-legacy";
+    localStorage.setItem(
+      `zamin-panel.tab-handoff:${id}`,
+      JSON.stringify({
+        version: 1,
+        handoffId: id,
+        issuedAt: Date.now(),
+        history: [server("beta")],
+        historyIndex: 0,
+        pinned: false,
+      }),
+    );
+    expect(claimHandoff(`#handoff=${id}`)).toBe(true);
+    expect(useTabs.getState().tabs[0]!.muted).toBeFalsy();
+  });
+
+  it("sanitizeTabs keeps a stored mute and defaults an absent one", () => {
+    const tabs = sanitizeTabs([
+      { id: "m", history: [server("alpha")], historyIndex: 0, reloadToken: 0, muted: true },
+      { id: "n", history: [server("beta")], historyIndex: 0, reloadToken: 0 },
+    ])!;
+    expect(tabs[0]!.muted).toBe(true);
+    expect(tabs[1]!.muted).toBeFalsy();
+  });
+});
+
+describe("vertical strip (§54)", () => {
+  it("toggles the presentation pref without touching the tabs", () => {
+    seed([tab([server("alpha")])]);
+    expect(useTabs.getState().verticalStrip).toBe(false);
+    useTabs.getState().toggleVerticalStrip();
+    expect(useTabs.getState().verticalStrip).toBe(true);
+    expect(useTabs.getState().tabs.map(tabKeyOf)).toEqual(["server:alpha"]);
+    useTabs.getState().toggleVerticalStrip();
+    expect(useTabs.getState().verticalStrip).toBe(false);
+  });
+
+  it("rehydrates the pref; absent means horizontal", () => {
+    localStorage.setItem(
+      stripKey(),
+      JSON.stringify({
+        state: {
+          tabs: [{ id: "v", history: [{ kind: "servers" }], historyIndex: 0, reloadToken: 0 }],
+          activeId: "v",
+          groups: {},
+          verticalStrip: true,
+        },
+        version: 4,
+      }),
+    );
+    void useTabs.persist.rehydrate();
+    expect(useTabs.getState().verticalStrip).toBe(true);
+    useTabs.getState().toggleVerticalStrip();
+  });
+});

@@ -50,7 +50,13 @@ function suggestionsFor(
                 ? "Discovery"
                 : dest.kind === "settings"
                   ? "Panel settings"
-                  : "Server"
+                  : dest.kind === "jobs"
+                    ? "Daemon jobs"
+                    : dest.kind === "audit"
+                      ? "The audit trail"
+                      : dest.kind === "about"
+                        ? "Version and channel"
+                        : "Server"
             : "No such ZaminPanel page",
           commitText: text,
           tone: known ? "normal" : "miss",

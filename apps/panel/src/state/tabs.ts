@@ -14,7 +14,15 @@
 //
 // ADR-0018 completes the machinery: DRAG REORDER (tabs are operators —
 // the pinned head is clamped, dragging out of a group leaves it) and the
-// §50 WINDOW MACHINERY. Moving a tab to a new window writes a handoff
+// §50 WINDOW MACHINERY.
+//
+// The strip's last two founder verbs are machinery now: §53 MUTE is tab
+// state — an audio posture every audio-producing surface (extensions
+// §56, future media) must consult before it makes a sound, shown on the
+// tab the moment it is set — and §54 VERTICAL TABS is presentation only:
+// the same tab objects, the same mutations, rendered as a rail. A mute
+// is remembered by duplicate, reopen, and the §50 window handoff; the
+// vertical pref is strip presentation and stays per window. Moving a tab to a new window writes a handoff
 // slot and the opener opens a second ZaminPanel context that claims the
 // slot by hash at boot. The tab is not closed (no recently-closed entry)
 // and the server behind it is never touched — the UI window is only a
@@ -50,6 +58,12 @@ export interface Tab {
   reloadToken: number;
   /** §52 pinned: compact, at the strip's head, guarded from accidents. */
   pinned?: boolean;
+  /** §53 muted: the tab's audio posture. Audio-producing surfaces (an
+   *  extension's UI, a future media view) must consult this before they
+   *  emit a sound; the strip shows the state the moment it is set. It
+   *  travels with the view: duplicate, reopen, and the §50 handoff keep
+   *  it, exactly like pinned. */
+  muted?: boolean;
   /** §49 group membership; groups live in the store's `groups` map. */
   groupId?: GroupId;
 }
@@ -66,6 +80,8 @@ export interface ClosedTab {
   history: Destination[];
   historyIndex: number;
   pinned?: boolean;
+  /** §53: the audio posture rides the close memory like pinned does. */
+  muted?: boolean;
   /** Strip position at close time; reopen clamps it to the strip's size. */
   index: number;
 }
@@ -133,6 +149,9 @@ export interface TabHandoff {
   history: Destination[];
   historyIndex: number;
   pinned: boolean;
+  /** §53, added after the first handoffs shipped — optional on purpose,
+   *  so a slot written by an older build still claims cleanly. */
+  muted?: boolean;
 }
 
 function isHandoff(value: unknown): value is TabHandoff {
@@ -148,7 +167,8 @@ function isHandoff(value: unknown): value is TabHandoff {
     v.history.length > 0 &&
     typeof v.historyIndex === "number" &&
     Number.isInteger(v.historyIndex) &&
-    typeof v.pinned === "boolean"
+    typeof v.pinned === "boolean" &&
+    (v.muted === undefined || typeof v.muted === "boolean")
   );
 }
 
@@ -229,6 +249,14 @@ interface TabsState {
   /** The undo of a blocked move: the popup never opened, the tab comes
    *  home. Group membership survives only if the group still does. */
   restoreMoved: (tab: Tab, index: number, focus: boolean) => void;
+  /** §53: flip the tab's audio posture. The strip shows the state; the
+   *  posture is consulted by audio surfaces, not by the strip alone. */
+  toggleMute: (id: TabId) => void;
+  /** §54: the strip's presentation, per window — the same tab objects,
+   *  rendered as a vertical rail. Nothing about identity changes. */
+  toggleVerticalStrip: () => void;
+  /** §54: the strip's current presentation (persisted per window). */
+  verticalStrip: boolean;
 }
 
 /** The active tab, or the first tab when the stored id went stale. */
@@ -293,6 +321,7 @@ function rememberClosed(recentlyClosed: ClosedTab[], tab: Tab, index: number): C
     history: tab.history,
     historyIndex: tab.historyIndex,
     pinned: tab.pinned,
+    muted: tab.muted,
     index,
   };
   return [entry, ...recentlyClosed].slice(0, MAX_RECENTLY_CLOSED);
@@ -355,8 +384,9 @@ export function sanitizeTabs(raw: unknown): Tab[] | null {
     if (seen.has(id)) id = newTabId();
     seen.add(id);
     const pinned = v.pinned === true;
+    const muted = v.muted === true;
     const groupId = typeof v.groupId === "string" && v.groupId !== "" ? v.groupId : undefined;
-    tabs.push({ id, history, historyIndex: index, reloadToken: token, pinned, groupId });
+    tabs.push({ id, history, historyIndex: index, reloadToken: token, pinned, muted, groupId });
   }
   return normalize(tabs);
 }
@@ -382,6 +412,7 @@ export const useTabs = create<TabsState>()(
       discoveryQuery: null,
       recentlyClosed: [],
       groups: {},
+      verticalStrip: false,
 
       navigate: (destination) =>
         set((state) => {
@@ -567,6 +598,9 @@ export const useTabs = create<TabsState>()(
             historyIndex: origin.historyIndex,
             reloadToken: 0,
             pinned: false,
+            // §53: the clone is the same VIEW in a second tab — the audio
+            // posture travels with the view (the group does not).
+            muted: origin.muted,
           };
           // §52: the clone never lands inside the pinned block.
           const tabs = normalizeOrder([
@@ -597,6 +631,7 @@ export const useTabs = create<TabsState>()(
             historyIndex: Math.min(mostRecent.historyIndex, mostRecent.history.length - 1),
             reloadToken: 0,
             pinned: mostRecent.pinned,
+            muted: mostRecent.muted,
           };
           const at = Math.min(mostRecent.index, state.tabs.length);
           const tabs = normalizeOrder([...state.tabs.slice(0, at), revived, ...state.tabs.slice(at)]);
@@ -701,6 +736,7 @@ export const useTabs = create<TabsState>()(
           history: victim.history,
           historyIndex: victim.historyIndex,
           pinned: victim.pinned === true,
+          muted: victim.muted === true,
         };
         try {
           localStorage.setItem(`${HANDOFF_PREFIX}${handoffId}`, JSON.stringify(handoff));
@@ -735,25 +771,45 @@ export const useTabs = create<TabsState>()(
           };
         });
       },
+
+      toggleMute: (id) =>
+        set((state) => {
+          const tab = state.tabs.find((t) => t.id === id);
+          if (!tab) return state;
+          // §53: the posture flips; nothing else about the tab moves. The
+          // muted state is plain data — audio surfaces read it through
+          // the store (or the destination of the active tab) before they
+          // make a sound.
+          const muted = !tab.muted;
+          return {
+            tabs: state.tabs.map((t) => (t.id === id ? { ...t, muted } : t)),
+          };
+        }),
+
+      toggleVerticalStrip: () =>
+        set((state) => ({ verticalStrip: !state.verticalStrip })),
     }),
     {
       name: LEGACY_TABS_KEY,
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => perWindowStorage),
       partialize: (state) => ({
         tabs: state.tabs,
         activeId: state.activeId,
         groups: state.groups,
+        verticalStrip: state.verticalStrip,
       }),
       migrate: (persisted) => {
         // v1 stored destination-keyed tabs without ids. Every tab gets a
         // fresh id; the stored activeKey (a destination key) maps to the
         // first tab resting there. v2/v3 carry ids and an activeId; the
         // shapes are identical from here on (v3 only moved the storage
-        // key per window — the payload did not change).
+        // key per window — the payload did not change). v4 adds §53's
+        // muted flag (per tab, optional, defaulted by sanitizeTabs) and
+        // §54's verticalStrip pref (top-level, defaulted false).
         const raw = (persisted ?? {}) as Record<string, unknown>;
         const tabs = sanitizeTabs(raw.tabs);
-        if (!tabs) return { tabs: [], activeId: null, groups: {} };
+        if (!tabs) return { tabs: [], activeId: null, groups: {}, verticalStrip: false };
         const groups = sanitizeGroups(raw.groups);
         const withRealGroups = tabs.map((t) =>
           t.groupId && groups[t.groupId] ? t : { ...t, groupId: undefined },
@@ -765,7 +821,12 @@ export const useTabs = create<TabsState>()(
         const storedId = typeof raw.activeId === "string" ? raw.activeId : undefined;
         const active =
           tabs.find((t) => t.id === (storedId ?? stored))?.id ?? tabs[0]?.id ?? null;
-        return { tabs: withRealGroups, activeId: active, groups };
+        return {
+          tabs: withRealGroups,
+          activeId: active,
+          groups,
+          verticalStrip: raw.verticalStrip === true,
+        };
       },
       merge: (persisted, current) => {
         const raw = (persisted ?? {}) as Record<string, unknown>;
@@ -785,6 +846,7 @@ export const useTabs = create<TabsState>()(
           tabs: withRealGroups,
           groups: surviving,
           activeId: active ? active.id : null,
+          verticalStrip: raw.verticalStrip === true,
         };
       },
     },
@@ -831,6 +893,7 @@ export function claimHandoff(hash: string | null | undefined): boolean {
     historyIndex: index,
     reloadToken: 0,
     pinned: slot.pinned || undefined,
+    muted: slot.muted || undefined,
   };
   useTabs.setState({ tabs: [tab], activeId: tab.id, groups: {}, discoveryQuery: null });
   return true;
