@@ -29,14 +29,17 @@ ErrorNote renders only the content, so no surface re-decides the shape
 and every surface grows the disclosure at once.
 
 The migration covers the six workspace views whose errors were bare
-strings (Players, Schedules, Network, Backups, Plugins, Startup); their
-`error` state widens from `string | null` to `DescribedError | null`,
-and local pre-flight sentences wrap as remediation-less described
-errors — a sentence with nothing technical behind it renders no
-disclosure at all, because a summary that opens onto nothing would be
-a fake control (§82). Modal flows with bespoke security handling
-(PublishModal's §45 interception, NewServerModal, the palette) keep
-their shapes and adopt the note as follow-ups.
+strings (Players, Schedules, Network, Backups, Plugins, Startup) plus
+the server Settings surface; their `error` state widens from
+`string | null` to `DescribedError | null`, and local pre-flight
+sentences wrap as remediation-less described errors — a sentence with
+nothing technical behind it renders no disclosure at all, because a
+summary that opens onto nothing would be a fake control (§82). The
+bespoke surfaces keep their shapes and adopt the note as follow-ups:
+PublishModal (its §45 security interception replaces the dead-end
+error), NewServerModal, the palette, and the files browser (its
+`{message, code}` pair predates the note and its sites deserve a
+cleaner mechanical pass than a hot string rewrite).
 
 ## Consequences
 

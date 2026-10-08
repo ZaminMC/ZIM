@@ -15,6 +15,7 @@ use unix as imp;
 use windows as imp;
 
 pub mod paths;
+pub mod private_file;
 
 // Platform-specific discovery data (install roots, executable naming).
 pub use imp::{java_exe_name, java_install_roots};
