@@ -236,8 +236,8 @@ fn copy_refuses_symlinks_inside_the_tree() {
 #[test]
 fn copy_stops_at_the_byte_budget_with_the_tree_untouched() {
     let (fs, _guard) = fixture("copy-budget");
-    fs.write("big1.bin", &[0u8; 40].as_slice()).unwrap();
-    fs.write("big2.bin", &[0u8; 40].as_slice()).unwrap();
+    fs.write("big1.bin", [0u8; 40].as_slice()).unwrap();
+    fs.write("big2.bin", [0u8; 40].as_slice()).unwrap();
 
     let err = fs.copy_bounded("big1.bin", "out.bin", 32).unwrap_err();
     assert!(matches!(err, CoreError::CopyTooLarge { .. }));

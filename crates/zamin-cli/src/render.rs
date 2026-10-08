@@ -921,35 +921,6 @@ pub fn network_status(status: &zamin_protocol::config::NetworkStatusResult) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn byte_sizes_stay_human() {
-        assert_eq!(bytes_text(0), "0 B");
-        assert_eq!(bytes_text(512), "512 B");
-        assert_eq!(bytes_text(2048), "2.0 KB");
-        assert_eq!(bytes_text(5 * 1024 * 1024), "5.0 MB");
-        assert_eq!(bytes_text(3 * 1024 * 1024 * 1024), "3.0 GB");
-    }
-
-    #[test]
-    fn utc_dates_render_from_epoch_millis() {
-        assert_eq!(utc_date_text(0), "1970-01-01 00:00:00 UTC");
-        // 2026-09-01T10:00:00Z — the ADR-0012 mock's published date.
-        assert_eq!(utc_date_text(1_788_256_800_000), "2026-09-01 10:00:00 UTC");
-        assert_eq!(utc_date_text(1_788_256_800_123), "2026-09-01 10:00:00 UTC");
-    }
-
-    #[test]
-    fn civil_dates_cross_leap_years() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // leap year boundary
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
-    }
-}
-
 // --- files (founder §32, ADR-0021) -----------------------------------------
 
 fn files_size(size: Option<u64>) -> String {
@@ -1011,4 +982,33 @@ pub fn files_search(result: &zamin_protocol::files::FilesSearchResult) {
         result.scanned,
         cut
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_sizes_stay_human() {
+        assert_eq!(bytes_text(0), "0 B");
+        assert_eq!(bytes_text(512), "512 B");
+        assert_eq!(bytes_text(2048), "2.0 KB");
+        assert_eq!(bytes_text(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(bytes_text(3 * 1024 * 1024 * 1024), "3.0 GB");
+    }
+
+    #[test]
+    fn utc_dates_render_from_epoch_millis() {
+        assert_eq!(utc_date_text(0), "1970-01-01 00:00:00 UTC");
+        // 2026-09-01T10:00:00Z — the ADR-0012 mock's published date.
+        assert_eq!(utc_date_text(1_788_256_800_000), "2026-09-01 10:00:00 UTC");
+        assert_eq!(utc_date_text(1_788_256_800_123), "2026-09-01 10:00:00 UTC");
+    }
+
+    #[test]
+    fn civil_dates_cross_leap_years() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // leap year boundary
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    }
 }

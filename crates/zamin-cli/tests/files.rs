@@ -138,7 +138,7 @@ fn cli_drives_files_end_to_end() {
         String::from_utf8_lossy(&mkdir.stderr)
     );
     assert!(root.join("backups/2025").is_dir());
-    harness
+    assert!(harness
         .zamin(&[
             "files",
             "cp",
@@ -147,7 +147,7 @@ fn cli_drives_files_end_to_end() {
             "backups/2025/sp.properties",
         ])
         .status
-        .success();
+        .success());
     let rm_file = harness.zamin(&["files", "rm", "demo", "backups/2025/sp.properties", "--yes"]);
     assert!(
         rm_file.status.success(),

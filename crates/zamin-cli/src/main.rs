@@ -922,26 +922,24 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             NetworkCommands::Status { server_id } => network_status(&cli, &client, server_id).await,
         },
         Commands::Files { command } => match command {
-            FilesCommands::Ls { server_id, path } => {
-                files_ls(&cli, &client, &server_id, &path).await
-            }
+            FilesCommands::Ls { server_id, path } => files_ls(&cli, &client, server_id, path).await,
             FilesCommands::Find {
                 server_id,
                 query,
                 limit,
-            } => files_find(&cli, &client, &server_id, &query, *limit).await,
+            } => files_find(&cli, &client, server_id, query, *limit).await,
             FilesCommands::Cp {
                 server_id,
                 from,
                 to,
-            } => files_copy(&cli, &client, &server_id, &from, &to).await,
+            } => files_copy(&cli, &client, server_id, from, to).await,
             FilesCommands::Mv {
                 server_id,
                 from,
                 to,
-            } => files_move(&cli, &client, &server_id, &from, &to).await,
+            } => files_move(&cli, &client, server_id, from, to).await,
             FilesCommands::Mkdir { server_id, path } => {
-                files_mkdir(&cli, &client, &server_id, &path).await
+                files_mkdir(&cli, &client, server_id, path).await
             }
             FilesCommands::Rm {
                 server_id,
@@ -949,20 +947,20 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 yes,
             } => {
                 if !yes {
-                    confirm_delete(&path)?;
+                    confirm_delete(path)?;
                 }
-                files_rm(&cli, &client, &server_id, &path).await
+                files_rm(&cli, &client, server_id, path).await
             }
             FilesCommands::Get {
                 server_id,
                 path,
                 out,
-            } => files_get(&cli, &client, &server_id, &path, &out).await,
+            } => files_get(&cli, &client, server_id, path, out).await,
             FilesCommands::Put {
                 server_id,
                 local,
                 path,
-            } => files_put(&cli, &client, &server_id, &local, &path).await,
+            } => files_put(&cli, &client, server_id, local, path).await,
         },
     }
 }
