@@ -218,10 +218,22 @@ pub fn commit(
         ));
     }
     std::fs::rename(&staging_path, &resolved_target).map_err(|source| {
-        to_protocol(&zamin_core::error::CoreError::Io {
-            path: resolved_target.clone(),
-            source,
-        })
+        if source.kind() == std::io::ErrorKind::NotFound {
+            // A missing parent directory is a typed miss, not an
+            // internal error — the client asked for a place the server
+            // root does not have (create it with files.mkdir first).
+            ProtocolError::new(
+                ErrorCode::FsNotFound,
+                format!(
+                    "{target}'s parent directory does not exist; create it with files.mkdir first."
+                ),
+            )
+        } else {
+            to_protocol(&zamin_core::error::CoreError::Io {
+                path: resolved_target.clone(),
+                source,
+            })
+        }
     })?;
     // Best effort: the staging directory may now be empty; leave any other
     // handles alone.
@@ -282,11 +294,7 @@ pub fn copy(root: &Path, from: &str, to: &str) -> Result<FilesCopyResult, Protoc
 /// `files.search`: the bounded name walk over the whole root. The query
 /// is validated here (empty means the client confused search with the
 /// listing) and the limit clamped to the wire cap.
-pub fn search(
-    root: &Path,
-    query: &str,
-    limit: u32,
-) -> Result<FilesSearchResult, ProtocolError> {
+pub fn search(root: &Path, query: &str, limit: u32) -> Result<FilesSearchResult, ProtocolError> {
     use zamin_core::fsops::RootedFs;
 
     if query.trim().is_empty() {
@@ -297,7 +305,9 @@ pub fn search(
     }
     let fs = RootedFs::open(root).map_err(|e| to_protocol(&e))?;
     let limit = limit.clamp(1, FILES_SEARCH_MAX_LIMIT);
-    let result = fs.search(query, limit as usize).map_err(|e| to_protocol(&e))?;
+    let result = fs
+        .search(query, limit as usize)
+        .map_err(|e| to_protocol(&e))?;
     Ok(FilesSearchResult {
         hits: result
             .hits
@@ -386,7 +396,10 @@ mod tests {
         assert_eq!(result.path, "backup/a.yml");
         assert_eq!(result.files, 1);
         assert_eq!(result.bytes, 6);
-        assert_eq!(std::fs::read(root.join("backup/a.yml")).unwrap(), b"alpha\n");
+        assert_eq!(
+            std::fs::read(root.join("backup/a.yml")).unwrap(),
+            b"alpha\n"
+        );
 
         // Never overwrite: the refusal is typed and the target is intact.
         let err = copy(&root, "a.yml", "b.yml").unwrap_err();

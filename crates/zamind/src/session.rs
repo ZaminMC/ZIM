@@ -1063,7 +1063,10 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
                 Err(e) => return unreadable(id, e),
             };
             match ServerId::parse(&params.server_id) {
-                Ok(server_id) => match engine.files_copy(&server_id, &params.from, &params.to).await {
+                Ok(server_id) => match engine
+                    .files_copy(&server_id, &params.from, &params.to)
+                    .await
+                {
                     Ok(result) => json_ok(id, result),
                     Err(e) => dispatch_error(id, e),
                 },

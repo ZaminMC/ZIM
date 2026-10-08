@@ -193,7 +193,8 @@ fn copy_never_overwrites_an_existing_target() {
 fn copy_directory_copies_the_whole_tree() {
     let (fs, _guard) = fixture("copy-tree");
     fs.write("plugins/EssentialsX/config.yml", b"a\n").unwrap();
-    fs.write("plugins/EssentialsX/messages.yml", b"b\n").unwrap();
+    fs.write("plugins/EssentialsX/messages.yml", b"b\n")
+        .unwrap();
     fs.write("plugins/Vault.jar", b"c").unwrap();
 
     let outcome = fs.copy("plugins", "plugins-backup").unwrap();
@@ -238,9 +239,7 @@ fn copy_stops_at_the_byte_budget_with_the_tree_untouched() {
     fs.write("big1.bin", &[0u8; 40].as_slice()).unwrap();
     fs.write("big2.bin", &[0u8; 40].as_slice()).unwrap();
 
-    let err = fs
-        .copy_bounded("big1.bin", "out.bin", 32)
-        .unwrap_err();
+    let err = fs.copy_bounded("big1.bin", "out.bin", 32).unwrap_err();
     assert!(matches!(err, CoreError::CopyTooLarge { .. }));
     assert!(!fs.resolve("out.bin").unwrap().exists(), "no partial file");
 
@@ -266,7 +265,8 @@ fn search_finds_names_case_insensitively_across_depths() {
     let (fs, _guard) = fixture("search-basic");
     fs.write("server.properties", b"").unwrap();
     fs.write("plugins/EssentialsX.jar", b"").unwrap();
-    fs.write("plugins/EssentialsXSpawn/config.yml", b"").unwrap();
+    fs.write("plugins/EssentialsXSpawn/config.yml", b"")
+        .unwrap();
     fs.write("unrelated.txt", b"").unwrap();
 
     let result = fs.search("essentialsx", 50).unwrap();
@@ -330,6 +330,8 @@ fn search_of_a_deep_tree_stops_at_the_depth_bound() {
     // 40 levels down, past the walk's 32-level bound: the walk says it
     // was cut short rather than silently answering "nothing".
     let result = fs.search("target", 50).unwrap();
-    assert!(result.truncated || !result.hits.is_empty(),
-        "either the hit is found or the truncation flag says why not");
+    assert!(
+        result.truncated || !result.hits.is_empty(),
+        "either the hit is found or the truncation flag says why not"
+    );
 }

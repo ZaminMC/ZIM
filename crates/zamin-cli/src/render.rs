@@ -949,3 +949,66 @@ mod tests {
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }
 }
+
+// --- files (founder §32, ADR-0021) -----------------------------------------
+
+fn files_size(size: Option<u64>) -> String {
+    match size {
+        Some(bytes) if bytes < 1024 => format!("{bytes} B"),
+        Some(bytes) if bytes < 1024 * 1024 => format!("{:.1} KiB", bytes as f64 / 1024.0),
+        Some(bytes) => format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0)),
+        None => "-".to_owned(),
+    }
+}
+
+/// One directory page: directories first (the daemon's order), the kind
+/// column honest about what a symlink row is.
+pub fn files_listing(result: &zamin_protocol::files::FilesListResult) {
+    println!("{} ({} entries)", result.path, result.total);
+    for entry in &result.entries {
+        let kind = match entry.kind {
+            zamin_protocol::files::EntryKind::Directory => "dir ".to_owned(),
+            zamin_protocol::files::EntryKind::File => "file".to_owned(),
+        };
+        let flag = if entry.symlink_outside {
+            " [outside link]"
+        } else {
+            ""
+        };
+        println!(
+            "  {kind}  {:>9}  {}{}",
+            files_size(entry.size_bytes),
+            entry.name,
+            flag
+        );
+    }
+    if result.entries.is_empty() {
+        println!("  (empty)");
+    }
+}
+
+/// Search answers: the hit paths, and the walk's honesty line — how much
+/// it covered, and whether the bound cut it.
+pub fn files_search(result: &zamin_protocol::files::FilesSearchResult) {
+    for hit in &result.hits {
+        let kind = match hit.kind {
+            zamin_protocol::files::EntryKind::Directory => "dir ",
+            zamin_protocol::files::EntryKind::File => "file",
+        };
+        println!("  {kind}  {:>9}  {}", files_size(hit.size_bytes), hit.path);
+    }
+    if result.hits.is_empty() {
+        println!("No matches.");
+    }
+    let cut = if result.truncated {
+        "truncated"
+    } else {
+        "complete"
+    };
+    println!(
+        "{} match(es), {} entries scanned ({}).",
+        result.hits.len(),
+        result.scanned,
+        cut
+    );
+}

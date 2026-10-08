@@ -18,6 +18,8 @@ path = "src/lib.rs"
 zamin-protocol = { path = "../zamin-protocol" }
 zamin-ipc = { path = "../zamin-ipc" }
 zamin-agent = { path = "../zamin-agent" }
+# files get/put speak the wire's base64 chunks (standard, padded).
+base64 = { workspace = true }
 tokio = { workspace = true, features = ["io-std"] }
 bytes = { workspace = true }
 serde = { workspace = true }

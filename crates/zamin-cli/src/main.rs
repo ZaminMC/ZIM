@@ -154,6 +154,13 @@ enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// The server's files (founder §32, ADR-0021): a listing, a bounded
+    /// search, copy/move/mkdir/delete, and chunked get/put — every path
+    /// server-root-relative, every refusaal typed
+    Files {
+        #[command(subcommand)]
+        command: FilesCommands,
+    },
     /// A server's network picture (founder §37): desired port, the
     /// server.properties authority, a live availability probe, conflicts
     Network {
@@ -264,6 +271,71 @@ enum SchedulesCommands {
     Resume {
         server_id: String,
         schedule_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum FilesCommands {
+    /// List a directory (root lists the server root)
+    Ls {
+        server_id: String,
+        /// Directory to list, root-relative
+        #[arg(default_value_t = String::new())]
+        path: String,
+    },
+    /// Search the whole server root for names matching a query
+    /// (case-insensitive substring; bounded, like the wire)
+    Find {
+        server_id: String,
+        query: String,
+        /// Maximum hits (the wire caps at 200)
+        #[arg(long, value_name = "N", default_value_t = 50)]
+        limit: u32,
+    },
+    /// Copy a file or a whole folder. The target must not exist —
+    /// copies never overwrite.
+    Cp {
+        server_id: String,
+        from: String,
+        to: String,
+    },
+    /// Rename or move a file or folder (one atomic rename within the
+    /// server root)
+    Mv {
+        server_id: String,
+        from: String,
+        to: String,
+    },
+    /// Create a directory (with parents, like mkdir -p)
+    Mkdir { server_id: String, path: String },
+    /// Delete a file or an EMPTY directory (recursive deletion does not
+    /// belong to a synchronous verb)
+    Rm {
+        server_id: String,
+        path: String,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Download a file: read it in chunks, write it to a local path
+    /// ("-" prints to stdout)
+    Get {
+        server_id: String,
+        path: String,
+        /// Local destination path, or "-" for stdout
+        #[arg(default_value = "-")]
+        out: String,
+    },
+    /// Upload a local file into the server root: staged chunks on the
+    /// wire, one atomic commit at the target (readers see old bytes or
+    /// new, never a partial file). The destination's parent directories
+    /// are created, like `mkdir -p`.
+    Put {
+        server_id: String,
+        /// Local file to upload
+        local: String,
+        /// Destination path inside the server root
+        path: String,
     },
 }
 
@@ -848,6 +920,49 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         },
         Commands::Network { command } => match command {
             NetworkCommands::Status { server_id } => network_status(&cli, &client, server_id).await,
+        },
+        Commands::Files { command } => match command {
+            FilesCommands::Ls { server_id, path } => {
+                files_ls(&cli, &client, &server_id, &path).await
+            }
+            FilesCommands::Find {
+                server_id,
+                query,
+                limit,
+            } => files_find(&cli, &client, &server_id, &query, *limit).await,
+            FilesCommands::Cp {
+                server_id,
+                from,
+                to,
+            } => files_copy(&cli, &client, &server_id, &from, &to).await,
+            FilesCommands::Mv {
+                server_id,
+                from,
+                to,
+            } => files_move(&cli, &client, &server_id, &from, &to).await,
+            FilesCommands::Mkdir { server_id, path } => {
+                files_mkdir(&cli, &client, &server_id, &path).await
+            }
+            FilesCommands::Rm {
+                server_id,
+                path,
+                yes,
+            } => {
+                if !yes {
+                    confirm_delete(&path)?;
+                }
+                files_rm(&cli, &client, &server_id, &path).await
+            }
+            FilesCommands::Get {
+                server_id,
+                path,
+                out,
+            } => files_get(&cli, &client, &server_id, &path, &out).await,
+            FilesCommands::Put {
+                server_id,
+                local,
+                path,
+            } => files_put(&cli, &client, &server_id, &local, &path).await,
         },
     }
 }
@@ -1996,5 +2111,258 @@ async fn network_status(cli: &Cli, client: &Client, server_id: &str) -> CmdResul
         return Ok(());
     }
     render::network_status(&result);
+    Ok(())
+}
+
+// --- files (founder §32, ADR-0021) -----------------------------------------
+
+async fn files_ls(cli: &Cli, client: &Client, server_id: &str, path: &str) -> CmdResult {
+    let result: zamin_protocol::files::FilesListResult = client
+        .request_typed(
+            methods::FILES_LIST,
+            zamin_protocol::files::FilesListParams {
+                server_id: server_id.to_owned(),
+                path: path.to_owned(),
+                offset: None,
+                limit: None,
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::files_listing(&result);
+    Ok(())
+}
+
+async fn files_find(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    query: &str,
+    limit: u32,
+) -> CmdResult {
+    let result: zamin_protocol::files::FilesSearchResult = client
+        .request_typed(
+            methods::FILES_SEARCH,
+            zamin_protocol::files::FilesSearchParams {
+                server_id: server_id.to_owned(),
+                query: query.to_owned(),
+                limit: Some(limit),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    render::files_search(&result);
+    Ok(())
+}
+
+async fn files_copy(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    from: &str,
+    to: &str,
+) -> CmdResult {
+    let result: zamin_protocol::files::FilesCopyResult = client
+        .request_typed(
+            methods::FILES_COPY,
+            zamin_protocol::files::FilesCopyParams {
+                server_id: server_id.to_owned(),
+                from: from.to_owned(),
+                to: to.to_owned(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!(
+        "Copied {} file(s) ({} bytes) to '{}'.",
+        result.files, result.bytes, result.path
+    );
+    Ok(())
+}
+
+async fn files_move(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    from: &str,
+    to: &str,
+) -> CmdResult {
+    client
+        .request_typed::<_, zamin_protocol::server::EmptyResult>(
+            methods::FILES_RENAME,
+            zamin_protocol::files::FilesRenameParams {
+                server_id: server_id.to_owned(),
+                from: from.to_owned(),
+                to: to.to_owned(),
+            },
+        )
+        .await?;
+    if !cli.json {
+        println!("Moved '{from}' to '{to}'.");
+    }
+    Ok(())
+}
+
+async fn files_mkdir(cli: &Cli, client: &Client, server_id: &str, path: &str) -> CmdResult {
+    client
+        .request_typed::<_, zamin_protocol::server::EmptyResult>(
+            methods::FILES_MKDIR,
+            zamin_protocol::files::FilesMkdirParams {
+                server_id: server_id.to_owned(),
+                path: path.to_owned(),
+            },
+        )
+        .await?;
+    if !cli.json {
+        println!("Created '{path}'.");
+    }
+    Ok(())
+}
+
+async fn files_rm(cli: &Cli, client: &Client, server_id: &str, path: &str) -> CmdResult {
+    client
+        .request_typed::<_, zamin_protocol::server::EmptyResult>(
+            methods::FILES_DELETE,
+            zamin_protocol::files::FilesDeleteParams {
+                server_id: server_id.to_owned(),
+                path: path.to_owned(),
+            },
+        )
+        .await?;
+    if !cli.json {
+        println!("Deleted '{path}'.");
+    }
+    Ok(())
+}
+
+/// One `files.read` chunk, bounded by the wire cap.
+const FILES_GET_CHUNK: u32 = zamin_protocol::files::FILES_READ_MAX_BYTES;
+
+async fn files_get(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    path: &str,
+    out: &str,
+) -> CmdResult {
+    use base64::Engine as _;
+    use std::io::Write as _;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut offset: u64 = 0;
+    loop {
+        let chunk: zamin_protocol::files::FilesReadResult = client
+            .request_typed(
+                methods::FILES_READ,
+                zamin_protocol::files::FilesReadParams {
+                    server_id: server_id.to_owned(),
+                    path: path.to_owned(),
+                    offset,
+                    max_bytes: FILES_GET_CHUNK,
+                },
+            )
+            .await?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&chunk.data)
+            .map_err(|e| {
+                Failure::error(format!("the daemon sent a chunk that is not base64: {e}"))
+            })?;
+        bytes.extend_from_slice(&decoded);
+        offset += decoded.len() as u64;
+        if chunk.eof {
+            break;
+        }
+    }
+    if cli.json {
+        // A machine reader gets the whole file as base64; decoding it is
+        // the caller's explicit choice.
+        print_json(&serde_json::json!({
+            "path": path,
+            "sizeBytes": bytes.len(),
+            "data": base64::engine::general_purpose::STANDARD.encode(&bytes),
+        }));
+        return Ok(());
+    }
+    if out == "-" {
+        std::io::stdout()
+            .write_all(&bytes)
+            .map_err(|e| Failure::error(format!("could not write to stdout: {e}")))?;
+    } else {
+        std::fs::write(out, &bytes)
+            .map_err(|e| Failure::error(format!("could not write {out:?}: {e}")))?;
+        println!("Wrote {} bytes from '{path}' to {out:?}.", bytes.len());
+    }
+    Ok(())
+}
+
+async fn files_put(
+    cli: &Cli,
+    client: &Client,
+    server_id: &str,
+    local: &str,
+    path: &str,
+) -> CmdResult {
+    use base64::Engine as _;
+
+    let data = std::fs::read(local)
+        .map_err(|e| Failure::error(format!("could not read {local:?}: {e}")))?;
+    // The commit is one atomic rename — it never invents directories.
+    // The destination's parents are the client's courtesy, like mkdir -p.
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let parent = parent.to_string_lossy().replace('\\', "/");
+        if !parent.is_empty() && parent != "." {
+            client
+                .request_typed::<_, zamin_protocol::server::EmptyResult>(
+                    methods::FILES_MKDIR,
+                    zamin_protocol::files::FilesMkdirParams {
+                        server_id: server_id.to_owned(),
+                        path: parent,
+                    },
+                )
+                .await?;
+        }
+    }
+    let mut staging: Option<String> = None;
+    for chunk in data.chunks(zamin_protocol::files::FILES_WRITE_MAX_CHUNK as usize) {
+        let result: zamin_protocol::files::FilesWriteResult = client
+            .request_typed(
+                methods::FILES_WRITE,
+                zamin_protocol::files::FilesWriteParams {
+                    server_id: server_id.to_owned(),
+                    staging_id: staging.clone(),
+                    content: base64::engine::general_purpose::STANDARD.encode(chunk),
+                },
+            )
+            .await?;
+        staging = Some(result.staging_id);
+    }
+    let staging = staging.ok_or_else(|| Failure::error("nothing to upload".to_owned()))?;
+    let committed: zamin_protocol::files::FilesCommitResult = client
+        .request_typed(
+            methods::FILES_COMMIT,
+            zamin_protocol::files::FilesCommitParams {
+                server_id: server_id.to_owned(),
+                staging_id: staging,
+                target: path.to_owned(),
+            },
+        )
+        .await?;
+    if cli.json {
+        print_json(&committed);
+        return Ok(());
+    }
+    println!(
+        "Uploaded {local:?} to '{}' ({} bytes).",
+        committed.path, committed.size_bytes
+    );
     Ok(())
 }

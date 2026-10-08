@@ -365,12 +365,17 @@ impl RootedFs {
                     let meta = item.metadata().ok();
                     hits.push(SearchHit {
                         path: rel.clone(),
-                        kind: if is_dir { EntryKind::Dir } else { EntryKind::File },
+                        kind: if is_dir {
+                            EntryKind::Dir
+                        } else {
+                            EntryKind::File
+                        },
                         size: meta.as_ref().filter(|_| !is_dir).map(|m| m.len()),
                         modified_ms: meta.and_then(|m| {
-                            m.modified().ok().and_then(|t| {
-                                t.duration_since(std::time::UNIX_EPOCH).ok()
-                            }).map(|d| d.as_millis() as u64)
+                            m.modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as u64)
                         }),
                     });
                 }
