@@ -409,9 +409,9 @@ lanes; the remaining §23 proof (clean VM installs) is manual by design.
 
 ### The development channel (updates)
 
-Installers for the **development** line publish to the public
-[ZaminPanel-Releases](https://github.com/ZaminMC/ZaminPanel-Releases/releases)
-repo as **versioned pre-releases** — `vMAJOR.MINOR.PATCH`, one entry per
+Installers for the **development** line publish to the project's own
+[releases page](https://github.com/ZaminMC/ZaminPanel/releases) as
+**versioned pre-releases** — `vMAJOR.MINOR.PATCH`, one entry per
 release, marked Pre-Release until v1.0.0 (ADR-0029). The versioning
 scheme is the founder's:
 

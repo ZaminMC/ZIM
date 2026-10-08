@@ -22,18 +22,23 @@ and automatic updates built in. Three facts shape the decision:
 
 ## Decision
 
-### The channel lives in a separate public repo
+### The channel lives on the code repo itself
 
-`ZaminMC/ZaminPanel-Releases` holds exactly what the name says: the
+> **Revision (2026-10-08):** the repo went public, and the separate channel
+> repo is retired — the channel lives on `ZaminMC/ZaminPanel`'s own releases
+> page, authenticated by the workflow's `GITHUB_TOKEN`. The original
+> separate-repo decision is kept below for the record.
+
+`ZaminMC/ZaminPanel` holds exactly what the channel needs: the
 NSIS installer, the AppImage, the portable archives, and the updater's
 `latest.json` — published under one fixed `dev` tag that every release
-run deletes and re-creates (assets, notes, and manifest replaced). The
-code repo stays private; the workflow that publishes rides the
+run rewrites (the manifest, notes, and versioned installers replaced).
+The workflow that publishes rides the
 `Release (dev)` dispatch in `.github/workflows/release-dev.yml` and
-authenticates to the channel repo with the `RELEASES_TOKEN` secret.
+authenticates with the run's own `GITHUB_TOKEN`.
 
 The fixed tag is deliberate: the updater endpoint is a constant —
-`https://github.com/ZaminMC/ZaminPanel-Releases/releases/download/dev/latest.json`
+`https://github.com/ZaminMC/ZaminPanel/releases/download/dev/latest.json`
 — baked into `tauri.conf.json`, so installs never reconfigure and the
 check is one stable URL. "Latest" release aliases would not work here
 (GitHub excludes pre-releases from them, and a dev channel is nothing
@@ -90,7 +95,7 @@ verbs).
 ## Consequences
 
 - Users install from
-  `https://github.com/ZaminMC/ZaminPanel-Releases/releases` (dev tag,
+  `https://github.com/ZaminMC/ZaminPanel/releases` (dev tag,
   pre-release flagged) and updates arrive without touching GitHub.
 - The release lane reuses the bundle lane's build steps but skips its
   host-crate gates: `bundle.yml` still runs clippy + host tests on the

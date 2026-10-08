@@ -1,10 +1,11 @@
 # Release (development channel): build the installers, sign them with the
-# updater key, and publish them to the PUBLIC releases repo
-# (ZaminMC/ZaminPanel-Releases) as VERSIONED PRE-RELEASES — vMAJOR.MINOR.PATCH
+# updater key, and publish them on THIS repo's releases page
+# (ZaminMC/ZaminPanel) as VERSIONED PRE-RELEASES — vMAJOR.MINOR.PATCH
 # (ADR-0029) — while the fixed `dev` tag keeps its role as the update
 # manifest anchor: the one URL the installed fleet polls
 # (…/releases/download/dev/latest.json), rewritten in place every release.
-# The code repo stays private; the channel must not.
+# (Revision: the repo is public now, so the channel lives here — the
+# separate ZaminPanel-Releases repo is retired, its history 2026-10-08.)
 #
 # Version discipline (ADR-0029):
 #   v0.1.0  first usable engine          v1.0.0  production release
@@ -50,13 +51,17 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASES_REPO: ZaminMC/ZaminPanel-Releases
+  RELEASES_REPO: ZaminMC/ZaminPanel
   ANCHOR_TAG: dev
 
 jobs:
   version:
     name: Stamp the build version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       version: ${{ steps.stamp.outputs.version }}
       changelog: ${{ steps.changelog.outputs.changelog }}
@@ -73,7 +78,7 @@ jobs:
       - id: resolve
         env:
           VERSION_INPUT: ${{ inputs.version }}
-          RELEASES_REPO: ZaminMC/ZaminPanel-Releases
+          RELEASES_REPO: ZaminMC/ZaminPanel
           ANCHOR_TAG: dev
         run: |
           set -euo pipefail
@@ -112,10 +117,10 @@ jobs:
       # recent history; a changelog that lies is worse than none.
       - id: changelog
         env:
-          RELEASES_REPO: ZaminMC/ZaminPanel-Releases
+          RELEASES_REPO: ZaminMC/ZaminPanel
         run: |
           set -euo pipefail
-          PREV=$(curl -fsSL \
+          PREV=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/$RELEASES_REPO/releases?per_page=30" \
             | node -e '
               let d = ""; process.stdin.on("data", (c) => (d += c)).on("end", () => {
@@ -308,11 +313,13 @@ jobs:
     name: Publish the versioned pre-release + refresh the manifest anchor
     runs-on: ubuntu-latest
     needs: [version, linux, windows]
+    permissions:
+      contents: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
       RELEASE_TAG: v${{ needs.version.outputs.version }}
       ALLOW_REPUBLISH: ${{ inputs.allow_republish }}
-      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 

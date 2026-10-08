@@ -1,8 +1,8 @@
 # Windows Manual Validation Checklist — Browser Shell (P0.2)
 
 Purpose: the human gate for P0.2. Green tests prove behavior; **this proves
-the UI is a browser.** Build: latest `v0.2.0` pre-release from
-ZaminMC/ZaminPanel-Releases (signed NSIS setup / portable / latest.json).
+the UI is a browser.** Build: the latest `vMAJOR.MINOR.PATCH` pre-release from
+ZaminMC/ZaminPanel's releases page (signed NSIS setup / portable).
 Run on Windows 10/11, 100% scaling first, then 125%/150%.
 
 Method: open the app and **use it as a user for 15 minutes**. For each row:

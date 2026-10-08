@@ -58,7 +58,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwRThCMDFCNDVBOEQ1NjUKUldSbDFhaEZHN0Rva0JBNGsvUEh6ckttVkh0cTJtT2t3b25xN0hpSU5OUDdDTVQ2NUlvaWQvZDQK",
       "endpoints": [
-        "https://github.com/ZaminMC/ZaminPanel-Releases/releases/download/dev/latest.json"
+        "https://github.com/ZaminMC/ZaminPanel/releases/download/dev/latest.json"
       ]
     }
   }
