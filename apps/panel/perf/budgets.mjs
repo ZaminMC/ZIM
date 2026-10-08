@@ -23,8 +23,12 @@ const BUDGETS = {
   // combined), so the entry and the cold start are untouched; the total
   // grows because the surfaces are real features, not regressions.
   totalJsGzip: 184 * 1024,
-  // 12 → 14 KB at ADR-0019: one shared stylesheet for the config rows.
-  totalCssGzip: 14 * 1024,
+  // 12 → 14 KB at ADR-0019 (one shared stylesheet for the config rows);
+  // 14 → 15 KB at ADR-0023: the bookmarks bar joins the chrome (its own
+  // stylesheet, shared across windows) and the scoreboard editor's two
+  // panes ride the files chunk — feature surface, not boot bloat; the
+  // entry CSS grew only by the crash card's reason row.
+  totalCssGzip: 15 * 1024,
 };
 
 function assets() {

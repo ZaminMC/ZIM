@@ -205,6 +205,17 @@ only while the server actually runs. `/reload` is deliberately absent:
 it is the one verb that pretends. The CLI reaches the same surface —
 `zamin files ls/find/cp/mv/mkdir/rm/get/put`.
 
+Specialized editors arrive through a registry, not a switch statement
+(§34, [ADR-0022](docs/adr/0022-specialized-editors.md)): an editor
+claims a file it can honestly parse — a scoreboard configuration earns a
+third mode — and edits through the SAME row model, so every
+byte-stability guarantee of Compose applies to the specialized view too.
+The scoreboard editor is the first: title and rows on the left, a live
+replica of the in-game sidebar on the right, `&`/`§` codes rendered in
+the client's own palette, and both of the wild's layouts editable (one
+pair of comma-joined rows, or one pair per row). The preview never
+resolves plugin placeholders — it shows the bytes the file speaks.
+
 ## Players
 
 The Players tab asks the server itself — Server List Ping plus the log's
@@ -225,7 +236,12 @@ ZaminPanel is a browser for Minecraft servers
 [founder vision](docs/founder-vision.md) made real). The sidebar is gone:
 a tab strip wears every open destination — a server tab's favicon is its
 state dot, live from the event stream — and a tool bar carries back,
-forward, reload, and the address bar. Destinations are a closed type,
+forward, reload, and the address bar. Under the tool bar rides the
+bookmark bar (§55, [ADR-0023](docs/adr/0023-bookmarks-bar-crash-verbs.md)):
+chips that ARE typed destinations — a click inherits singleton focus, a
+Ctrl+click opens a new tab, and the address bar's star adds or removes
+the current destination, one bookmark per destination, shared across
+windows, hidden when empty. Destinations are a closed type,
 never strings: `zaminpanel://servers/` (the fleet), `zaminpanel://new`
 (discovery), `zaminpanel://settings/`, and one tab per server. Identity
 discipline holds everywhere: navigating to an open destination focuses

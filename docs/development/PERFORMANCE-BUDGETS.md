@@ -47,7 +47,7 @@ sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
 Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
 perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
 entry ≤ 90 KB, any single chunk ≤ 90 KB, total JS ≤ 184 KB, total CSS
-≤ 14 KB. The cold-start payload was cut with code splitting: the entry
+≤ 15 KB. The cold-start payload was cut with code splitting: the entry
 chunk went from 147 KB to 68 KB gzip by splitting the console and the
 three operator modals into their own chunks; the console loads when the
 tab first renders, not at boot. The ADR-0019 raise (170 → 184 KB JS,
@@ -59,7 +59,11 @@ not the boot path regrowing. ADR-0020 then removed xterm — the panel's
 heaviest dependency — by making the console the structured view; the
 console chunk collapsed to the shared feed engine and the budget lines
 stayed where ADR-0019 pinned them (a shrinking total is recorded, never
-banked as headroom for the next regression). Boot progress is
+banked as headroom for the next regression). The ADR-0023 raise (14 → 15 KB CSS) bought the
+bookmarks bar (its own chrome stylesheet, shared across windows) and
+the scoreboard editor's two-pane layout (riding the files chunk); the
+entry CSS grew only by the crash card's reason row, and the boot path
+itself is untouched. Boot progress is
 measurable in the running app through the `panel:boot-start` →
 `panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
 recorded from browser smoke runs rather than guessed.
