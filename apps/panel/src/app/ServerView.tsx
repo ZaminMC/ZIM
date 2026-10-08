@@ -291,6 +291,7 @@ export function ServerView({ serverId }: { serverId: string }) {
 
       <CrashCard
         serverId={serverId}
+        onViewLogs={() => setLowerView("logs")}
         onRecover={() => setLowerView("backups")}
       />
 

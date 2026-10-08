@@ -1,32 +1,78 @@
-// Crash card: phase, exit code, and the evidence excerpt the daemon
-// classified at crash time (ADR-0005). Stays until the server starts
-// again (resolved by the next transition) or the operator dismisses it —
-// both paths flip `resolved` in the store, which hides the card.
+// The crash card (§62): the server tab stays open, the status turns
+// red, and the operator gets the founder's exact conversation —
+// "Server stopped unexpectedly." with the Reason the daemon classified,
+// then [Restart], [View logs], [Ask Dutchmen]. The card never invents a
+// cause: what it says is the evidence excerpt and the structured error
+// the daemon attached at crash time, and nothing more.
 //
-// Crash recovery (Phase 5): the card is also the doorway to the backups
-// surface — restore-from-backup is the recovery path when a crash left
-// the server files unusable, so the card offers the jump directly.
+// Restart dispatches through the SAME pending/actionError fields the
+// header uses, so one in-flight verb shows once and one failure
+// surfaces once. The card resolves itself when the next state
+// transition proves it stale (the store's rule); the buttons only
+// dispatch and wait. "Ask Dutchmen" is the reserved room — the agent
+// runtime will own crash inspection, and the seat is honestly labeled
+// as not arrived rather than silently absent.
 
-import { useServers } from "../state/servers";
+import { useState } from "react";
+import { startServer } from "../state/actions";
+import { describeError } from "../state/errors";
+import { useServers, type CrashInfo } from "../state/servers";
+import { useUi } from "../state/ui";
 import { Button } from "../ui/Button";
 import styles from "./CrashCard.module.css";
 
+/** The honest reason line: the daemon's structured message if it has
+ *  one, else the first evidence line. Null when nothing was captured —
+ *  the card then says so instead of guessing. */
+export function crashReason(crash: CrashInfo): string | null {
+  if (crash.error?.message) return crash.error.message;
+  const firstLine = crash.evidence?.split("\n").find((line) => line.trim() !== "");
+  return firstLine ?? null;
+}
+
 export function CrashCard({
   serverId,
+  onViewLogs,
   onRecover,
 }: {
   serverId: string;
+  /** Jumps to the log viewer (§62's [View logs]). */
+  onViewLogs?: () => void;
   /** Opens the backups surface (restore flow). */
   onRecover?: () => void;
 }) {
   const crash = useServers((s) => s.crashes[serverId]);
   const resolveCrash = useServers((s) => s.resolveCrash);
+  const setPending = useUi((s) => s.setPending);
+  const setActionError = useUi((s) => s.setActionError);
+  const [restarting, setRestarting] = useState(false);
   if (!crash || crash.resolved) return null;
+
+  const reason = crashReason(crash);
+
+  const restart = () => {
+    setActionError(serverId, null);
+    setPending(serverId, "start");
+    setRestarting(true);
+    void startServer(serverId)
+      .catch((error: unknown) => {
+        const described = describeError(error);
+        setActionError(serverId, {
+          code: described.code,
+          message: described.title,
+          remediation: described.remediation,
+        });
+      })
+      .finally(() => {
+        setPending(serverId, null);
+        setRestarting(false);
+      });
+  };
 
   return (
     <aside className={styles.card} role="status" aria-label="Crash report">
       <div className={styles.head}>
-        <h2 className={styles.title}>The server crashed during {crash.phase}</h2>
+        <h2 className={styles.title}>Server stopped unexpectedly.</h2>
         <button
           className={styles.dismiss}
           onClick={() => resolveCrash(serverId)}
@@ -37,19 +83,24 @@ export function CrashCard({
       </div>
 
       <div className={styles.facts}>
+        <span className={styles.chip}>during {crash.phase}</span>
         <span className={styles.chip}>exit code: {crash.exitCode ?? "unknown"}</span>
         {crash.error?.code ? <span className={styles.chip}>{crash.error.code}</span> : null}
       </div>
 
-      {crash.error?.message ? <p style={{ margin: 0 }}>{crash.error.message}</p> : null}
-
-      {crash.evidence ? (
-        <pre className={styles.evidence}>{crash.evidence}</pre>
+      {reason ? (
+        <p className={styles.reason}>
+          <strong>Reason:</strong> {reason}
+        </p>
       ) : (
-        <p style={{ margin: 0, color: "var(--text-muted)" }}>
-          No evidence excerpt was captured for this crash.
+        <p className={styles.reason}>
+          <strong>Reason:</strong> nothing was captured — the logs are the evidence now.
         </p>
       )}
+
+      {crash.evidence && crash.evidence.trim() !== reason ? (
+        <pre className={styles.evidence}>{crash.evidence}</pre>
+      ) : null}
 
       {crash.error?.remediation && crash.error.remediation.length > 0 ? (
         <ul className={styles.remediation}>
@@ -60,12 +111,18 @@ export function CrashCard({
       ) : null}
 
       <div className={styles.actions}>
-        <Button variant="primary" onClick={() => resolveCrash(serverId)}>
-          Acknowledge
+        <Button variant="primary" onClick={restart} disabled={restarting}>
+          {restarting ? "Starting…" : "Restart"}
         </Button>
-        {onRecover ? (
-          <Button onClick={onRecover}>Recover from a backup</Button>
-        ) : null}
+        {onViewLogs ? <Button onClick={onViewLogs}>View logs</Button> : null}
+        <Button
+          onClick={() => {}}
+          disabled
+          title="Reserved — Dutchmen inspects crashes once the agent runtime arrives."
+        >
+          Ask Dutchmen
+        </Button>
+        {onRecover ? <Button onClick={onRecover}>Recover from a backup</Button> : null}
       </div>
     </aside>
   );

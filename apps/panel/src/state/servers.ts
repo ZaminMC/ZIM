@@ -63,9 +63,21 @@ export const useServers = create<ServersState>((set) => ({
     }),
 
   upsert: (server) =>
-    set((state) => ({
-      servers: { ...state.servers, [server.serverId]: server },
-    })),
+    set((state) => {
+      const crashes = { ...state.crashes };
+      const existing = crashes[server.serverId];
+      // Details fetched after a register can carry a live state while a
+      // stale crash card lingers: any state other than crashed proves
+      // the card stale, exactly like applyState's rule (§62 keeps the
+      // card only while the registry itself says crashed).
+      if (existing && !existing.resolved && server.state !== "crashed") {
+        crashes[server.serverId] = { ...existing, resolved: true };
+      }
+      return {
+        servers: { ...state.servers, [server.serverId]: server },
+        crashes,
+      };
+    }),
 
   applyState: (serverId, next) =>
     set((state) => {

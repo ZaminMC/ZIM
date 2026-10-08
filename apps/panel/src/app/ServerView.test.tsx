@@ -138,19 +138,20 @@ describe("ServerView", () => {
       },
     });
     render(<ServerView serverId="alpha" />);
-    expect(screen.getByText(/crashed during startup/)).toBeTruthy();
+    expect(screen.getByText("Server stopped unexpectedly.")).toBeTruthy();
+    expect(screen.getByText(/during startup/)).toBeTruthy();
     expect(screen.getByText(/exit code: 3/)).toBeTruthy();
     expect(screen.getByText(/Exception in thread/)).toBeTruthy();
   });
 
-  it("dismisses the crash card on Acknowledge", async () => {
+  it("dismisses the crash card on dismiss", async () => {
     useServers.setState({
       crashes: {
         alpha: { serverId: "alpha", phase: "runtime", exitCode: 1, resolved: false },
       },
     });
     render(<ServerView serverId="alpha" />);
-    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss crash report" }));
     await waitFor(() => expect(useServers.getState().crashes["alpha"]?.resolved).toBe(true));
   });
 
