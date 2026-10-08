@@ -16,14 +16,18 @@ vi.mock("../state/actions", () => ({
   deleteEntry: vi.fn(),
   readWholeFile: vi.fn(),
   writeWholeFile: vi.fn(),
+  copyFilesEntry: vi.fn(),
+  searchFiles: vi.fn(),
 }));
 
 import {
+  copyFilesEntry,
   deleteEntry,
   listFiles,
   mkdir,
   readWholeFile,
   renameEntry,
+  searchFiles,
   writeWholeFile,
 } from "../state/actions";
 import { ProtocolRequestError } from "../protocol/client";
@@ -34,6 +38,8 @@ const writeWholeFileMock = writeWholeFile as ReturnType<typeof vi.fn>;
 const mkdirMock = mkdir as ReturnType<typeof vi.fn>;
 const renameEntryMock = renameEntry as ReturnType<typeof vi.fn>;
 const deleteEntryMock = deleteEntry as ReturnType<typeof vi.fn>;
+const copyFilesEntryMock = copyFilesEntry as ReturnType<typeof vi.fn>;
+const searchFilesMock = searchFiles as ReturnType<typeof vi.fn>;
 
 type TestEntry = ReturnType<typeof entryOf>;
 
@@ -56,6 +62,8 @@ beforeEach(() => {
   mkdirMock.mockReset().mockResolvedValue(undefined);
   renameEntryMock.mockReset().mockResolvedValue(undefined);
   deleteEntryMock.mockReset().mockResolvedValue(undefined);
+  copyFilesEntryMock.mockReset().mockResolvedValue({ path: "x", files: 1, bytes: 1 });
+  searchFilesMock.mockReset().mockResolvedValue({ hits: [], truncated: false, scanned: 0 });
 });
 
 afterEach(cleanup);
@@ -121,6 +129,97 @@ describe("FilesView", () => {
     fireEvent.click(screen.getByRole("button", { name: "delete" }));
     await waitFor(() => expect(deleteEntryMock).toHaveBeenCalledWith("smp", "old.txt"));
     confirm.mockRestore();
+  });
+
+  it("copies a row to the prompted destination and never overwrites silently", async () => {
+    listFilesMock.mockResolvedValue(listing([entryOf("config.yml", "file", { sizeBytes: 4 })]));
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByText("config.yml")).toBeTruthy());
+
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("config copy.yml");
+    fireEvent.click(screen.getByRole("button", { name: "copy" }));
+    await waitFor(() => expect(copyFilesEntryMock).toHaveBeenCalledWith("smp", "config.yml", "config copy.yml"));
+
+    // The typed refusal is the message — the panel says the honest word.
+    copyFilesEntryMock.mockRejectedValue(
+      new ProtocolRequestError({
+        code: "FS_COPY_TARGET_EXISTS",
+        message: "copy target already exists; copies never overwrite",
+        remediation: [],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "copy" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("FS_COPY_TARGET_EXISTS"));
+    prompt.mockRestore();
+  });
+
+  it("searches the whole root, opens hits, and returns to the listing on clear", async () => {
+    listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: 11 })]));
+    searchFilesMock.mockResolvedValue({
+      hits: [
+        { path: "plugins/EssentialsX/config.yml", kind: "file", sizeBytes: 40 },
+        { path: "world", kind: "directory" },
+      ],
+      truncated: true,
+      scanned: 900,
+    });
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode("x=1\n"));
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByText("server.properties")).toBeTruthy());
+
+    const box = screen.getByLabelText(/Search file names/);
+    fireEvent.change(box, { target: { value: "essentials" } });
+    await waitFor(() => expect(searchFilesMock).toHaveBeenCalledWith("smp", "essentials"));
+    await waitFor(() => expect(screen.getByText("config.yml")).toBeTruthy());
+    expect(screen.getByText(/plugins\/EssentialsX/).textContent).toContain("plugins/EssentialsX");
+    // The truncation is said, not hidden.
+    expect(screen.getByText(/stopped at 2 matches/)).toBeTruthy();
+
+    // Clearing the query returns the listing view.
+    fireEvent.change(screen.getByLabelText(/Search file names/), { target: { value: "" } });
+    await waitFor(() => expect(screen.getByText("server.properties")).toBeTruthy());
+    // An empty query never reaches the wire — the listing is that view.
+    expect(searchFilesMock).toHaveBeenLastCalledWith("smp", "essentials");
+
+    // A file hit opens the editor at its real path.
+    fireEvent.change(screen.getByLabelText(/Search file names/), { target: { value: "essentials" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "config.yml" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "config.yml" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Editing plugins\/EssentialsX\/config.yml/)).toBeTruthy(),
+    );
+  });
+
+  it("downloads a file row through the browser's save affordance", async () => {
+    listFilesMock.mockResolvedValue(listing([entryOf("world.dat", "file", { sizeBytes: 6 })]));
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode("region"));
+    const madeUrls: string[] = [];
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => {
+        madeUrls.push("blob:fake");
+        return "blob:fake";
+      }),
+      revokeObjectURL: revoke,
+    });
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByText("world.dat")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "download" }));
+    await waitFor(() => expect(readWholeFileMock).toHaveBeenCalledWith("smp", "world.dat"));
+    await waitFor(() => expect(madeUrls.length).toBe(1));
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses an oversized download before any read", async () => {
+    listFilesMock.mockResolvedValue(listing([entryOf("huge.tar", "file", { sizeBytes: 200 * 1024 * 1024 })]));
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByText("huge.tar")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "download" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("use a backup"));
+    expect(readWholeFileMock).not.toHaveBeenCalled();
   });
 
   it("surfaces typed errors from the daemon", async () => {

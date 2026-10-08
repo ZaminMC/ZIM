@@ -12,6 +12,8 @@ import type {
   JavaInstallResult,
   JavaListResult,
   FilesCommitResult,
+  FilesCopyResult,
+  FilesSearchResult,
   Job,
   JobsListResult,
   PlayersListResult,
@@ -206,6 +208,22 @@ export async function deleteEntry(serverId: string, path: string): Promise<void>
 }
 
 /** Read a whole file through chunked reads (spec §8), 512 KiB at a time. */
+export async function copyFilesEntry(
+  serverId: string,
+  from: string,
+  to: string,
+): Promise<FilesCopyResult> {
+  return client.request<FilesCopyResult>("files.copy", { serverId, from, to });
+}
+
+export async function searchFiles(
+  serverId: string,
+  query: string,
+  limit = 100,
+): Promise<FilesSearchResult> {
+  return client.request<FilesSearchResult>("files.search", { serverId, query, limit });
+}
+
 export async function readWholeFile(serverId: string, path: string): Promise<Uint8Array> {
   const READ_CHUNK = 512 * 1024;
   const parts: Uint8Array[] = [];

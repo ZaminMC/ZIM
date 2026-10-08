@@ -231,3 +231,18 @@
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+
+.search {
+  margin-left: auto;
+  min-width: 200px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+
+.search:focus {
+  outline: 1px solid var(--accent);
+}

@@ -294,6 +294,42 @@ export interface FilesListResult {
   total: number;
 }
 
+// --- files.copy / files.search (the files slice, ADR-0021) ---
+
+export interface FilesCopyParams {
+  serverId: string;
+  /** Root-relative source: a file or a whole folder. */
+  from: string;
+  /** Root-relative target. Must not exist — copies never overwrite. */
+  to: string;
+}
+
+export interface FilesCopyResult {
+  path: string;
+  files: number;
+  bytes: number;
+}
+
+export interface FilesSearchParams {
+  serverId: string;
+  /** Case-insensitive name substring; empty is a protocol error. */
+  query: string;
+  limit?: number;
+}
+
+export interface FilesSearchHit {
+  path: string;
+  kind: EntryKind;
+  sizeBytes?: number;
+  modifiedMs?: number;
+}
+
+export interface FilesSearchResult {
+  hits: FilesSearchHit[];
+  truncated: boolean;
+  scanned: number;
+}
+
 export interface FilesReadParams {
   serverId: string;
   path: string;

@@ -1,24 +1,40 @@
-// File browser + editor: the server root over the wire (spec §8). The
-// listing pages directories-first; a text file opens in the editor and
-// saves through the staged upload (chunked write → one atomic commit), so
-// a crashed tab can never leave a half-written file at the target path.
+// File browser + editor (founder §32): the server root over the wire
+// (spec §8). The listing pages directories-first; a text file opens in
+// the editor and saves through the staged upload (chunked write → one
+// atomic commit), so a crashed tab can never leave a half-written file
+// at the target path. The slice's verbs live here too: search walks the
+// whole root (bounded, the walk says when it truncated), copy refuses to
+// overwrite (the typed refusal is the message), move is the one-rename
+// path, upload lands through the same staging, and download streams the
+// bytes back to the operator's machine.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  copyFilesEntry,
   deleteEntry,
   listFiles,
   mkdir,
   readWholeFile,
   renameEntry,
+  searchFiles,
   writeWholeFile,
 } from "../state/actions";
-import type { FilesEntry, FilesListResult } from "../protocol/types";
+import type {
+  FilesEntry,
+  FilesListResult,
+  FilesSearchResult,
+} from "../protocol/types";
 import { describeError } from "../state/errors";
 import { Button } from "../ui/Button";
 import { useDeferredWindow } from "../ui/deferred";
 import styles from "./FilesView.module.css";
 
 const EDIT_LIMIT_BYTES = 1024 * 1024; // the editor is for text files
+// A download builds one Uint8Array in the tab before the browser takes
+// over; the honest cap keeps a world folder from crashing the view —
+// bigger trees go through backups, which stream.
+const DOWNLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
+const SEARCH_DEBOUNCE_MS = 250;
 
 // The deferred window resets on array identity; a fresh [] per render
 // would reset it every time, so the empty fallback is a constant.
@@ -69,6 +85,14 @@ export function FilesView({ serverId }: { serverId: string }) {
   const [saved, setSaved] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Search (the whole-root walk) is a view over its own state: the box's
+  // text, the debounced query actually sent, and the bounded answer.
+  const [searchBox, setSearchBox] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResult, setSearchResult] = useState<FilesSearchResult | null>(null);
+  const [searching, setSearching] = useState(false);
+  const uploadInput = useRef<HTMLInputElement>(null);
+
   const refresh = useCallback(
     (path: string) => {
       setLoading(true);
@@ -90,6 +114,40 @@ export function FilesView({ serverId }: { serverId: string }) {
   useEffect(() => {
     refresh("");
   }, [refresh]);
+
+  // The search box debounces before the walk: typing one keystroke per
+  // letter must not walk the whole root per letter.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchQuery(searchBox.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchBox]);
+
+  useEffect(() => {
+    if (searchQuery === "") {
+      setSearchResult(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    let alive = true;
+    void searchFiles(serverId, searchQuery)
+      .then((result) => {
+        if (alive) setSearchResult(result);
+      })
+      .catch((cause: unknown) => {
+        if (alive) {
+          const described = describeError(cause);
+          setError({ message: described.title, code: described.code });
+          setSearchResult(null);
+        }
+      })
+      .finally(() => {
+        if (alive) setSearching(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [serverId, searchQuery]);
 
   const openFile = useCallback(
     (path: string, size?: number) => {
@@ -182,6 +240,92 @@ export function FilesView({ serverId }: { serverId: string }) {
     [dir, refresh],
   );
 
+  // The verbs of the slice. Copy asks for the destination (the typed
+  // refusal names the honest mistake when it exists); move is the
+  // one-rename path and shows it as such; download streams the file
+  // back with the browser's own save affordance.
+  const copyEntry = useCallback(
+    (entry: FilesEntry) => {
+      const from = join(dir, entry.name);
+      const suggested = entry.name.includes(".")
+        ? `${entry.name.slice(0, entry.name.lastIndexOf("."))} copy${entry.name.slice(entry.name.lastIndexOf("."))}`
+        : `${entry.name} copy`;
+      const to = window.prompt(`Copy ${entry.name} to (server-root path):`, join(dir, suggested));
+      if (!to || to === from) return;
+      act(
+        () =>
+          copyFilesEntry(serverId, from, to).then(() => {
+            setSearchBox("");
+          }),
+        "copy failed",
+      );
+    },
+    [dir, act, serverId],
+  );
+
+  const moveEntry = useCallback(
+    (entry: FilesEntry) => {
+      const from = join(dir, entry.name);
+      const to = window.prompt(`Move ${from} to (server-root path):`, from);
+      if (!to || to === from) return;
+      act(() => renameEntry(serverId, from, to), "move failed");
+    },
+    [dir, act, serverId],
+  );
+
+  const downloadEntry = useCallback(
+    (entry: FilesEntry) => {
+      if (entry.kind !== "file") return;
+      if (entry.sizeBytes !== undefined && entry.sizeBytes > DOWNLOAD_LIMIT_BYTES) {
+        setError({
+          message: `${entry.name} is ${formatSize(entry.sizeBytes)} — download covers files up to ${formatSize(DOWNLOAD_LIMIT_BYTES)}; use a backup for bigger trees.`,
+        });
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      void readWholeFile(serverId, join(dir, entry.name))
+        .then((bytes) => {
+          const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = entry.name;
+          anchor.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+        })
+        .catch((cause: unknown) => {
+          const described = describeError(cause);
+          setError({ message: described.title, code: described.code });
+        })
+        .finally(() => setBusy(false));
+    },
+    [dir, serverId],
+  );
+
+  const uploadFiles = useCallback(
+    (files: FileList | File[]) => {
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      setBusy(true);
+      setError(null);
+      void Promise.all(
+        list.map((file) =>
+          file
+            .arrayBuffer()
+            .then((buffer) => writeWholeFile(serverId, join(dir, file.name), new Uint8Array(buffer))),
+        ),
+      )
+        .then(() => refresh(dir))
+        .catch((cause: unknown) => {
+          const described = describeError(cause);
+          setError({ message: `upload failed: ${described.title}`, code: described.code });
+        })
+        .finally(() => setBusy(false));
+    },
+    [dir, refresh, serverId],
+  );
+
   const dirty = draft !== saved;
 
   // The listing renders in slices: the first commit paints the window,
@@ -263,8 +407,84 @@ export function FilesView({ serverId }: { serverId: string }) {
             >
               New file
             </Button>
+            <Button disabled={busy} onClick={() => uploadInput.current?.click()}>
+              Upload
+            </Button>
+            <input
+              ref={uploadInput}
+              type="file"
+              multiple
+              hidden
+              aria-label="Upload files into this directory"
+              onChange={(event) => {
+                if (event.target.files) uploadFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <input
+              className={styles.search}
+              type="search"
+              placeholder="Search the whole server…"
+              value={searchBox}
+              onChange={(event) => setSearchBox(event.target.value)}
+              aria-label="Search file names across the server root"
+            />
           </div>
 
+          {searchQuery !== "" ? (
+            <div className={styles.tableCard}>
+              {searching ? (
+                <p className={styles.emptyDir}>Searching "{searchQuery}"…</p>
+              ) : searchResult && searchResult.hits.length > 0 ? (
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th scope="col">Name</th>
+                      <th scope="col">Size</th>
+                      <th scope="col">Where</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchResult.hits.map((hit) => {
+                      const name = hit.path.slice(hit.path.lastIndexOf("/") + 1);
+                      const parent = hit.path.slice(0, hit.path.lastIndexOf("/"));
+                      return (
+                        <tr key={hit.path}>
+                          <td>
+                            <button
+                              className={styles.name}
+                              onClick={() => {
+                                if (hit.kind === "file") {
+                                  setOpenPath(null);
+                                  openFile(hit.path, hit.sizeBytes);
+                                } else {
+                                  setSearchBox("");
+                                  setOpenPath(null);
+                                  refresh(hit.path);
+                                }
+                              }}
+                            >
+                              {hit.kind === "directory" ? `${name}/` : name}
+                            </button>
+                          </td>
+                          <td className={styles.num}>{formatSize(hit.sizeBytes)}</td>
+                          <td className={styles.num}>{parent === "" ? "root" : parent}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <p className={styles.emptyDir}>Nothing matches "{searchQuery}".</p>
+              )}
+              {searchResult?.truncated ? (
+                <p className={styles.moreNote}>
+                  The walk stopped at {searchResult.hits.length} matches after checking{" "}
+                  {searchResult.scanned} entries — refine the query to see the rest.
+                </p>
+              ) : null}
+            </div>
+          ) : (
           <div className={styles.tableCard}>
             <table className={styles.table}>
             <thead>
@@ -323,6 +543,29 @@ export function FilesView({ serverId }: { serverId: string }) {
                         <button
                           className={styles.rowButton}
                           disabled={busy}
+                          onClick={() => copyEntry(entry)}
+                        >
+                          copy
+                        </button>
+                        <button
+                          className={styles.rowButton}
+                          disabled={busy}
+                          onClick={() => moveEntry(entry)}
+                        >
+                          move
+                        </button>
+                        {entry.kind === "file" ? (
+                          <button
+                            className={styles.rowButton}
+                            disabled={busy}
+                            onClick={() => downloadEntry(entry)}
+                          >
+                            download
+                          </button>
+                        ) : null}
+                        <button
+                          className={styles.rowButton}
+                          disabled={busy}
                           onClick={() => {
                             if (window.confirm(`Delete ${path}? This cannot be undone.`)) {
                               act(() => deleteEntry(serverId, path), "delete failed");
@@ -346,6 +589,7 @@ export function FilesView({ serverId }: { serverId: string }) {
             </tbody>
             </table>
           </div>
+          )}
           {!loading && !deferred.done ? (
             <p className={styles.moreNote}>
               Showing {deferred.visible.length} of {deferred.total} — the rest render as the
