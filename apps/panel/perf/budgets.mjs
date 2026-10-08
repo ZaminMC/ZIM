@@ -12,8 +12,9 @@ import { fileURLToPath } from "node:url";
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
 // Budgets in gzip bytes. The entry holds React, zustand, the shell, the
-// dashboard and the workspace chrome; xterm lives in its own console
-// chunk; the modals split individually.
+// dashboard and the workspace chrome; the modals split individually. Since
+// ADR-0020 the console is the structured view — no terminal dependency —
+// so its chunk shrank to the shared feed engine.
 const BUDGETS = {
   entryJsGzip: 90 * 1024, // index-*.js — was 147 KB before the split
   anySingleJsGzip: 90 * 1024, // no chunk may quietly become the new monster

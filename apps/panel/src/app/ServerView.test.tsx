@@ -21,8 +21,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../state/wire", () => ({ client: {}, startWire: vi.fn() }));
-vi.mock("./Console", () => ({
-  Console: () => {
+vi.mock("./ConsoleView", () => ({
+  ConsoleView: () => {
     mocks.consoleRenders += 1;
     return <div data-testid="console-stub" />;
   },

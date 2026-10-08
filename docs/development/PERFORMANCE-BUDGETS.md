@@ -31,7 +31,7 @@
 | Interaction → next paint | < 100 ms; no layout shift from state changes |
 | Terminal input echo (round trip via daemon) | p99 < 50 ms |
 | UI under load | no dropped frames with a background server streaming 1k lines/s |
-| xterm.js scrollback | capped at 5k lines in view; full history belongs to the log viewer, not terminal memory |
+| Console view bounds | paged history by byte offset + the live buffer; full history belongs to the file (ADR-0006), the view renders the loaded window with `content-visibility` rows (ADR-0020) |
 | Stream delivery to webview | batched by the daemon's log pump — 10 ms flush tick with a 256-line cap (see Verifications); never one message per line under load |
 | Long-list first paint (files table, player roster) | ≤ 120 rows committed with the listing (`ui/deferred.ts` window); a 2,000-entry directory costs the same interaction latency as a 100-item one; the remainder lands over idle frames and never blocks interaction |
 
@@ -48,14 +48,18 @@ Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
 perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
 entry ≤ 90 KB, any single chunk ≤ 90 KB, total JS ≤ 184 KB, total CSS
 ≤ 14 KB. The cold-start payload was cut with code splitting: the entry
-chunk went from 147 KB to 68 KB gzip by moving xterm into a console-tab
-chunk (74 KB) and the three operator modals into their own chunks; the
-console loads when the tab first renders, not at boot. The ADR-0019
-raise (170 → 184 KB JS, 12 → 14 KB CSS) bought the three configuration
-surfaces — Startup, Network, Settings — as new lazy chunks (~6.5 KB JS
-gzip combined, ~1 KB CSS); the entry chunk was untouched by that slice
-(cold start → interactive stays the real budget), so the growth is
-features arriving, not the boot path regrowing. Boot progress is
+chunk went from 147 KB to 68 KB gzip by splitting the console and the
+three operator modals into their own chunks; the console loads when the
+tab first renders, not at boot. The ADR-0019 raise (170 → 184 KB JS,
+12 → 14 KB CSS) bought the three configuration surfaces — Startup,
+network, Settings — as new lazy chunks (~6.5 KB JS gzip combined, ~1 KB
+CSS); the entry chunk was untouched by that slice (cold start →
+interactive stays the real budget), so the growth is features arriving,
+not the boot path regrowing. ADR-0020 then removed xterm — the panel's
+heaviest dependency — by making the console the structured view; the
+console chunk collapsed to the shared feed engine and the budget lines
+stayed where ADR-0019 pinned them (a shrinking total is recorded, never
+banked as headroom for the next regression). Boot progress is
 measurable in the running app through the `panel:boot-start` →
 `panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
 recorded from browser smoke runs rather than guessed.

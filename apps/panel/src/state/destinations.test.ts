@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   NEW_TAB,
   SERVERS_TAB,
+  consoleTab,
   destinationUrl,
   hostHint,
   joinAddress,
@@ -196,5 +197,36 @@ describe("joinAddress", () => {
     expect(joinAddress(entry("alpha", { port: 25565 }), "box.example.com")).toBe(
       "box.example.com:25565",
     );
+  });
+});
+
+describe("console destinations (§27, ADR-0020)", () => {
+  it("derives one console tab per server", () => {
+    expect(tabKey({ kind: "console", serverId: "alpha" })).toBe("console:alpha");
+    expect(consoleTab("alpha")).toBe("console:alpha");
+  });
+
+  it("names the console tab with its internal URL", () => {
+    expect(destinationUrl({ kind: "console", serverId: "alpha" })).toBe(
+      "zaminpanel://console/alpha",
+    );
+    expect(restingAddress({ kind: "console", serverId: "alpha" }, [], "localhost")).toBe(
+      "zaminpanel://console/alpha",
+    );
+  });
+
+  it("parses the console URL from the address bar", () => {
+    expect(parseAddressInput("zaminpanel://console/alpha")).toEqual({
+      kind: "internal",
+      destination: { kind: "console", serverId: "alpha" },
+    });
+  });
+
+  it("answers an id-less console URL with the honest missing page", () => {
+    const request = parseAddressInput("zaminpanel://console");
+    expect(request).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "zaminpanel://console" },
+    });
   });
 });

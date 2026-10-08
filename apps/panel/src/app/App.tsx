@@ -13,6 +13,7 @@ import { bootWindow, tabDestination, tabKeyOf, useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
 import { ServerView } from "./ServerView";
+import { ConsoleView } from "./ConsoleView";
 import { FleetPage } from "./FleetPage";
 import { MissingPage } from "./browser/MissingPage";
 import { NewTabPage } from "./browser/NewTabPage";
@@ -52,6 +53,8 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <SettingsPage />;
     case "server":
       return <ServerView serverId={destination.serverId} />;
+    case "console":
+      return <ConsoleView serverId={destination.serverId} variant="dedicated" />;
     case "missing":
       return <MissingPage url={destination.url} />;
   }

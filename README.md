@@ -157,6 +157,25 @@ the copy says "the next time the server starts" and means it. Rooms the
 model does not have yet (icon, restart/crash policy, log retention) are
 stated as reserved, not faked (§82).
 
+## Console
+
+The console is the founder's §25–§30 made structural
+([ADR-0020](docs/adr/0020-console-slice.md)). Output renders as typed rows
+over the same file-backed feed engine as the log viewer — one machinery,
+never a second log system. The §29 filter row (Show all | Info | Warnings
+| Errors, plus Debug) is a view over an intact buffer: switching filters
+never destroys the stream. The §28 copy control is one button — left-click
+copies the selected mode (All errors / All warnings / All) from the loaded
+view, right-click changes the mode in a contextual menu, and the tint
+answers the mode (red / yellow / default); an empty mode says so instead of
+pretending. The §26 composer sends over the ordinary stdin path, disabled
+honestly while the server is not running. And §27's icon hands the console
+a dedicated tab — `zaminpanel://console/<id>`, one per server, full height,
+every tab operator (duplicate, pin, group, drag, move to window) working on
+it unchanged. The terminal emulator is gone: the heaviest dependency in the
+panel was the wrong shape for a filterable, copyable console, and the file
+was always the unbounded memory (§30) the scrollback cap could never be.
+
 ## Players
 
 The Players tab asks the server itself — Server List Ping plus the log's
@@ -243,7 +262,7 @@ integration harnesses find their binaries.
 
 - [Architecture review](docs/architecture/ARCHITECTURE-REVIEW.md) — decisions and implementation order (§23)
 - [Protocol v0](docs/architecture/protocol-v0.md) — the client boundary
-- [ADRs](docs/adr/) — accepted decisions 0001–0017
+- [ADRs](docs/adr/) — accepted decisions 0001–0020
 - [Style guide](docs/development/STYLE-GUIDE.md) · [Testing](docs/development/TESTING.md) · [Glossary](docs/development/GLOSSARY.md)
 
 ## Install (Phase 7)

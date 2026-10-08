@@ -109,6 +109,14 @@ The sampler is the only source of performance numbers; the panel never invents o
 - `metrics.range` serves the ring chronologically, trims to the newest `maxSamples`, and answers typed `SERVER_NOT_FOUND` for an unknown server — all end-to-end over the wire while a fake server runs.
 - Panel: the metrics store dedupes ring replay vs. live ticks by timestamp, caps the window, seeds range history under live data · header chips subscribe to the metrics store alone (a 1 Hz flood re-renders two chips, never the console — render-count assertion) · stale samples never display once the server leaves a live state.
 
+## Console (required coverage)
+
+The founder's §26–§30 over the structured console (ADR-0020). Required, at three layers:
+
+- Destinations (`src/state/destinations.test.ts`): the `console:<id>` tab key (one console tab per server, §61) · the `zaminpanel://console/<id>` URL as the resting address (an internal page, never the join address) · the address bar parses the console URL and answers an id-less `zaminpanel://console` with the honest missing page · `sanitizeDestination` accepts the console kind and refuses torn payloads.
+- Console view (`src/app/ConsoleView.test.tsx`): the §29 filter round trip — filtering hides, switching back restores, the buffer is never touched; the empty filter states "the stream itself is untouched" · the §28 copy control: All copies the loaded view, the right-click contextual menu changes the mode (no modal), the button re-labels per mode, an empty mode reports "no error lines in the loaded view" instead of pretending, and copied lines format as `[level] [thread] message` · the §26 composer: send clears the input, the disabled + honest note while the server is not running, a stdin rejection surfaces · §27: the open-in-new-tab icon fires exactly where provided and is absent on the dedicated tab.
+- Shared engine (`src/app/LogViewer.test.tsx`, unchanged): the feed extraction keeps the seam, paging, and live-join behavior green — the console and the log viewer play identical rules, so the log viewer's suite is the regression fence around the console's machinery.
+
 ## Performance budgets (required coverage)
 
 The budgets in [PERFORMANCE-BUDGETS.md](PERFORMANCE-BUDGETS.md) are tests in

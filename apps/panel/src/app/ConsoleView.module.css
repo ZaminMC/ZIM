@@ -1,0 +1,290 @@
+/* The structured console (ADR-0020). The bar carries the §28 copy control
+ * and the §27 open-in-new-tab icon; the chips row is §29; the composer is
+ * §26. Rows are cheap DOM nodes made cheap to render with
+ * content-visibility (§30) — the same discipline as the log viewer. */
+
+.console {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-s);
+  min-height: 440px;
+  overflow: hidden;
+}
+
+.dedicated {
+  min-height: 0;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  font-size: var(--text-s);
+}
+
+.barLabel {
+  color: var(--text-faint);
+}
+
+.barNote {
+  color: var(--text-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.copyNote {
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.copyWrap {
+  position: relative;
+}
+
+.copyButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--radius-s);
+  padding: 3px 10px;
+  font-size: var(--text-s);
+  cursor: copy;
+}
+
+.copyButton:hover {
+  background: var(--surface-3);
+}
+
+/* §28: the button's tint answers the selected mode. */
+.copyErrors {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.copyWarnings {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.copyMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  box-shadow: var(--shadow-m);
+}
+
+.copyMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 5px 10px;
+  border-radius: var(--radius-s);
+  font-size: var(--text-s);
+  cursor: pointer;
+}
+
+.copyMenuItem:hover {
+  background: var(--surface-3);
+}
+
+.check {
+  color: var(--accent);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-s);
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.chips {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 2px 12px;
+  font-size: var(--text-s);
+  cursor: pointer;
+}
+
+.chip:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.chipActive {
+  background: var(--surface-3);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+}
+
+.row {
+  display: flex;
+  gap: var(--space-2);
+  padding: 1px var(--space-3);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 20px;
+}
+
+.level {
+  flex: 0 0 auto;
+  width: 5ch;
+  color: var(--text-faint);
+}
+
+.levelWarn {
+  color: var(--warning);
+}
+
+.levelError {
+  color: var(--danger);
+}
+
+.levelDebug {
+  color: var(--accent);
+}
+
+.thread {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.seam,
+.startOfLog {
+  margin: var(--space-1) var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-s);
+}
+
+.loadOlder {
+  margin: var(--space-2) var(--space-3);
+}
+
+.errorNote {
+  margin: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.empty {
+  margin: var(--space-3);
+  color: var(--text-faint);
+}
+
+.jump {
+  margin: 0 var(--space-3) var(--space-2);
+  align-self: flex-start;
+  border: 1px solid var(--accent);
+  background: var(--surface-3);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: var(--text-s);
+  cursor: pointer;
+}
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+.command {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+}
+
+.command:disabled {
+  opacity: 0.55;
+}
+
+.stdinNote {
+  color: var(--danger);
+  font-size: var(--text-s);
+}

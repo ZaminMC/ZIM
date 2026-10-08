@@ -10,6 +10,7 @@ import { describeError, LIFECYCLE_VERBS } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
 import type { ServerState } from "../protocol/types";
 import { useServers } from "../state/servers";
+import { useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
 import {
   ensureMetrics,
@@ -35,6 +36,7 @@ import {
   IconTerminal,
 } from "../ui/icons";
 import { CrashCard } from "./CrashCard";
+import { ConsoleView } from "./ConsoleView";
 import { FilesView } from "./FilesView";
 import { LogViewer } from "./LogViewer";
 import { MetricsView } from "./MetricsView";
@@ -45,13 +47,10 @@ import { SchedulesView } from "./SchedulesView";
 import { BackupsView } from "./BackupsView";
 import styles from "./ServerView.module.css";
 
-// xterm (+ addons) is the panel's heaviest dependency and only the console
-// tab needs it: it loads when the tab first renders, so the cold start
-// ships without it (PERFORMANCE-BUDGETS: cold start → interactive).
-const Console = lazy(() => import("./Console").then((m) => ({ default: m.Console })));
-
-// The three configuration surfaces (§37–39, ADR-0019) lazy-load the same
-// way: the workspace chrome must not pay for forms a tab may never open.
+// The three configuration surfaces (§37–39, ADR-0019) lazy-load: the
+// workspace chrome must not pay for forms a tab may never open. The
+// console needs no lazy load since ADR-0020 — it is the structured view,
+// with no heavy terminal dependency behind it.
 const NetworkView = lazy(() =>
   import("./NetworkView").then((m) => ({ default: m.NetworkView })),
 );
@@ -308,7 +307,12 @@ export function ServerView({ serverId }: { serverId: string }) {
       <div className={styles.panel}>
         <Suspense fallback={<div className={styles.lazyLoad} aria-busy="true" />}>
           {lowerView === "console" ? (
-            <Console serverId={serverId} running={server.state === "running"} />
+            <ConsoleView
+              serverId={serverId}
+              onOpenInNewTab={() =>
+                useTabs.getState().navigate({ kind: "console", serverId })
+              }
+            />
           ) : lowerView === "metrics" ? (
             <MetricsView serverId={serverId} />
           ) : lowerView === "logs" ? (

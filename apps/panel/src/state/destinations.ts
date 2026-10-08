@@ -22,6 +22,12 @@ export interface ServerDestination {
   kind: "server";
   serverId: string;
 }
+/** §27's dedicated console tab: one per server (§61 identity), the console
+ *  optimized for large output — full height, same engine, its own tab. */
+export interface ConsoleDestination {
+  kind: "console";
+  serverId: string;
+}
 export interface SettingsDestination {
   kind: "settings";
 }
@@ -39,6 +45,7 @@ export type Destination =
   | ServersDestination
   | NewTabDestination
   | ServerDestination
+  | ConsoleDestination
   | SettingsDestination
   | MissingPageDestination;
 
@@ -50,6 +57,7 @@ export const SERVERS_TAB: TabKey = "servers";
 export const NEW_TAB: TabKey = "new";
 export const SETTINGS_TAB: TabKey = "settings";
 export const serverTab = (serverId: string): TabKey => `server:${serverId}`;
+export const consoleTab = (serverId: string): TabKey => `console:${serverId}`;
 
 export function tabKey(destination: Destination): TabKey {
   switch (destination.kind) {
@@ -61,6 +69,8 @@ export function tabKey(destination: Destination): TabKey {
       return SETTINGS_TAB;
     case "server":
       return serverTab(destination.serverId);
+    case "console":
+      return consoleTab(destination.serverId);
     case "missing":
       return `missing:${destination.url}`;
   }
@@ -77,6 +87,8 @@ export function destinationUrl(destination: Destination): string {
       return "zaminpanel://settings/";
     case "server":
       return `zaminpanel://server/${destination.serverId}`;
+    case "console":
+      return `zaminpanel://console/${destination.serverId}`;
     case "missing":
       return destination.url;
   }
@@ -94,6 +106,11 @@ export function restingAddress(
   if (destination.kind === "servers") return destinationUrl(destination);
   if (destination.kind === "new") return "";
   if (destination.kind === "settings" || destination.kind === "missing") {
+    return destinationUrl(destination);
+  }
+  if (destination.kind === "console") {
+    // The console tab rests at its internal URL: it is a ZaminPanel page,
+    // not the server's join address (that stays the server tab's rest).
     return destinationUrl(destination);
   }
   const entry = entries.find((e) => e.serverId === destination.serverId);
@@ -144,6 +161,9 @@ export function parseAddressInput(text: string): AddressRequest {
     if (page === "settings") return { kind: "internal", destination: { kind: "settings" } };
     if (page === "server" && internal[2]) {
       return { kind: "internal", destination: { kind: "server", serverId: internal[2] } };
+    }
+    if (page === "console" && internal[2]) {
+      return { kind: "internal", destination: { kind: "console", serverId: internal[2] } };
     }
     // An unknown internal page is a real destination request the shell
     // answers honestly (no such page) — not silently a web search.

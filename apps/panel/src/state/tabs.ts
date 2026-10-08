@@ -310,6 +310,10 @@ function sanitizeDestination(value: unknown): Destination | null {
       return typeof v.serverId === "string" && v.serverId !== ""
         ? { kind: "server", serverId: v.serverId }
         : null;
+    case "console":
+      return typeof v.serverId === "string" && v.serverId !== ""
+        ? { kind: "console", serverId: v.serverId }
+        : null;
     case "missing":
       return typeof v.url === "string" && v.url !== "" ? { kind: "missing", url: v.url } : null;
     default:

@@ -29,6 +29,7 @@ import {
   IconPlus,
   IconSearch,
   IconServer,
+  IconTerminal,
 } from "../../ui/icons";
 import styles from "./TabStrip.module.css";
 
@@ -43,6 +44,10 @@ function tabTitle(tab: Tab, entries: ServerEntry[]): string {
       return "Settings";
     case "server":
       return entries.find((e) => e.serverId === dest.serverId)?.displayName ?? dest.serverId;
+    case "console": {
+      const name = entries.find((e) => e.serverId === dest.serverId)?.displayName ?? dest.serverId;
+      return `${name} console`;
+    }
     case "missing":
       return dest.url;
   }
@@ -61,6 +66,8 @@ function TabIcon({ tab, entries }: { tab: Tab; entries: ServerEntry[] }) {
       const entry = entries.find((e) => e.serverId === dest.serverId);
       return entry ? <StatusDot state={entry.state} /> : <IconServer size={13} />;
     }
+    case "console":
+      return <IconTerminal size={13} />;
     case "missing":
       return <IconBolt size={13} />;
   }

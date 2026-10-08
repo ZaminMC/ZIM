@@ -232,3 +232,22 @@ export function IconRocket(p: IconProps) {
     </svg>
   );
 }
+
+export function IconCopy(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+    </svg>
+  );
+}
+
+export function IconOpenInNew(p: IconProps) {
+  return (
+    <svg {...base(p.size, p.className, p.style)}>
+      <path d="M14 4h6v6" />
+      <path d="M20 4 11 13" />
+      <path d="M18 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4.5" />
+    </svg>
+  );
+}
