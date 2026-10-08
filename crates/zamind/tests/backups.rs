@@ -85,7 +85,7 @@ fn remaining_or_deadline(deadline: std::time::Instant) -> Duration {
 #[tokio::test]
 async fn backup_create_list_restore_roundtrip() {
     let dir = scoped_dir("backups-roundtrip");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;
@@ -182,7 +182,7 @@ async fn backup_create_list_restore_roundtrip() {
 #[tokio::test]
 async fn restore_is_refused_while_running() {
     let dir = scoped_dir("backups-restore-running");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;
@@ -301,7 +301,7 @@ async fn restore_is_refused_while_running() {
 #[tokio::test]
 async fn retention_prunes_to_configured_keep() {
     let dir = scoped_dir("backups-retention");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;
@@ -344,7 +344,7 @@ async fn retention_prunes_to_configured_keep() {
 #[tokio::test]
 async fn unknown_job_and_restore_target_are_typed_errors() {
     let dir = scoped_dir("backups-typed-errors");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;

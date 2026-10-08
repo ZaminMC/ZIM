@@ -215,6 +215,23 @@ pub fn spawn_daemon_with(
     TestServer { child }
 }
 
+/// The platform-correct endpoint for a test data dir: a socket path on
+/// unix; on Windows the same string rides as the pipe NAME — the spawn
+/// passes it through --endpoint verbatim (from_daemon_arg makes it a
+/// WindowsPipe there), so the client must dial the same name, not a
+/// UnixSocket the platform layer would refuse.
+pub fn endpoint_for(data_dir: &std::path::Path) -> zamin_ipc::Endpoint {
+    let sock = data_dir.join("d.sock");
+    #[cfg(windows)]
+    {
+        zamin_ipc::Endpoint::WindowsPipe(sock.to_string_lossy().into_owned())
+    }
+    #[cfg(unix)]
+    {
+        zamin_ipc::Endpoint::UnixSocket(sock)
+    }
+}
+
 /// Connect with retry (the daemon needs a moment to bind) and say hello.
 pub async fn connect_daemon(endpoint: &zamin_ipc::Endpoint) -> Client {
     let deadline = Instant::now() + Duration::from_secs(10);
