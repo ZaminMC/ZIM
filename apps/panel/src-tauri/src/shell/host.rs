@@ -274,7 +274,8 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         return Ok(()); // window gone mid-sync; nothing to lay out
     };
     let size = host_window
-        .inner_size()?
+        .inner_size()
+        .map_err(|e| e.to_string())?
         .to_logical(host_window.scale_factor().unwrap_or(1.0));
 
     let (snap, header, create_tab) = {
