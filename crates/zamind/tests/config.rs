@@ -18,7 +18,7 @@ use common::{connect_daemon, make_server_root, register_server, scoped_dir, spaw
 #[tokio::test]
 async fn config_get_defaults_and_provenance() {
     let dir = scoped_dir("config-get");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;
@@ -53,7 +53,7 @@ async fn config_get_defaults_and_provenance() {
 #[tokio::test]
 async fn config_set_tri_state_patch_layering_and_clearing() {
     let dir = scoped_dir("config-set");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
 
     // A global default the per-server file can override and clear. The
@@ -188,7 +188,7 @@ async fn config_set_tri_state_patch_layering_and_clearing() {
 #[tokio::test]
 async fn network_status_probe_properties_and_conflicts() {
     let dir = scoped_dir("network-status");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;

@@ -49,7 +49,7 @@ async fn list_schedules(client: &mut Client, server_id: &str) -> Value {
 #[tokio::test]
 async fn schedules_crud_validation_and_not_found() {
     let dir = scoped_dir("schedules-crud");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;
@@ -247,7 +247,7 @@ async fn schedules_crud_validation_and_not_found() {
 #[tokio::test]
 async fn the_clock_fires_due_schedules_and_skips_disabled() {
     let dir = scoped_dir("schedules-fire");
-    let endpoint = zamin_ipc::Endpoint::UnixSocket(dir.join("d.sock"));
+    let endpoint = common::endpoint_for(&dir);
     let data_dir = dir.join("data");
     let _daemon = spawn_daemon(&data_dir, &endpoint);
     let mut client = connect_daemon(&endpoint).await;
