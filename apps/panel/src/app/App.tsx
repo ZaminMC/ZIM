@@ -9,6 +9,7 @@
 import { Suspense, lazy, useEffect, useMemo } from "react";
 import type { Destination } from "../state/destinations";
 import { sortedServers, useServers } from "../state/servers";
+import { useBookmarks } from "../state/bookmarks";
 import { bootWindow, tabDestination, tabKeyOf, useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
@@ -16,6 +17,7 @@ import { ServerView } from "./ServerView";
 import { ConsoleView } from "./ConsoleView";
 import { FleetPage } from "./FleetPage";
 import { MissingPage } from "./browser/MissingPage";
+import { BookmarksBar } from "./browser/BookmarksBar";
 import { NewTabPage } from "./browser/NewTabPage";
 import { SettingsPage } from "./browser/SettingsPage";
 import { TabBoundary } from "./browser/TabCrash";
@@ -96,6 +98,12 @@ export function App() {
         setPaletteOpen(!useUi.getState().paletteOpen);
         return;
       }
+      if (mod && event.shiftKey && event.key.toLowerCase() === "b") {
+        // §55: the bookmark bar toggles like a browser's.
+        event.preventDefault();
+        useBookmarks.getState().toggleBar();
+        return;
+      }
       if (mod && event.key.toLowerCase() === "t") {
         event.preventDefault();
         if (event.shiftKey) {
@@ -164,6 +172,7 @@ export function App() {
     <div className={styles.shell}>
       <TabStrip />
       <ToolBar />
+      <BookmarksBar />
       <main className={styles.content} key={contentKey}>
         <TabBoundary>
           <DestinationView destination={destination} />

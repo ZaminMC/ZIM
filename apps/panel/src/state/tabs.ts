@@ -188,6 +188,10 @@ interface TabsState {
 
   navigate: (destination: Destination) => void;
   newTab: (query?: string) => void;
+  /** §55: open a bookmark in a NEW tab — an explicit request, so the
+   *  resting new-tab page is not reused; the destination travels with a
+   *  fresh view while the singleton rule stays a NAVIGATE-only rule. */
+  openInNewTab: (destination: Destination) => void;
   back: () => void;
   forward: () => void;
   reload: () => void;
@@ -416,6 +420,15 @@ export const useTabs = create<TabsState>()(
             tabs: [...state.tabs, fresh],
             activeId: fresh.id,
             discoveryQuery: query ?? null,
+          };
+        }),
+
+      openInNewTab: (destination) =>
+        set((state) => {
+          const fresh = freshTab(destination);
+          return {
+            tabs: [...state.tabs, fresh],
+            activeId: fresh.id,
           };
         }),
 

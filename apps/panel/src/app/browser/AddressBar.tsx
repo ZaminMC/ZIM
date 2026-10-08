@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  destinationLabel,
   destinationUrl,
   joinAddress,
   parseAddressInput,
@@ -16,6 +17,7 @@ import {
   type Destination,
 } from "../../state/destinations";
 import type { ServerEntry } from "../../state/servers";
+import { isBookmarked, useBookmarks } from "../../state/bookmarks";
 import { commitAddress } from "./commitAddress";
 import styles from "./AddressBar.module.css";
 
@@ -137,6 +139,16 @@ export function AddressBar({
     [editing, draft, entries, host],
   );
 
+  // The star (§55): the current destination's bookmark toggle. A new-tab
+  // page is a room, not a destination worth keeping — no star there.
+  const items = useBookmarks((s) => s.items);
+  const marked = isBookmarked(items, destination);
+  const toggleBookmark = () => {
+    const store = useBookmarks.getState();
+    if (marked) store.removeDestination(destination);
+    else store.add(destination, destinationLabel(destination, entries));
+  };
+
   const commit = (text: string) => {
     const outcome = commitAddress(text, entries, host);
     if (outcome.kind === "join-miss") {
@@ -175,25 +187,39 @@ export function AddressBar({
 
   return (
     <div className={styles.wrap}>
-      <input
-        ref={inputRef}
-        className={`${styles.input} ${editing ? styles.editing : ""}`}
-        value={value}
-        placeholder="Search servers, a join address, or a zaminpanel:// page"
-        aria-label="Address bar"
-        spellCheck={false}
-        autoComplete="off"
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setSelected(0);
-          setMissPort(null);
-        }}
-        onFocus={(e) => {
-          setDraft(resting);
-          requestAnimationFrame(() => e.target.select());
-        }}
-        onKeyDown={onKeyDown}
-      />
+      <div className={styles.fieldRow}>
+        <input
+          ref={inputRef}
+          className={`${styles.input} ${editing ? styles.editing : ""}`}
+          value={value}
+          placeholder="Search servers, a join address, or a zaminpanel:// page"
+          aria-label="Address bar"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSelected(0);
+            setMissPort(null);
+          }}
+          onFocus={(e) => {
+            setDraft(resting);
+            requestAnimationFrame(() => e.target.select());
+          }}
+          onKeyDown={onKeyDown}
+        />
+        {destination.kind !== "new" ? (
+          <button
+            type="button"
+            className={`${styles.star} ${marked ? styles.starMarked : ""}`}
+            aria-pressed={marked}
+            aria-label={marked ? "Remove bookmark" : "Bookmark this page"}
+            title={marked ? "Remove bookmark" : "Bookmark this page"}
+            onClick={toggleBookmark}
+          >
+            {marked ? "\u2605" : "\u2606"}
+          </button>
+        ) : null}
+      </div>
       {missPort !== null ? (
         <div className={styles.missNote} role="status">
           Nothing registered on :{missPort}

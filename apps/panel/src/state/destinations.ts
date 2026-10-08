@@ -219,6 +219,29 @@ export function resolveJoin(
   return exact ?? null;
 }
 
+/** The human label a destination deserves — the bookmark star's default
+ *  name and the bookmark bar's fallback chip text. A server keeps its
+ *  display name (identity preserved, §61); internal pages keep their
+ *  page names. */
+export function destinationLabel(destination: Destination, entries: ServerEntry[]): string {
+  const name = (serverId: string): string =>
+    entries.find((entry) => entry.serverId === serverId)?.displayName ?? serverId;
+  switch (destination.kind) {
+    case "server":
+      return name(destination.serverId);
+    case "console":
+      return `${name(destination.serverId)} console`;
+    case "servers":
+      return "Servers";
+    case "settings":
+      return "Settings";
+    case "new":
+      return "New tab";
+    case "missing":
+      return destination.url;
+  }
+}
+
 /** Discovery (§22, deterministic form): the registry answers the query
  *  with its rows — name or id containing the text, case-insensitive. */
 export function searchServers(text: string, entries: ServerEntry[]): ServerEntry[] {

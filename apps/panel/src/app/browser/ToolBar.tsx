@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useConnection } from "../../state/connection";
+import { useBookmarks } from "../../state/bookmarks";
 import { activeProfile, useConnections } from "../../state/connections";
 import { hostHint } from "../../state/destinations";
 import { sortedServers, useServers } from "../../state/servers";
@@ -25,6 +26,8 @@ export function ToolBar() {
   const setConnectionsOpen = useUi((s) => s.setConnectionsOpen);
   const remotes = useConnections((s) => s.remotes);
   const activeId = useConnections((s) => s.activeId);
+  const bookmarksBarVisible = useBookmarks((s) => s.barVisible);
+  const toggleBookmarksBar = useBookmarks((s) => s.toggleBar);
   const status = useConnection((s) => s.status);
   const daemon = useConnection((s) => s.daemon);
   const lastError = useConnection((s) => s.lastError);
@@ -148,6 +151,17 @@ export function ToolBar() {
               }}
             >
               Command palette <span className={styles.kbd}>Ctrl K</span>
+            </button>
+            <button
+              role="menuitemcheckbox"
+              aria-checked={bookmarksBarVisible}
+              className={styles.menuItem}
+              onClick={() => {
+                setMenuOpen(false);
+                toggleBookmarksBar();
+              }}
+            >
+              Bookmarks bar <span className={styles.kbd}>Ctrl Shift B</span>
             </button>
             <button
               role="menuitem"

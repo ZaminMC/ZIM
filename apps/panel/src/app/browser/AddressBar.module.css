@@ -94,3 +94,42 @@
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fieldRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.star {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.star:hover {
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.star:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.starMarked {
+  color: #e0b341;
+}
