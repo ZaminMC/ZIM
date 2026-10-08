@@ -11,6 +11,7 @@ import type { Destination } from "../state/destinations";
 import { sortedServers, useServers } from "../state/servers";
 import { useBookmarks } from "../state/bookmarks";
 import { bootWindow, tabDestination, tabKeyOf, useTabs } from "../state/tabs";
+import { startUpdates } from "../state/updates";
 import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
 import { ServerView } from "./ServerView";
@@ -23,6 +24,7 @@ import { SettingsPage } from "./browser/SettingsPage";
 import { TabBoundary } from "./browser/TabCrash";
 import { TabStrip } from "./browser/TabStrip";
 import { ToolBar } from "./browser/ToolBar";
+import { UpdateNotice } from "./browser/UpdateNotice";
 import styles from "./App.module.css";
 
 // Modals are operator-invoked overlays, not boot surfaces: each loads on
@@ -66,9 +68,11 @@ export function App() {
   useEffect(() => {
     // Window housekeeping (ADR-0018) before the wire: the registry touch,
     // the prune of idle windows, and the one persist write that pins this
-    // window's strip under its own key.
+    // window's strip under its own key. The update lane boots beside it
+    // (ADR-0024) — its cadence is its own; nothing here awaits it.
     bootWindow();
     startWire();
+    void startUpdates();
   }, []);
 
   const tabs = useTabs((s) => s.tabs);
@@ -173,6 +177,7 @@ export function App() {
       <TabStrip />
       <ToolBar />
       <BookmarksBar />
+      <UpdateNotice />
       <main className={styles.content} key={contentKey}>
         <TabBoundary>
           <DestinationView destination={destination} />

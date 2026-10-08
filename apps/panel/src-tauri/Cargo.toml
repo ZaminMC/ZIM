@@ -30,6 +30,14 @@ tracing = "0.1"
 # the taxonomy, this plugin performs the OS call.
 tauri-plugin-notification = "2"
 
+# The development channel's update lane (ADR-0024): the updater checks the
+# public releases repo's latest.json, verifies the minisign signature, and
+# swaps the bundle; the process plugin performs the final relaunch. The
+# webview owns every decision — when to check, what "automatic" means —
+# the plugins only perform the OS calls.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
 # Login autostart (HKCU Run key) — the Windows half of the §12.1 seam.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

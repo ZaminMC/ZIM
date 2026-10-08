@@ -195,6 +195,10 @@ async fn autostart_set(enabled: bool) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        // The update lane (ADR-0024): the webview drives check/install/relaunch
+        // through these plugins; the host adds no policy of its own.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(HostState::default())
         .invoke_handler(tauri::generate_handler![
             daemon_connect,

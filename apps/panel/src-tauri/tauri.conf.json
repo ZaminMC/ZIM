@@ -27,6 +27,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "appimage"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,6 +43,14 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwRThCMDFCNDVBOEQ1NjUKUldSbDFhaEZHN0Rva0JBNGsvUEh6ckttVkh0cTJtT2t3b25xN0hpSU5OUDdDTVQ2NUlvaWQvZDQK",
+      "endpoints": [
+        "https://github.com/ZaminMC/ZaminPanel-Releases/releases/download/dev/latest.json"
+      ]
     }
   }
 }

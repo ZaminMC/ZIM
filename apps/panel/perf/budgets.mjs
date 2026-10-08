@@ -16,8 +16,13 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 // ADR-0020 the console is the structured view — no terminal dependency —
 // so its chunk shrank to the shared feed engine.
 const BUDGETS = {
-  entryJsGzip: 90 * 1024, // index-*.js — was 147 KB before the split
-  anySingleJsGzip: 90 * 1024, // no chunk may quietly become the new monster
+  // 90 → 96 KB at ADR-0024: the update lane joins the boot chrome (the
+  // store + notice + the Settings updates rows ride the entry by design —
+  // the boot check is the lane's first duty). The desktop plugin APIs
+  // themselves split into lazy chunks, so the growth is the decisions,
+  // not the OS calls.
+  entryJsGzip: 96 * 1024, // index-*.js — was 147 KB before the split
+  anySingleJsGzip: 96 * 1024, // no chunk may quietly become the new monster
   // 170 → 184 KB at ADR-0019: the three configuration surfaces (Startup,
   // Network, Settings) lazy-load into their own chunks (~6.5 KB gzip
   // combined), so the entry and the cold start are untouched; the total

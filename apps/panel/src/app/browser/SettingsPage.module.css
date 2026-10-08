@@ -87,6 +87,21 @@
   font-size: var(--text-s);
 }
 
+.rowActions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.channelLink {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.channelLink:hover {
+  text-decoration: underline;
+}
+
 .reserved {
   margin: 0;
   padding: 0;
