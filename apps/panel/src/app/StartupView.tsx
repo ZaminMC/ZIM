@@ -9,6 +9,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getServerConfig, setServerConfig } from "../state/actions";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import type { ConfigGetResult, ServerSettingsPatch } from "../protocol/types";
 import { Button } from "../ui/Button";
 import { FieldRow, Rows } from "./configFields";
@@ -54,7 +56,7 @@ function adoptFrom(result: ConfigGetResult): { drafts: Record<string, Draft>; ba
 
 export function StartupView({ serverId }: { serverId: string }) {
   const [view, setView] = useState<ConfigGetResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -69,7 +71,7 @@ export function StartupView({ serverId }: { serverId: string }) {
         setDrafts(adopted.drafts);
         setBaseline(adopted.baseline);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title));
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, [serverId]);
 
   useEffect(() => {
@@ -159,10 +161,10 @@ export function StartupView({ serverId }: { serverId: string }) {
           setDrafts(adopted.drafts);
           setBaseline(adopted.baseline);
         })
-        .catch((cause: unknown) => setError(describeError(cause).title))
+        .catch((cause: unknown) => setError(describeError(cause)))
         .finally(() => setBusy(false));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError({ title: cause instanceof Error ? cause.message : String(cause), remediation: [] });
     }
   };
 
@@ -170,8 +172,8 @@ export function StartupView({ serverId }: { serverId: string }) {
     return (
       <section className={styles.startup} aria-label="Startup">
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       </section>
     );
   }
@@ -208,8 +210,8 @@ export function StartupView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       ) : null}
       {notice && !error ? (
         <div className={styles.notice} role="status">

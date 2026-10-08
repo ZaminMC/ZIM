@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { createBackup, listBackups, restoreBackup } from "../state/actions";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import { useJobs } from "../state/jobs";
 import type { BackupInfo } from "../protocol/types";
 import { Button } from "../ui/Button";
@@ -24,7 +26,7 @@ function formatBytes(bytes: number): string {
 
 export function BackupsView({ serverId, running }: { serverId: string; running: boolean }) {
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function BackupsView({ serverId, running }: { serverId: string; running: 
         setBackups(result.backups);
         setError(null);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title));
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, [serverId]);
 
   useEffect(() => {
@@ -83,7 +85,7 @@ export function BackupsView({ serverId, running }: { serverId: string; running: 
     setNotice(null);
     void createBackup(serverId)
       .then(() => setNotice("Backup started — progress shows below."))
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -94,7 +96,7 @@ export function BackupsView({ serverId, running }: { serverId: string; running: 
     setConfirming(null);
     void restoreBackup(serverId, backupId)
       .then(() => setNotice("Restore started — the server must stay stopped."))
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -140,8 +142,8 @@ export function BackupsView({ serverId, running }: { serverId: string; running: 
 
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       ) : null}
       {notice && !error ? (
         <div className={styles.notice} role="status">

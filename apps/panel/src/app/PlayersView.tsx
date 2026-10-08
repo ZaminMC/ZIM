@@ -10,6 +10,8 @@ import { useCallback, useEffect, useState } from "react";
 import { listPlayers, sendStdin } from "../state/actions";
 import type { PlayerSample, PlayersListResult } from "../protocol/types";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import {
   MODERATION_VERBS,
   moderationLine,
@@ -36,7 +38,7 @@ export function PlayersView({
   running: boolean;
 }) {
   const [result, setResult] = useState<PlayersListResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [loading, setLoading] = useState(true);
   // The selected name (pills are buttons; keyboard selection is free).
   const [selected, setSelected] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export function PlayersView({
         setError(null);
       })
       .catch((cause: unknown) => {
-        setError(describeError(cause).title);
+        setError(describeError(cause));
       })
       .finally(() => setLoading(false));
   }, [serverId]);
@@ -137,8 +139,8 @@ export function PlayersView({
       ) : null}
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       ) : null}
 
       {result && result.roster && result.roster.length > 0 ? (

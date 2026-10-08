@@ -12,6 +12,8 @@ import {
   updateSchedule,
 } from "../state/actions";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import type { ScheduleAction, ScheduleSpec, ScheduleView } from "../protocol/types";
 import { Button } from "../ui/Button";
 import styles from "./SchedulesView.module.css";
@@ -57,7 +59,7 @@ type SpecDraft = { kind: "interval"; everySecs: number } | { kind: "daily"; at: 
 
 export function SchedulesView({ serverId }: { serverId: string }) {
   const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -78,7 +80,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
         setSchedules(result.schedules);
         setError(null);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title));
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, [serverId]);
 
   useEffect(() => {
@@ -118,7 +120,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
     setNotice(null);
     const built = draft();
     if (typeof built === "string") {
-      setError(built);
+      setError({ title: built, remediation: [] });
       return;
     }
     setBusy(true);
@@ -128,7 +130,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
         setAdding(false);
         setName("");
       })
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -144,7 +146,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
             : "Schedule paused — nothing fires until you resume it.",
         ),
       )
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -155,7 +157,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
     setBusy(true);
     void deleteSchedule(serverId, scheduleId)
       .then(() => setNotice("Schedule removed."))
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -183,8 +185,8 @@ export function SchedulesView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       ) : null}
       {notice && !error ? (
         <div className={styles.notice} role="status">

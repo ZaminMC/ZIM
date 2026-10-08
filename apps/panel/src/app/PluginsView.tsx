@@ -18,6 +18,8 @@ import type {
   PluginsUpdatesResult,
 } from "../protocol/types";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import { runningJob, useJobs } from "../state/jobs";
 import { formatBytes } from "../state/metrics";
 import { Button } from "../ui/Button";
@@ -34,7 +36,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
   // list to keep in sync.
   const [updates, setUpdates] = useState<PluginsUpdatesResult | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [installingProject, setInstallingProject] = useState<string | null>(null);
   // The typed update rule (ADR-0012): PLUGIN_EXISTS offers the explicit
   // overwrite — the operator's decision, surfaced once, never silently.
@@ -51,7 +53,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
   const refreshInstalled = useCallback(() => {
     void pluginsInstalled(serverId)
       .then(setInstalled)
-      .catch((cause: unknown) => setError(describeError(cause).title));
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, [serverId]);
 
   useEffect(() => {
@@ -72,7 +74,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
         updatesLoaded.current = true;
         setUpdates(report);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setCheckingUpdates(false));
   }, [serverId]);
 
@@ -106,7 +108,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
       setError(null);
       void pluginsSearch(serverId, query)
         .then(setResult)
-        .catch((cause: unknown) => setError(describeError(cause).title))
+        .catch((cause: unknown) => setError(describeError(cause)))
         .finally(() => setSearching(false));
     },
     [serverId],
@@ -130,7 +132,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
               file: typeof file === "string" ? file : "a file by this name",
             });
           } else {
-            setError(described.title);
+            setError(described);
           }
           setInstallingProject(null);
         });
@@ -144,7 +146,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
       setError(null);
       void pluginsDelete(serverId, fileName)
         .then(refreshInstalled)
-        .catch((cause: unknown) => setError(describeError(cause).title));
+        .catch((cause: unknown) => setError(describeError(cause)));
     },
     [serverId, refreshInstalled],
   );
@@ -229,8 +231,8 @@ export function PluginsView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       ) : null}
 
       {result ? (

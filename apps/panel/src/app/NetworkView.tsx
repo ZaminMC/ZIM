@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getNetworkStatus, getServerConfig, setServerConfig } from "../state/actions";
 import { describeError } from "../state/errors";
+import type { DescribedError } from "../state/errors";
+import { ErrorNote } from "../ui/ErrorNote";
 import type { ConfigGetResult, NetworkStatusResult } from "../protocol/types";
 import { Button } from "../ui/Button";
 import { FieldRow, Rows, StaticRow } from "./configFields";
@@ -16,7 +18,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
   const [config, setConfig] = useState<ConfigGetResult | null>(null);
   const [status, setStatus] = useState<NetworkStatusResult | null>(null);
   const [portDraft, setPortDraft] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -28,7 +30,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
         setPortDraft(configResult.effective.port?.toString() ?? "");
         setError(null);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title));
+      .catch((cause: unknown) => setError(describeError(cause)));
   }, [serverId]);
 
   useEffect(() => {
@@ -48,7 +50,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
       return;
     }
     if (patch.port !== null && (!Number.isInteger(patch.port) || patch.port <= 0)) {
-      setError("The port must be a whole number.");
+      setError({ title: "The port must be a whole number.", remediation: [] });
       return;
     }
     setBusy(true);
@@ -59,7 +61,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
         setNotice("Port saved. The server binds it the next time it starts.");
         return getNetworkStatus(serverId).then(setStatus);
       })
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -68,7 +70,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
     setBusy(true);
     void getNetworkStatus(serverId)
       .then(setStatus)
-      .catch((cause: unknown) => setError(describeError(cause).title))
+      .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
 
@@ -76,8 +78,8 @@ export function NetworkView({ serverId }: { serverId: string }) {
     return (
       <section className={styles.network} aria-label="Network">
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       </section>
     );
   }
@@ -104,8 +106,8 @@ export function NetworkView({ serverId }: { serverId: string }) {
 
       {error ? (
         <div className={styles.alert} role="alert">
-          {error}
-        </div>
+        {error ? <ErrorNote error={error} /> : null}
+      </div>
       ) : null}
       {notice && !error ? (
         <div className={styles.notice} role="status">

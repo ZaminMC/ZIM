@@ -1,0 +1,37 @@
+/* The error note (§81): the shared inner body of an error alert. The
+ * owning view keeps its own alert chrome; this carries the sentence, the
+ * remediation ("what to do next"), and the technical details behind a
+ * disclosure — available, never forced. */
+
+.remediation {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.remediation li {
+  margin: 2px 0;
+}
+
+.details {
+  margin-top: 6px;
+}
+
+.summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: var(--text-s);
+  user-select: none;
+}
+
+.code {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  max-height: 180px;
+  background: var(--surface-raised);
+  border-radius: 6px;
+  font-size: var(--text-s);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
