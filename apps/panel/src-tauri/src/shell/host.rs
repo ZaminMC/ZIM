@@ -47,7 +47,7 @@ struct DragSession {
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Clone)]
-struct GroupView {
+pub struct GroupView {
     id: GroupId,
     label: String,
     color: u8,
@@ -55,7 +55,7 @@ struct GroupView {
 }
 
 #[derive(Serialize, Clone)]
-struct TabView {
+pub struct TabView {
     id: TabId,
     title: String,
     url: String,
@@ -68,7 +68,7 @@ struct TabView {
 }
 
 #[derive(Serialize, Clone)]
-struct Snapshot {
+pub struct Snapshot {
     window: String,
     strip_width: f32,
     header_height: f32,
@@ -309,9 +309,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         let Some(webview) = app.get_webview(&tab_label(window_label, tab.id)) else { continue };
         if tab.active {
             let _ = webview.set_bounds(content_bounds.clone());
-            webview.show();
+            let _ = webview.show();
         } else {
-            webview.hide();
+            let _ = webview.hide();
         }
     }
 
