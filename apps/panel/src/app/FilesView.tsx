@@ -33,6 +33,13 @@ import {
 } from "./editor/properties";
 import type { PropertyLine } from "./editor/properties";
 import { reloadPlanFor } from "./editor/reload";
+import { specializedEditorFor } from "./editor/registry";
+import {
+  readScoreboard,
+  writeScoreboardTitle,
+  writeScoreboardRows,
+} from "./editor/scoreboard";
+import { ScoreboardEditor } from "./editor/ScoreboardEditor";
 import { restartServer } from "../state/actions";
 import { useServers } from "../state/servers";
 import { describeError } from "../state/errors";
@@ -97,8 +104,12 @@ export function FilesView({ serverId }: { serverId: string }) {
   const [busy, setBusy] = useState(false);
   // §33's two modes: Compose is the friendly view over the properties
   // AST; Source is the raw file. Source is always one click away, for
-  // every file, forever.
+  // every file, forever. §34 adds the specialized editor: when the
+  // registry claims this file (e.g. a scoreboard configuration), its
+  // mode rides the SAME compose pipeline — the AST — so every view is
+  // a face over one model, never a second representation.
   const [composeMode, setComposeMode] = useState(false);
+  const [specializedMode, setSpecializedMode] = useState(false);
 
   // Search (the whole-root walk) is a view over its own state: the box's
   // text, the debounced query actually sent, and the bounded answer.
@@ -379,6 +390,48 @@ export function FilesView({ serverId }: { serverId: string }) {
     [],
   );
 
+  // §34: the registry decides on file open whether a specialized editor
+  // claims this file. The decision is per FILE, not per keystroke — a
+  // draft passing through an empty title mid-edit must not yank the
+  // mode away — so the content sniff reads the path and the draft only
+  // when the file changes.
+  const specialized = useMemo(
+    () => specializedEditorFor(openPath, draft),
+    // draft deliberately read once per file: detection is a property of
+    // the file on disk.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openPath],
+  );
+
+  // The specialized editors edit through the SAME row model: a
+  // transform over the lines, serialized back to the draft. One
+  // pipeline, three faces (Source, Compose, specialized).
+  const composeApply = useCallback(
+    (transform: (lines: PropertyLine[]) => PropertyLine[]) => {
+      setComposeFile((current) => {
+        if (current === null) return current;
+        const lines = transform(current.lines);
+        setDraft(serializeProperties(lines));
+        return { ...current, lines };
+      });
+    },
+    [],
+  );
+
+  const scoreboardSpec = useMemo(
+    () =>
+      specialized?.id === "scoreboard" && composeFile !== null
+        ? readScoreboard(composeFile.lines)
+        : null,
+    [specialized, composeFile],
+  );
+
+  // A different file restarts the mode choice: the specialized tab is a
+  // claim about THIS file, and it does not travel to the next one.
+  useEffect(() => {
+    setSpecializedMode(false);
+  }, [openPath]);
+
   // Save, then the confirmed restart: two promises, one honest order —
   // the bytes are on the daemon before anything asks a player to wait.
   const saveAndRestart = useCallback(() => {
@@ -453,12 +506,29 @@ export function FilesView({ serverId }: { serverId: string }) {
                 </button>
                 <button
                   role="tab"
-                  aria-selected={composeMode}
-                  className={composeMode ? styles.modeTabActive : styles.modeTab}
+                  aria-selected={composeMode && !specializedMode}
+                  className={
+                    composeMode && !specializedMode ? styles.modeTabActive : styles.modeTab
+                  }
                   onClick={() => setComposeMode(true)}
                 >
                   Compose
                 </button>
+                {specialized !== null ? (
+                  <button
+                    role="tab"
+                    aria-selected={composeMode && specializedMode}
+                    className={
+                      composeMode && specializedMode ? styles.modeTabActive : styles.modeTab
+                    }
+                    onClick={() => {
+                      setComposeMode(true);
+                      setSpecializedMode(true);
+                    }}
+                  >
+                    {specialized.label}
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {plan.explain ? (
@@ -474,9 +544,15 @@ export function FilesView({ serverId }: { serverId: string }) {
                 Save &amp; Restart
               </Button>
             ) : null}
-            <Button onClick={() => { setOpenPath(null); setComposeMode(false); }}>Close</Button>
+            <Button onClick={() => { setOpenPath(null); setComposeMode(false); setSpecializedMode(false); }}>Close</Button>
           </div>
-          {composeMode && composeFile !== null ? (
+          {composeMode && specializedMode && specialized?.id === "scoreboard" && scoreboardSpec !== null ? (
+            <ScoreboardEditor
+              spec={scoreboardSpec}
+              onTitle={(title) => composeApply((lines) => writeScoreboardTitle(lines, title))}
+              onRows={(rows) => composeApply((lines) => writeScoreboardRows(lines, scoreboardSpec, rows))}
+            />
+          ) : composeMode && composeFile !== null ? (
             <div className={styles.compose} aria-label={`Compose view for ${openPath}`}>
               {composeFile.lines
                 .filter((line) => line.kind === "pair")
