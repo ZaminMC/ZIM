@@ -11,7 +11,10 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::{install_jdk, validate_release_name, AdoptiumClient, JdkAsset};
+use super::{validate_release_name, AdoptiumClient};
+
+#[cfg(unix)]
+use super::{install_jdk, JdkAsset};
 use crate::error::CoreError;
 use crate::server::registry::tempdir;
 
@@ -22,10 +25,12 @@ const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 /// A minimal JDK archive layout: `jdk-<release>/bin/java` (+ a release
 /// marker). The `java` fixture is a shell script that answers the
 /// inspection probe (unix-only).
+#[cfg(unix)]
 fn fake_java_script() -> &'static str {
     "#!/bin/sh\necho '  java.version = 21.0.99' >&2\necho '  java.vendor = Test Temurin' >&2\nexit 0\n"
 }
 
+#[cfg(unix)]
 fn build_tar(top: &str, java_body: &str) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     let add = |builder: &mut tar::Builder<Vec<u8>>, path: &str, body: &[u8], mode: u32| {
@@ -50,6 +55,7 @@ fn build_tar(top: &str, java_body: &str) -> Vec<u8> {
     builder.into_inner().unwrap()
 }
 
+#[cfg(unix)]
 fn build_tar_gz_gzipped(top: &str, java_body: &str) -> Vec<u8> {
     let tar_bytes = build_tar(top, java_body);
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -75,6 +81,7 @@ fn build_zip(top: &str, java_body: &str, exe_name: &str) -> Vec<u8> {
     buffer.into_inner()
 }
 
+#[cfg(unix)]
 fn asset(url: String, package: &str, sha: String) -> JdkAsset {
     JdkAsset {
         release_name: "jdk-21-test+1".to_owned(),
