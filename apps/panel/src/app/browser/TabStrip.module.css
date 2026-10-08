@@ -31,6 +31,16 @@
   cursor: pointer;
   user-select: none;
   transition: background var(--speed-fast) var(--ease), color var(--speed-fast) var(--ease);
+  /* §75: a tab arrives with a two-pixel settle — fast, compositor-only,
+     gone before it can feel like decoration. */
+  animation: tabIn var(--speed-fast) var(--ease);
+}
+
+@keyframes tabIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
 }
 
 /* Drag feedback (ADR-0018): the strip shows the insertion edge —

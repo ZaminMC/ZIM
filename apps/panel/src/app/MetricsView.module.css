@@ -136,7 +136,7 @@
 .meterFill {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.4s ease;
+  transition: width var(--speed-slow) var(--ease);
 }
 
 .cpuBar {

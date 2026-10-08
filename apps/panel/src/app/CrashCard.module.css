@@ -11,6 +11,16 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  /* §75: the crash card lands with a fast settle — present at once,
+     expressive about what just happened, never celebrating. */
+  animation: crashIn var(--speed-fast) var(--ease);
+}
+
+@keyframes crashIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
 }
 
 .head {

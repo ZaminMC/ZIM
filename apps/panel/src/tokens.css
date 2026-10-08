@@ -47,6 +47,11 @@
   --radius-s: 8px;
   --radius-m: 12px;
   --radius-l: 16px;
+  /* The pre-refresh aliases, still used by card containers and inputs —
+     they used to resolve to nothing (invalid → 0/transparent), which the
+     2026-10 refresh's rename never caught. */
+  --radius: var(--radius-m);
+  --surface-raised: var(--surface-2);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -73,18 +78,35 @@
   --text-xl: 20px;
   --text-2xl: 26px;
 
-  /* motion */
+  /* motion (§75): fast, intentional, compositor-only. --speed-slow is
+     for the major entrances (modals, page changes); everything else is
+     fast or normal. Loops (pulses, spinners) keep their own cadence. */
   --speed-fast: 120ms;
   --speed-normal: 200ms;
+  --speed-slow: 280ms;
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
 
   /* terminal (xterm surface) */
   --term-bg: #0b0f15;
 }
 
+/* Reduced motion is a hard floor, not a preference token: durations go
+   to zero, loops run once, literals the tokens never reached are caught
+   by the global guard. Nothing moves forever; animations land on their
+   end state immediately. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --speed-fast: 0ms;
     --speed-normal: 0ms;
+    --speed-slow: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

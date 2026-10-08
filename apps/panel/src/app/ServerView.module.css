@@ -198,5 +198,18 @@
   min-height: 160px;
   border-radius: var(--radius);
   background: var(--surface-2);
-  animation: chipPulse 1.2s ease-in-out infinite;
+  /* §75: the lazy pane breathes while it loads. The pulse lives here —
+     the file used to borrow a keyframes name from another module, where
+     CSS modules scope it away and the animation silently never ran. */
+  animation: lazyPulse 1.2s var(--ease) infinite;
+}
+
+@keyframes lazyPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }

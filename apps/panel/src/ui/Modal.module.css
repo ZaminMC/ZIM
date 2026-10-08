@@ -16,7 +16,9 @@
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-l);
   padding: var(--space-5);
-  animation: rise var(--speed-normal) var(--ease);
+  /* §75: a modal is a major transition — the one place motion is
+     expressive, and still quick (280ms, compositor-only). */
+  animation: rise var(--speed-slow) var(--ease);
 }
 
 .title {
@@ -45,3 +47,6 @@
     animation: none;
   }
 }
+
+/* The tokens also go to zero under reduced motion (tokens.css); the
+   explicit none here keeps the intent stated where the motion lives. */

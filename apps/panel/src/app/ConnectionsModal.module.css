@@ -36,7 +36,7 @@
   border-radius: var(--radius-m);
   cursor: pointer;
   color: inherit;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color var(--speed-fast) var(--ease), background var(--speed-fast) var(--ease);
 }
 
 .rowMain:hover {
