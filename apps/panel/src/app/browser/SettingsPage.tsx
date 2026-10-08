@@ -3,11 +3,17 @@
 // the update lane); what is planned is named as planned (§82: unavailable,
 // never pretend).
 
+import { useEffect, useState } from "react";
 import { useConnection } from "../../state/connection";
 import { activeProfile, useConnections } from "../../state/connections";
 import { useFeedback } from "../../state/feedback";
 import { updatesSentence, useUpdates } from "../../state/updates";
 import { useUi } from "../../state/ui";
+import { discoveryRoots, setDiscoveryRoots } from "../../state/actions";
+import { describeError } from "../../state/errors";
+import type { DescribedError } from "../../state/errors";
+import type { RootsGetResult } from "../../protocol/types";
+import { ErrorNote } from "../../ui/ErrorNote";
 import { Button } from "../../ui/Button";
 import styles from "./SettingsPage.module.css";
 
@@ -68,6 +74,116 @@ function FeedbackAccountSection() {
           ) : null}
         </div>
       </div>
+    </section>
+  );
+}
+
+/** The discovery roots (§64, ADR-0027): the folders the daemon's scan
+ *  walks beyond its own instances dir — listed, added, removed here,
+ *  every change answered by the daemon's config so the page shows the
+ *  machine's truth, never the draft's guess (§82). */
+function DiscoveryRootsSection() {
+  const [roots, setRoots] = useState<string[] | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
+
+  useEffect(() => {
+    discoveryRoots()
+      .then((result: RootsGetResult) => setRoots(result.roots))
+      .catch((cause: unknown) => setError(describeError(cause)));
+  }, []);
+
+  const apply = (next: Promise<RootsGetResult>) => {
+    setBusy(true);
+    setNote(null);
+    setError(null);
+    next
+      .then((result) => {
+        setRoots(result.roots);
+        setDraft("");
+        setBusy(false);
+      })
+      .catch((cause: unknown) => {
+        setError(describeError(cause));
+        setBusy(false);
+      });
+  };
+
+  const add = () => {
+    const path = draft.trim();
+    if (path === "" || busy) return;
+    if (roots?.includes(path)) {
+      setNote("That root is already configured.");
+      return;
+    }
+    apply(setDiscoveryRoots([...(roots ?? []), path]));
+  };
+
+  const remove = (path: string) => {
+    if (busy) return;
+    apply(setDiscoveryRoots((roots ?? []).filter((root) => root !== path)));
+  };
+
+  return (
+    <section className={styles.section} aria-label="Server discovery">
+      <h2 className={styles.sectionTitle}>Server discovery</h2>
+      {error ? <ErrorNote error={error} /> : null}
+      {roots === null && !error ? (
+        <p className={styles.rowDetail}>Asking the daemon for its scan roots…</p>
+      ) : null}
+      {roots !== null ? (
+        <>
+          <ul className={styles.list}>
+            {roots.map((root) => (
+              <li key={root} className={styles.row}>
+                <div className={styles.rowMain}>
+                  <span className={styles.pathText}>{root}</span>
+                  <span className={styles.rowDetail}>
+                    Scanned when the New tab asks this machine.
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  aria-label={`Remove root ${root}`}
+                  onClick={() => remove(root)}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <div className={styles.addRow}>
+            <input
+              className={styles.pathInput}
+              value={draft}
+              placeholder="/home/you/servers — a folder that holds server folders"
+              aria-label="Add a discovery root"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") add();
+              }}
+            />
+            <Button onClick={add} disabled={busy || draft.trim() === ""}>
+              Add root
+            </Button>
+          </div>
+          <p className={styles.rowDetail}>
+            Empty by default — the daemon always scans its own instances folder. Extra roots
+            are folders of servers kept elsewhere; the scan never follows symlinks and skips
+            hidden and staging folders.
+          </p>
+        </>
+      ) : null}
+      {note ? (
+        <p className={styles.rowDetail} role="status">
+          {note}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -253,6 +369,8 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+
+        <DiscoveryRootsSection />
 
         <UpdatesSection />
 

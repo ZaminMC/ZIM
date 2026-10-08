@@ -92,6 +92,39 @@
   border-color: var(--accent);
 }
 
+/* The discovery roots (ADR-0027): a mono path that can be long, and an
+   add row that keeps the field and its verb one unit. */
+.pathText {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  overflow-wrap: anywhere;
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.pathInput {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+}
+
+.pathInput:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .rowName {
   color: var(--text);
   font-size: var(--text-m);
