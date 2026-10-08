@@ -7,6 +7,8 @@
 
 import { useEffect, useState } from "react";
 import { parseAddressInput, joinAddress, searchServers } from "../../state/destinations";
+import { registerServer } from "../../state/actions";
+import type { DiscoveredServer } from "../../protocol/types";
 import { sortedServers, useServers } from "../../state/servers";
 import { useTabs } from "../../state/tabs";
 import { useUi } from "../../state/ui";
@@ -15,6 +17,9 @@ import { StatusChip } from "../../ui/StatusChip";
 import { StatusDot } from "../../ui/StatusDot";
 import { IconPlus, IconServer } from "../../ui/icons";
 import { commitAddress } from "./commitAddress";
+import { MachineDiscovery, slugFromPath } from "./machineDiscovery";
+import { describeError } from "../../state/errors";
+import { ErrorNote } from "../../ui/ErrorNote";
 import styles from "./NewTabPage.module.css";
 
 const ACTIVE_STATES = new Set(["running", "starting", "adopting"]);
@@ -40,6 +45,29 @@ export function NewTabPage() {
       setDiscoveryQuery(null);
     }
   }, [query, setDiscoveryQuery]);
+
+  // The machine's answer (§64): what the scan holds beyond the registry,
+  // following the same text. The open verb turns a directory into a
+  // managed server (register with the folder's slug) and opens its tab;
+  // a refusal is a typed note, never a fake navigation.
+  const [openNote, setOpenNote] = useState<string | null>(null);
+  const openCandidate = async (candidate: DiscoveredServer) => {
+    if (candidate.kind !== "directory") {
+      setOpenNote(
+        "That is a jar, not a server directory — opening it starts nothing. Register the folder that runs it first.",
+      );
+      return;
+    }
+    const serverId = slugFromPath(candidate.path);
+    const displayName = candidate.displayName ?? serverId;
+    try {
+      await registerServer({ serverId, displayName, rootPath: candidate.path });
+      useTabs.getState().navigate({ kind: "server", serverId });
+    } catch (error) {
+      const described = describeError(error);
+      setOpenNote(`${described.title} (${candidate.path})`);
+    }
+  };
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -125,6 +153,18 @@ export function NewTabPage() {
             ))}
           </ul>
         )}
+
+        {openNote ? (
+          <div className={styles.machine} role="alert">
+            <ErrorNote
+              error={{
+                title: openNote,
+                remediation: ["The registry is unchanged — nothing was half-opened."],
+              }}
+            />
+          </div>
+        ) : null}
+        <MachineDiscovery query={filter} onOpen={(candidate) => void openCandidate(candidate)} />
       </div>
     </div>
   );

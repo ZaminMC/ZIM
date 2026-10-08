@@ -57,6 +57,9 @@ import type {
   ConfigSetPayload,
   ConfigSetResult,
   NetworkStatusResult,
+  DiscoverResult,
+  RootsGetResult,
+  RootsSetParams,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -66,6 +69,19 @@ export function newRequestId(): string {
 
 export async function listServers(): Promise<ServerListResult> {
   return client.request<ServerListResult>("server.list");
+}
+
+export async function discoverServers(query?: string): Promise<DiscoverResult> {
+  return client.request<DiscoverResult>("server.discover", query ? { query } : {});
+}
+
+export async function discoveryRoots(): Promise<RootsGetResult> {
+  return client.request<RootsGetResult>("discovery.roots.get");
+}
+
+export async function setDiscoveryRoots(roots: string[]): Promise<RootsGetResult> {
+  const params: RootsSetParams = { roots };
+  return client.request<RootsGetResult>("discovery.roots.set", params);
 }
 
 export async function getServer(serverId: string): Promise<ServerDetails> {

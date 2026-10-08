@@ -68,6 +68,36 @@ export interface ServerListResult {
   servers: ServerSummary[];
 }
 
+// --- discovery (founder §64, ADR-0027) --------------------------------------
+
+export interface DiscoveredServer {
+  serverId?: string;
+  displayName?: string;
+  path: string;
+  kind: "registered" | "directory" | "jar";
+  state?: string;
+  port?: number;
+  platform?: string;
+  marker?: string;
+  jarName?: string;
+}
+
+export interface DiscoverResult {
+  servers: DiscoveredServer[];
+  roots: string[];
+  skippedRoots: string[];
+  scanned: number;
+  truncated: boolean;
+}
+
+export interface RootsGetResult {
+  roots: string[];
+}
+
+export interface RootsSetParams {
+  roots: string[];
+}
+
 export interface RegisterServerParams {
   requestId: string;
   serverId: string;
