@@ -107,7 +107,15 @@ impl MockServer {
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(10));
                     }
-                    Err(_) => return,
+                    // Windows surfaces a client's pre-accept reset ON THE
+                    // LISTENING SOCKET (WSAECONNRESET as accept's own
+                    // error); treating it as fatal killed the mock thread
+                    // mid-test and every later connect died with os error
+                    // 10053 — a flake class, not a product bug. Any accept
+                    // error here is transient: wait, re-check stop, go on.
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
                 }
             }
         });

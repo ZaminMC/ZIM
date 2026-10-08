@@ -107,7 +107,12 @@ impl MockServer {
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(_) => return,
+                // Windows surfaces a client's pre-accept reset on the
+                // listening socket itself; a transient accept error must
+                // never kill the mock thread (the os error 10053 flake).
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
             }
         });
         MockServer {
