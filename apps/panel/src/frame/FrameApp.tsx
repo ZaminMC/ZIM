@@ -21,14 +21,28 @@ import {
   isTauri,
   omniboxClassify,
   omniboxCommit,
+  onAskGroupLabel,
   onSnapshot,
   onFocusAddress,
   reportFrameSize,
   shellCommand,
   shellDrag,
+  tabContextMenu,
   type Snapshot,
 } from "./frameIpc";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
+import {
+  IconBack,
+  IconForward,
+  IconReload,
+  IconStar,
+  IconPlus,
+  IconClose,
+  IconSearch,
+  IconMinimize,
+  IconMaximize,
+  IconWindowClose,
+} from "./icons";
 import "./frame.css";
 
 const CMD = {
@@ -149,11 +163,48 @@ export function FrameApp() {
     };
   }, []);
 
+  // The native menu's group verb needs a typed label — the host bounces
+  // here, the frame asks, and the group command lands with the answer.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onAskGroupLabel((tabId) => {
+      const label = window.prompt("Group name", "group");
+      if (label) void shellCommand(CMD.ADD_NEW_TAB_TO_GROUP, { tab_id: tabId, label });
+    }).then((off) => {
+      if (disposed) off();
+      else unlisten = off;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   // The omnibox rests on the model's address until the user edits it.
   useEffect(() => {
     setOmniboxText(null);
     setJoinNote(null);
   }, [snap?.address, snap?.active]);
+
+  // The DOM menu (demo stand-in) closes on Escape or any click outside
+  // itself — the native menu gets this from the OS for free.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest(".context")) setMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
 
   // The update lane (ADR-0024): the frame owns the pill now.
   useEffect(() => {
@@ -303,7 +354,10 @@ export function FrameApp() {
         data-tauri-drag-region
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).dataset.tab === undefined) {
-            void shellCommand(CMD.NEW_TAB);
+            // Windows titlebar law: a bare-strip double click asks about
+            // the window, never about tabs (the + button and Ctrl+T
+            // make tabs).
+            void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE);
           }
         }}
       >
@@ -338,7 +392,11 @@ export function FrameApp() {
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
+                // The OS menu under the host (the band clips a DOM
+                // menu); the DOM stand-in only wears the demo hat.
+                void tabContextMenu(tab.id).then((native) => {
+                  if (!native) setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
+                });
               }}
               onPointerDown={(e) => {
                 if (e.button !== 0 || slot.pinned) return;
@@ -357,7 +415,7 @@ export function FrameApp() {
                     void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
                   }}
                 >
-                  ×
+                  <IconClose />
                 </button>
               ) : null}
               {group ? <span className="tab-group-underline" /> : null}
@@ -370,12 +428,18 @@ export function FrameApp() {
           aria-label="New tab"
           onClick={() => void shellCommand(CMD.NEW_TAB)}
         >
-          +
+          <IconPlus />
         </button>
         <div className="window-controls">
-          <button aria-label="Minimize" onClick={() => void shellCommand(CMD.WINDOW_MINIMIZE)}>—</button>
-          <button aria-label="Maximize" onClick={() => void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE)}>□</button>
-          <button aria-label="Close" className="window-close" onClick={() => void shellCommand(CMD.WINDOW_CLOSE)}>×</button>
+          <button aria-label="Minimize" onClick={() => void shellCommand(CMD.WINDOW_MINIMIZE)}>
+            <IconMinimize />
+          </button>
+          <button aria-label="Maximize" onClick={() => void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE)}>
+            <IconMaximize />
+          </button>
+          <button aria-label="Close" className="window-close" onClick={() => void shellCommand(CMD.WINDOW_CLOSE)}>
+            <IconWindowClose />
+          </button>
         </div>
       </div>
 
@@ -387,7 +451,7 @@ export function FrameApp() {
           disabled={!snap.tabs.find((t) => t.id === snap.active)?.can_back}
           onClick={() => void shellCommand(CMD.NAV_BACK)}
         >
-          ‹
+          <IconBack />
         </button>
         <button
           className="tool"
@@ -395,43 +459,48 @@ export function FrameApp() {
           disabled={!snap.tabs.find((t) => t.id === snap.active)?.can_forward}
           onClick={() => void shellCommand(CMD.NAV_FORWARD)}
         >
-          ›
+          <IconForward />
         </button>
         <button className="tool" aria-label="Reload" onClick={() => void shellCommand(CMD.RELOAD)}>
-          ⟳
+          <IconReload />
         </button>
-        <input
-          ref={omniboxRef}
-          className="omnibox"
-          value={omniboxText ?? snap.address}
-          spellCheck={false}
-          placeholder="Search servers, or type an address"
-          onChange={(e) => {
-            setOmniboxText(e.target.value);
-            void classifyNow();
-          }}
-          onFocus={(e) => e.currentTarget.select()}
-          onBlur={() => {
-            setOmniboxText(null);
-            setJoinNote(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              void commitOmnibox();
-              omniboxRef.current?.blur();
-            } else if (e.key === "Escape") {
+        <div className="omnibox-wrap">
+          <span className="omnibox-icon">
+            <IconSearch />
+          </span>
+          <input
+            ref={omniboxRef}
+            className="omnibox"
+            value={omniboxText ?? snap.address}
+            spellCheck={false}
+            placeholder="Search servers, or type an address"
+            onChange={(e) => {
+              setOmniboxText(e.target.value);
+              void classifyNow();
+            }}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={() => {
               setOmniboxText(null);
-              omniboxRef.current?.blur();
-            }
-          }}
-        />
-        {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
+              setJoinNote(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                void commitOmnibox();
+                omniboxRef.current?.blur();
+              } else if (e.key === "Escape") {
+                setOmniboxText(null);
+                omniboxRef.current?.blur();
+              }
+            }}
+          />
+          {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
+        </div>
         <button
           className="tool"
           aria-label="Bookmark this tab"
           onClick={() => void shellCommand(CMD.BOOKMARK_THIS_TAB)}
         >
-          ☆
+          <IconStar />
         </button>
       </div>
 
@@ -467,7 +536,8 @@ export function FrameApp() {
         </div>
       ) : null}
 
-      {/* The tab context menu — browser verbs, not dashboard verbs. */}
+      {/* The tab context menu — the DEMO stand-in only: under the host
+          the band would clip it, so there the native menu shows. */}
       {menu ? (
         <div className="context" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
           <button onClick={() => { void shellCommand(CMD.TOGGLE_PINNED, { tab_id: menu.tab }); setMenu(null); }}>

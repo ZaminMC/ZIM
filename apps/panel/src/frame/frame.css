@@ -1,7 +1,14 @@
-/* The frame's face — the shell's view band (tab strip, toolbar, 
-   omnibox, bookmarks bar), rebuilt to the ported law (shell/layout.rs 
-   cites each constant's upstream Chromium file). Tokens come from 
-   tokens.css; dark theme follows the app palette. */
+/* The frame's face — the shell's view band (tab strip, toolbar,
+   omnibox, bookmarks bar), rebuilt to the ported law (shell/layout.rs
+   cites each constant's upstream Chromium file).
+
+   2026-10-09: the band dropped its light "chrome-gray" skin. The panel
+   is dark-first (STYLE-GUIDE) and every content page renders on the
+   dark canvas — a light band over dark pages read as two apps glued
+   together. The band now speaks the token palette: the active tab
+   melts into the toolbar through the shared surface, the strip sits a
+   step below it, and the omnibox is a quiet field that lights on
+   focus. */
 
 :root {
   --group-sky: #8ab4f8;
@@ -10,6 +17,19 @@
   --group-rose: #f28b82;
   --group-violet: #c58af9;
   --group-slate: #9aa0a6;
+
+  /* frame surface ladder — strip < surface (active tab + toolbar melt),
+     fields sit between; all inside the token palette's family. */
+  --frame-bg: #0b0f16;
+  --frame-surface: #151c25;
+  --frame-field: #0d1219;
+  --frame-field-hover: #11171f;
+  --frame-fg: #e9eef6;
+  --frame-fg-dim: #9aa7b9;
+  --frame-hover: rgba(233, 238, 246, 0.07);
+  --frame-hover-strong: rgba(233, 238, 246, 0.11);
+  --frame-line: rgba(233, 238, 246, 0.14);
+  --frame-accent: #5c9df4;
 }
 
 html, body, #root {
@@ -19,7 +39,7 @@ html, body, #root {
 }
 
 body {
-  background: transparent;
+  background: var(--frame-bg);
 }
 
 .frame {
@@ -27,8 +47,9 @@ body {
   flex-direction: column;
   width: 100vw;
   overflow: hidden;
-  background: var(--frame-bg, #dee1e6);
-  color: var(--frame-fg, #202124);
+  background: var(--frame-bg);
+  color: var(--frame-fg);
+  font-family: var(--font-ui, "Segoe UI", system-ui, sans-serif);
   user-select: none;
 }
 
@@ -50,21 +71,23 @@ body {
   height: 35px; /* TAB_HEIGHT */
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px; /* CONTENT_INSET_X */
+  gap: 6px;
+  padding: 0 10px; /* CONTENT_INSET_X + a breath */
   box-sizing: border-box;
   cursor: default;
   font-size: 12px;
+  font-weight: 450;
   line-height: 1;
   border-radius: 10px 10px 0 0; /* CORNER_TOP */
   transition: background 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.tab-inactive { background: transparent; }
-.tab-inactive:hover { background: color-mix(in srgb, var(--frame-fg, #202124) 8%, transparent); }
+.tab-inactive { background: transparent; color: var(--frame-fg-dim); }
+.tab-inactive:hover { background: var(--frame-hover); color: var(--frame-fg); }
 .tab-active {
-  background: var(--frame-surface, #ffffff);
-  box-shadow: 0 -1px 2px rgb(0 0 0 / 8%);
+  background: var(--frame-surface);
+  color: var(--frame-fg);
+  font-weight: 500;
 }
 
 /* The active tab melts into the toolbar: bottom corner extensions,
@@ -90,26 +113,52 @@ body {
   white-space: nowrap;
 }
 
+.tab-pinned {
+  justify-content: center;
+  padding: 0;
+}
+
+/* Pinned tabs carry no title text — until favicons land, the first
+   letter rides in a deliberate chip instead of an orphan glyph. */
 .tab-pinned .tab-title {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--frame-hover-strong);
+  font-size: 11px;
   font-weight: 600;
 }
 
-.tab-muted::before { content: "🔇"; font-size: 10px; }
+.tab-muted {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--group-amber);
+}
 
 .tab-close {
   flex: none;
+  display: grid;
+  place-items: center;
   width: 16px;  /* CLOSE_BUTTON */
   height: 16px;
   border: none;
   border-radius: 50%;
   background: transparent;
   color: inherit;
-  font-size: 12px;
-  line-height: 16px;
   padding: 0;
   cursor: default;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
 }
-.tab-close:hover { background: color-mix(in srgb, var(--frame-fg, #202124) 14%, transparent); }
+.tab:hover .tab-close,
+.tab-active .tab-close { opacity: 0.85; }
+.tab .tab-close:hover { opacity: 1; background: var(--frame-hover-strong); }
+.tab-pinned .tab-close { display: none; }
 
 /* Separators between inactive tabs: 2 × 20 (SEPARATOR_W × SEPARATOR_H). */
 .tab-inactive + .tab-inactive::after {
@@ -120,8 +169,10 @@ body {
   width: 2px;
   height: 20px;
   transform: translateY(-50%);
-  background: color-mix(in srgb, var(--frame-fg, #202124) 22%, transparent);
+  background: var(--frame-line);
 }
+.tab-inactive:hover + .tab-inactive::after,
+.tab-inactive + .tab-inactive:hover::after { opacity: 0; }
 
 .tab-group-underline {
   position: absolute;
@@ -135,7 +186,7 @@ body {
 
 .tab-dragging {
   z-index: 3;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 22%);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 45%);
   transition: none;
 }
 
@@ -144,16 +195,18 @@ body {
 .new-tab {
   position: absolute;
   bottom: 0;
+  display: grid;
+  place-items: center;
   width: 36px; /* NEW_TAB_BUTTON_W */
   height: 35px;
   border: none;
   background: transparent;
-  color: inherit;
-  font-size: 18px;
+  color: var(--frame-fg-dim);
   border-radius: 10px 10px 0 0;
   cursor: default;
+  transition: background 120ms ease-out, color 120ms ease-out;
 }
-.new-tab:hover { background: color-mix(in srgb, var(--frame-fg, #202124) 8%, transparent); }
+.new-tab:hover { background: var(--frame-hover); color: var(--frame-fg); }
 
 .window-controls {
   position: absolute;
@@ -163,15 +216,17 @@ body {
   display: flex;
 }
 .window-controls button {
+  display: grid;
+  place-items: center;
   width: 46px;
   height: 35px;
   border: none;
   background: transparent;
-  color: inherit;
-  font-size: 12px;
+  color: var(--frame-fg-dim);
   cursor: default;
+  transition: background 100ms ease-out, color 100ms ease-out;
 }
-.window-controls button:hover { background: color-mix(in srgb, var(--frame-fg, #202124) 10%, transparent); }
+.window-controls button:hover { background: var(--frame-hover-strong); color: var(--frame-fg); }
 .window-controls .window-close:hover { background: #e81123; color: #fff; }
 
 /* -- Toolbar: 34 location bar + 2×4 padding ------------------------------ */
@@ -180,47 +235,80 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   height: 42px; /* LOCATION_BAR_H 34 + 2×TOOLBAR_PAD_Y 4 */
   padding: 0 8px;
   box-sizing: border-box;
+  background: var(--frame-surface);
 }
 
 .tool {
   flex: none;
+  display: grid;
+  place-items: center;
   width: 32px;
   height: 32px;
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: inherit;
-  font-size: 15px;
+  color: var(--frame-fg);
   cursor: default;
+  transition: background 120ms ease-out;
 }
-.tool:hover:not(:disabled) { background: color-mix(in srgb, var(--frame-fg, #202124) 9%, transparent); }
-.tool:disabled { opacity: 0.35; }
+.tool:hover:not(:disabled) { background: var(--frame-hover-strong); }
+.tool:active:not(:disabled) { background: rgba(233, 238, 246, 0.16); }
+.tool:disabled { opacity: 0.32; }
+
+/* The omnibox: a quiet field with a leading scope glyph; on focus it
+   becomes the one loud thing in the band. */
+.omnibox-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 34px; /* LOCATION_BAR_H */
+  margin: 0 6px;
+  border-radius: 17px;
+  background: var(--frame-field);
+  border: 1px solid transparent;
+  transition: background 140ms ease-out, border-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+.omnibox-wrap:hover { background: var(--frame-field-hover); }
+.omnibox-wrap:focus-within {
+  background: var(--frame-field-hover);
+  border-color: var(--frame-accent);
+  box-shadow: 0 0 0 3px rgba(92, 157, 244, 0.18);
+}
+
+.omnibox-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 100%;
+  color: var(--frame-fg-dim);
+}
 
 .omnibox {
   flex: 1;
-  height: 34px; /* LOCATION_BAR_H */
+  height: 100%;
   border: none;
-  border-radius: 17px;
-  padding: 0 14px;
+  padding: 0 10px 0 0;
   box-sizing: border-box;
+  font-family: inherit;
   font-size: 13px;
-  background: var(--frame-omnibox, #f1f3f4);
-  color: var(--frame-fg, #202124);
+  background: transparent;
+  color: var(--frame-fg);
   outline: none;
 }
-.omnibox:focus {
-  background: var(--frame-surface, #ffffff);
-  box-shadow: 0 1px 6px rgb(0 0 0 / 18%);
-}
+.omnibox::placeholder { color: var(--frame-fg-dim); }
+.omnibox::selection { background: rgba(92, 157, 244, 0.35); }
 
 .omnibox-note {
   flex: none;
   font-size: 11px;
-  opacity: 0.75;
+  color: var(--frame-fg-dim);
   padding: 0 6px;
   white-space: nowrap;
 }
@@ -236,6 +324,7 @@ body {
   padding: 0 8px;
   box-sizing: border-box;
   overflow: hidden;
+  background: var(--frame-surface);
 }
 
 .bookmark {
@@ -245,19 +334,22 @@ body {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: inherit;
+  color: var(--frame-fg-dim);
+  font-family: inherit;
   font-size: 12px;
   padding: 0 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: default;
+  transition: background 120ms ease-out, color 120ms ease-out;
 }
-.bookmark:hover { background: color-mix(in srgb, var(--frame-fg, #202124) 9%, transparent); }
+.bookmark:hover { background: var(--frame-hover); color: var(--frame-fg); }
 
 .bookmarks-empty {
   font-size: 11px;
-  opacity: 0.55;
+  color: var(--frame-fg-dim);
+  opacity: 0.7;
 }
 
 /* -- Context menu / update pill ------------------------------------------- */
@@ -265,41 +357,54 @@ body {
 .context {
   position: fixed;
   z-index: 9;
-  min-width: 180px;
+  min-width: 200px;
   display: flex;
   flex-direction: column;
-  padding: 4px;
-  background: var(--frame-surface, #ffffff);
-  color: var(--frame-fg, #202124);
-  border-radius: 8px;
-  box-shadow: 0 4px 18px rgb(0 0 0 / 24%);
+  padding: 5px;
+  background: var(--frame-surface);
+  color: var(--frame-fg);
+  border: 1px solid rgba(233, 238, 246, 0.09);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 50%), 0 2px 8px rgb(0 0 0 / 40%);
 }
 .context button {
   border: none;
   background: transparent;
   color: inherit;
+  font-family: inherit;
   font-size: 12px;
   text-align: left;
-  padding: 6px 10px;
+  padding: 7px 10px;
   border-radius: 6px;
   cursor: default;
 }
-.context button:hover { background: color-mix(in srgb, var(--frame-fg, #202124) 9%, transparent); }
+.context button:hover { background: var(--frame-hover-strong); }
 
+/* The update notice lives INSIDE the band — the frame webview is only
+   the header (83px, 111 with bookmarks), so a bottom-fixed toast would
+   be clipped off by the webview's edge (0.4.3's invisible pill). It
+   docks over the toolbar's right end, left of the star. */
 .update-pill {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
+  right: 48px;
+  top: 45px;
   z-index: 9;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: none;
-  border-radius: 14px;
-  padding: 8px 14px;
+  border-radius: 15px;
+  padding: 7px 14px;
+  font-family: inherit;
   font-size: 12px;
-  background: var(--group-grass, #81c995);
-  color: #102010;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 24%);
+  font-weight: 500;
+  background: var(--frame-accent);
+  color: #071120;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 45%);
   cursor: pointer;
 }
+.update-pill:hover { background: #85b7f8; }
 
 /* Reduced motion floor (ADR-0030): no stylesheet can outrun it. */
 @media (prefers-reduced-motion: reduce) {
@@ -314,16 +419,17 @@ body {
   justify-content: center;
   width: 100vw;
   height: 100vh;
-  background: var(--frame-bg, #dee1e6);
-  color: var(--frame-fg, #202124);
+  background: var(--frame-bg);
+  color: var(--frame-fg);
 }
 
 .frame-error-box {
   max-width: 520px;
   padding: 20px 24px;
-  border-radius: 10px;
-  background: var(--frame-surface, #ffffff);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 18%);
+  border-radius: 12px;
+  background: var(--frame-surface);
+  border: 1px solid rgba(233, 238, 246, 0.09);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 40%);
   text-align: center;
 }
 
@@ -336,18 +442,20 @@ body {
 .frame-error-detail {
   margin: 0 0 14px;
   font-size: 12px;
-  opacity: 0.75;
+  color: var(--frame-fg-dim);
   overflow-wrap: anywhere;
 }
 
 .frame-error-retry {
-  padding: 6px 18px;
+  padding: 7px 18px;
   border: none;
-  border-radius: 6px;
-  background: var(--frame-fg, #202124);
-  color: var(--frame-surface, #ffffff);
+  border-radius: 7px;
+  background: var(--frame-accent);
+  color: #071120;
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
 
-.frame-error-retry:hover { opacity: 0.88; }
+.frame-error-retry:hover { background: #85b7f8; }

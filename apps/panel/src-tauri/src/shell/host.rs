@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window};
 
 use crate::shell::bookmarks::Bookmarks;
@@ -218,11 +219,19 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
             collapsed: g.collapsed,
         })
         .collect();
+    // The omnibox's resting text. A new tab shows NOTHING — Chrome's
+    // NTP law: the address bar carries the page's address, and the new
+    // tab has none to show (its placeholder speaks instead). Every other
+    // destination — internal pages included — is an address worth
+    // showing, because the user can have arrived here by navigation.
     let address = strip
         .tabs
         .iter()
         .find(|t| t.id == active)
-        .map(|t| t.destination().url())
+        .map(|t| match t.destination() {
+            Destination::New => String::new(),
+            other => other.url(),
+        })
         .unwrap_or_default();
     Snapshot {
         window: window.to_owned(),
@@ -808,6 +817,103 @@ pub async fn shell_bookmark_remove(
     let window_name = window_label_of(&window);
     state.lock().bookmarks.remove(&id);
     sync(&app, &state, &window_name)
+}
+
+/// The tab context menu — a NATIVE popup. The frame webview is an
+/// 83px band; a DOM menu drawn inside it is clipped at the band's
+/// bottom edge (shipped 0.4.3 hid this — the menu simply lost its tail),
+/// so Chromium's Windows answer applies here too: the OS renders the
+/// menu and it floats over the whole window. Items dispatch through
+/// [`handle_tab_menu_verb`]; menu events arrive on the main thread, so
+/// the verb itself runs on the async runtime (the re-entrancy law).
+#[tauri::command]
+pub async fn shell_tab_menu(
+    window: tauri::Webview,
+    app: AppHandle,
+    state: State<'_, ShellState>,
+    tab_id: u32,
+) -> Result<(), String> {
+    let window_name = window_label_of(&window);
+    let (pinned, muted) = {
+        let inner = state.lock();
+        let strip = inner.strip(&window_name);
+        match strip.tabs.iter().find(|t| t.id == tab_id) {
+            Some(tab) => (tab.pinned, tab.muted),
+            None => return Ok(()), // gone before the menu could show
+        }
+    };
+    let base = format!("zamin-tab-menu|{window_name}|{tab_id}");
+    let pin = MenuItem::with_id(&app, format!("{base}|pin"), if pinned { "Unpin tab" } else { "Pin tab" }, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let mute = MenuItem::with_id(&app, format!("{base}|mute"), if muted { "Unmute tab" } else { "Mute tab" }, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let duplicate = MenuItem::with_id(&app, format!("{base}|duplicate"), "Duplicate", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let group = MenuItem::with_id(&app, format!("{base}|group"), "Add to new group…", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let new_tab = MenuItem::with_id(&app, format!("{base}|new"), "New tab", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let close = MenuItem::with_id(&app, format!("{base}|close"), "Close tab", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let before_new = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
+    let before_close = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(
+        &app,
+        &[&pin, &mute, &duplicate, &group, &before_new, &new_tab, &before_close, &close],
+    )
+    .map_err(|e| e.to_string())?;
+    let host = window_for(&app, &window_name)?;
+    menu.popup(host).map_err(|e| e.to_string())
+}
+
+/// The native tab menu's verbs — the model mutations behind the popup
+/// items. Called from main.rs's menu-event hook, which spawns this onto
+/// the async runtime: the event fires on the main thread, and a verb
+/// like "new tab" births a webview inside sync (the re-entrancy law).
+pub fn handle_tab_menu_verb(
+    app: &AppHandle,
+    state: &ShellState,
+    window_label: &str,
+    tab_id: u32,
+    verb: &str,
+) {
+    {
+        let mut inner = state.lock();
+        let strip = inner.strip(window_label);
+        match verb {
+            "pin" => {
+                let pinned = strip
+                    .tabs
+                    .iter()
+                    .find(|t| t.id == tab_id)
+                    .map(|t| t.pinned)
+                    .unwrap_or(false);
+                strip.set_pinned(tab_id, !pinned);
+            }
+            "mute" => {
+                if let Some(tab) = strip.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.muted = !tab.muted;
+                }
+            }
+            "duplicate" => strip.duplicate(tab_id),
+            "close" => strip.close(tab_id),
+            "new" => strip.append(Destination::New, true),
+            // The group needs a label only the operator can type — the
+            // frame asks, then lands ADD_NEW_TAB_TO_GROUP itself.
+            "group" => {
+                let _ = app.emit_to(
+                    frame_label(window_label),
+                    "shell://ask-group-label",
+                    serde_json::json!({ "tab_id": tab_id }),
+                );
+            }
+            _ => {}
+        }
+    }
+    emit_tab_state(app, state, window_label);
+    if let Err(e) = sync(app, state, window_label) {
+        tracing::debug!("tab-menu verb {verb} sync failed: {e}");
+    }
 }
 
 /// The drag session — frame pointer events in, model decisions out.
