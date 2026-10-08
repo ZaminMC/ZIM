@@ -1,0 +1,982 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Builder type of `WebView`."><title>WebViewBuilder in wry - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/static/vendored.css?0-0-0-1733306b4665170461f7ed5676aa80650abaefbb-2026-10-07" media="all" /><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="/-/rustdoc.static/" data-current-crate="wry" data-themes="" data-resource-suffix="-20260907-1.100.0-nightly-cea272fa3" data-rustdoc-version="1.100.0-nightly (cea272fa3 2026-09-07)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260907-1.100.0-nightly-cea272fa3.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"><link rel="stylesheet" href="/-/static/rustdoc-2025-08-20.css?0-0-0-1733306b4665170461f7ed5676aa80650abaefbb-2026-10-07" media="all" /><link rel="stylesheet" href="/-/static/font-awesome.css?0-0-0-1733306b4665170461f7ed5676aa80650abaefbb-2026-10-07" media="all" />
+
+<link rel="search" href="/-/static/opensearch.xml" type="application/opensearchdescription+xml" title="Docs.rs" />
+
+<script type="text/javascript">(function() {
+    function applyTheme(theme) {
+        if (theme) {
+            document.documentElement.dataset.docsRsTheme = theme;
+        }
+    }
+
+    window.addEventListener("storage", ev => {
+        if (ev.key === "rustdoc-theme") {
+            applyTheme(ev.newValue);
+        }
+    });
+
+    // see ./storage-change-detection.html for details
+    window.addEventListener("message", ev => {
+        if (ev.data && ev.data.storage && ev.data.storage.key === "rustdoc-theme") {
+            applyTheme(ev.data.storage.value);
+        }
+    });
+
+    applyTheme(window.localStorage.getItem("rustdoc-theme"));
+})();</script></head><body class="rustdoc-page">
+<div class="nav-container">
+    <div class="container">
+        <div class="pure-menu pure-menu-horizontal" role="navigation" aria-label="Main navigation">
+            <form action="/releases/search"
+                  method="GET"
+                  id="nav-search-form"
+                  class="landing-search-form-nav  ">
+
+                
+                <a href="/" class="pure-menu-heading pure-menu-link docsrs-logo" aria-label="Docs.rs">
+                    <span title="Docs.rs"><span class="fa fa-solid fa-cubes " aria-hidden="true"></span></span>
+                    <span class="title">Docs.rs</span>
+                </a><ul class="pure-menu-list">
+    <script id="crate-metadata" type="application/json">
+        
+        {
+            "name": "wry",
+            "version": "0.57.0"
+        }
+    </script><li class="pure-menu-item pure-menu-has-children crate-dropdown">
+            <a href="#" class="pure-menu-link crate-name" title="Cross-platform WebView rendering library">
+                <span class="fa fa-solid fa-cube " aria-hidden="true"></span>
+                <span class="title">wry-0.57.0</span>
+            </a><div class="pure-menu-children package-details-menu">
+                
+                <ul class="pure-menu-list menu-item-divided">
+                    <li class="pure-menu-heading" id="crate-title">
+                        wry 0.57.0
+                        <span id="clipboard" class="svg-clipboard" title="Copy crate name and version information"></span>
+                    </li><li class="pure-menu-item">
+                        <a href="/wry/0.57.0/wry/struct.WebViewBuilder.html" class="pure-menu-link description" id="permalink" title="Get a link to this specific version"><span class="fa fa-solid fa-link " aria-hidden="true"></span> Permalink
+                        </a>
+                    </li><li class="pure-menu-item">
+                        <a href="/crate/wry/latest" class="pure-menu-link description" title="See wry in docs.rs">
+                            <span class="fa fa-solid fa-cube " aria-hidden="true"></span> Docs.rs crate page
+                        </a>
+                    </li><li class="pure-menu-item">
+                            <span class="pure-menu-link description license"><span class="fa fa-solid fa-scale-unbalanced-flip " aria-hidden="true"></span>
+                            <a href="https://spdx.org/licenses/Apache-2.0" class="pure-menu-sublink">Apache-2.0</a> OR <a href="https://spdx.org/licenses/MIT" class="pure-menu-sublink">MIT</a></span>
+                        </li><li class="pure-menu-item">
+                            <span class="pure-menu-link description" title="Built with rustc 1.100.0-nightly (cea272fa3 2026-09-07)">
+                                <span class="fa fa-solid fa-gears " aria-hidden="true"></span> 08 September 2026
+                            </span>
+                        </li></ul>
+
+                <div class="pure-g menu-item-divided">
+                    <div class="pure-u-1-2 right-border">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Links</li>
+
+                            <li class="pure-menu-item">
+                                    <a href="https://github.com/tauri-apps/wry" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-code-branch " aria-hidden="true"></span> Repository
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                <a href="https://crates.io/crates/wry" class="pure-menu-link" title="See wry in crates.io">
+                                    <span class="fa fa-solid fa-cube " aria-hidden="true"></span> crates.io
+                                </a>
+                            </li>
+
+                            
+                            <li class="pure-menu-item">
+                                <a href="/crate/wry/latest/source/" title="Browse source of wry-0.57.0" class="pure-menu-link">
+                                    <span class="fa fa-solid fa-folder-open " aria-hidden="true"></span> Source
+                                </a>
+                            </li>
+                        </ul>
+                    </div><div class="pure-u-1-2">
+                        <ul class="pure-menu-list" id="topbar-owners">
+                            <li class="pure-menu-heading">Owners</li><li class="pure-menu-item">
+                                    <a href="https://crates.io/users/wusyong" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-user " aria-hidden="true"></span> wusyong
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                    <a href="https://crates.io/users/tauri-bot" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-user " aria-hidden="true"></span> tauri-bot
+                                    </a>
+                                </li></ul>
+                    </div>
+                </div>
+
+                <div class="pure-g menu-item-divided">
+                    <div class="pure-u-1-2 right-border">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Dependencies</li>
+
+                            
+                            <li class="pure-menu-item">
+                                <div class="pure-menu pure-menu-scrollable sub-menu" tabindex="-1">
+                                    <ul class="pure-menu-list">
+                                        <li class="pure-menu-item"><a href="/cookie/^0.18/" class="pure-menu-link">
+                cookie ^0.18
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dpi/^0.1/" class="pure-menu-link">
+                dpi ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/http/^1.1/" class="pure-menu-link">
+                http ^1.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/once_cell/^1/" class="pure-menu-link">
+                once_cell ^1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/raw-window-handle/^0.6/" class="pure-menu-link">
+                raw-window-handle ^0.6
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/thiserror/^2.0/" class="pure-menu-link">
+                thiserror ^2.0
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tracing/^0.1/" class="pure-menu-link">
+                tracing ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/base64/^0.22/" class="pure-menu-link">
+                base64 ^0.22
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dom_query/^0.28.0/" class="pure-menu-link">
+                dom_query ^0.28.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/getrandom/^0.3/" class="pure-menu-link">
+                getrandom ^0.3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/glow/^0.18.0/" class="pure-menu-link">
+                glow ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/http-range/^0.1/" class="pure-menu-link">
+                http-range ^0.1
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/libloading/^0.8.9/" class="pure-menu-link">
+                libloading ^0.8.9
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/percent-encoding/^2.3/" class="pure-menu-link">
+                percent-encoding ^2.3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/pollster/^1.0.0/" class="pure-menu-link">
+                pollster ^1.0.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/sha2/^0.10/" class="pure-menu-link">
+                sha2 ^0.10
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tao/^0.37/" class="pure-menu-link">
+                tao ^0.37
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/wgpu/^23/" class="pure-menu-link">
+                wgpu ^23
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/winit/^0.30/" class="pure-menu-link">
+                winit ^0.30
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dirs/^7/" class="pure-menu-link">
+                dirs ^7
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/gdkx11/^0.18/" class="pure-menu-link">
+                gdkx11 ^0.18
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/gtk/^0.18/" class="pure-menu-link">
+                gtk ^0.18
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/javascriptcore-rs/=1.1.2/" class="pure-menu-link">
+                javascriptcore-rs =1.1.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/percent-encoding/^2.3/" class="pure-menu-link">
+                percent-encoding ^2.3
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/soup3/^0.5/" class="pure-menu-link">
+                soup3 ^0.5
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/webkit2gtk/=2.0.2/" class="pure-menu-link">
+                webkit2gtk =2.0.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/webkit2gtk-sys/=2.0.2/" class="pure-menu-link">
+                webkit2gtk-sys =2.0.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/x11-dl/^2.21/" class="pure-menu-link">
+                x11-dl ^2.21
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/x11-dl/^2.21/" class="pure-menu-link">
+                x11-dl ^2.21
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/base64/^0.22/" class="pure-menu-link">
+                base64 ^0.22
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/crossbeam-channel/^0.5/" class="pure-menu-link">
+                crossbeam-channel ^0.5
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dom_query/^0.28.0/" class="pure-menu-link">
+                dom_query ^0.28.0
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/jni/^0.21/" class="pure-menu-link">
+                jni ^0.21
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/libc/^0.2/" class="pure-menu-link">
+                libc ^0.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/ndk/^0.9/" class="pure-menu-link">
+                ndk ^0.9
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/sha2/^0.10/" class="pure-menu-link">
+                sha2 ^0.10
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tao-macros/^0.1.4/" class="pure-menu-link">
+                tao-macros ^0.1.4
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-ui-kit/^0.3.2/" class="pure-menu-link">
+                objc2-ui-kit ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-app-kit/^0.3.2/" class="pure-menu-link">
+                objc2-app-kit ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dunce/^1/" class="pure-menu-link">
+                dunce ^1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/webview2-com/^0.39/" class="pure-menu-link">
+                webview2-com ^0.39
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/windows/^0.62/" class="pure-menu-link">
+                windows ^0.62
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/windows-core/^0.62/" class="pure-menu-link">
+                windows-core ^0.62
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/windows-version/^0.1/" class="pure-menu-link">
+                windows-version ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/block2/^0.6/" class="pure-menu-link">
+                block2 ^0.6
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dirs/^7/" class="pure-menu-link">
+                dirs ^7
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2/^0.6.4/" class="pure-menu-link">
+                objc2 ^0.6.4
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-core-foundation/^0.3.2/" class="pure-menu-link">
+                objc2-core-foundation ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-foundation/^0.3.2/" class="pure-menu-link">
+                objc2-foundation ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-web-kit/^0.3.2/" class="pure-menu-link">
+                objc2-web-kit ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/url/^2.5/" class="pure-menu-link">
+                url ^2.5
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-foundation/^0.3.2/" class="pure-menu-link">
+                objc2-foundation ^0.3.2
+                
+                    <i class="dependencies build">build</i>
+                    
+                
+            </a>
+        </li>
+                                    </ul>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="pure-u-1-2">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Versions</li>
+
+                            <li class="pure-menu-item">
+                                <div class="pure-menu pure-menu-scrollable sub-menu" id="releases-list" tabindex="-1" data-url="/crate/wry/latest/menus/releases/wry/struct.WebViewBuilder.html">
+                                    <span class="rotate"><span class="fa fa-solid fa-spinner " aria-hidden="true"></span></span>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                    
+                    
+                    <div class="pure-g">
+                        <div class="pure-u-1">
+                            <ul class="pure-menu-list">
+                                <li>
+                                    <a href="/crate/wry/latest" class="pure-menu-link">
+                                        <b>83.24%</b>
+                                        of the crate is documented
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div></div>
+        </li><li class="pure-menu-item pure-menu-has-children">
+                <a href="#" class="pure-menu-link" aria-label="Platform">
+                    <span class="fa fa-solid fa-gears " aria-hidden="true"></span>
+                    <span class="title">Platform</span>
+                </a>
+
+                
+                <ul class="pure-menu-children" id="platforms" data-url="/crate/wry/latest/menus/platforms/wry/struct.WebViewBuilder.html"><li class="pure-menu-item">
+            <a href="/crate/wry/latest/target-redirect/x86_64-apple-darwin/wry/struct.WebViewBuilder.html" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-apple-darwin</a>
+        </li><li class="pure-menu-item">
+            <a href="/crate/wry/latest/target-redirect/x86_64-pc-windows-msvc/wry/struct.WebViewBuilder.html" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-pc-windows-msvc</a>
+        </li><li class="pure-menu-item">
+            <a href="/crate/wry/latest/target-redirect/wry/struct.WebViewBuilder.html" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-unknown-linux-gnu</a>
+        </li></ul>
+            </li><li class="pure-menu-item">
+                <a href="/crate/wry/latest/features" title="Browse available feature flags of wry-0.57.0" class="pure-menu-link">
+                    <span class="fa fa-solid fa-flag " aria-hidden="true"></span>
+                    <span class="title">Feature flags</span>
+                </a>
+            </li>
+        
+    
+    <li id="crate-warnings" class="pure-menu-item hidden" data-url="/-/partial/crate-warnings/wry/"></li>
+</ul><div class="spacer"></div>
+                
+                <div id="abnormalities" class="hidden"></div>
+
+                <ul class="pure-menu-list">
+                    <li class="pure-menu-item pure-menu-has-children">
+                        <a href="#" class="pure-menu-link" aria-label="docs.rs">docs.rs</a>
+                        <ul class="pure-menu-children aligned-icons"><li class="pure-menu-item"><a class="pure-menu-link" href="/about"><span class="fa fa-solid fa-circle-info " aria-hidden="true"></span> About docs.rs</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/badges"><span class="fa fa-brands fa-fonticons " aria-hidden="true"></span> Badges</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/builds"><span class="fa fa-solid fa-gears " aria-hidden="true"></span> Builds</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/metadata"><span class="fa fa-solid fa-table " aria-hidden="true"></span> Metadata</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/redirections"><span class="fa fa-solid fa-road " aria-hidden="true"></span> Shorthand URLs</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/download"><span class="fa fa-solid fa-download " aria-hidden="true"></span> Download</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/rustdoc-json"><span class="fa fa-solid fa-file-code " aria-hidden="true"></span> Rustdoc JSON</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/releases/queue"><span class="fa fa-solid fa-gears " aria-hidden="true"></span> Build queue</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs" target="_blank"><span class="fa fa-solid fa-shield-halved " aria-hidden="true"></span> Privacy policy</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                <ul class="pure-menu-list"><li class="pure-menu-item pure-menu-has-children">
+                        <a href="#" class="pure-menu-link" aria-label="Rust">Rust</a>
+                        <ul class="pure-menu-children">
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://www.rust-lang.org/" target="_blank">Rust website</a></li>
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/book/" target="_blank">The Book</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/std/" target="_blank">Standard Library API Reference</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/rust-by-example/" target="_blank">Rust by Example</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/cargo/guide/" target="_blank">The Cargo Guide</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/nightly/clippy" target="_blank">Clippy Documentation</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <div id="search-input-nav">
+                    <label for="nav-search">
+                        <span class="fa fa-solid fa-magnifying-glass " aria-hidden="true"></span>
+                    </label>
+
+                    
+                    
+                    <input id="nav-search" name="query" type="text" aria-label="Find crate by search query" tabindex="-1"
+                        placeholder="Find crate"
+                        >
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<div id="alerts" class="hidden"></div><div class="rustdoc struct container-rustdoc" id="rustdoc_body_wrapper" tabindex="-1"><script async src="/-/static/menu.js?0-0-0-1733306b4665170461f7ed5676aa80650abaefbb-2026-10-07"></script>
+<script async src="/-/static/index.js?0-0-0-1733306b4665170461f7ed5676aa80650abaefbb-2026-10-07"></script>
+
+<iframe src="/-/storage-change-detection.html" width="0" height="0" style="display: none"></iframe><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">WebViewBuilder</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../wry/index.html">wry</a><span class="version">0.57.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">WebView<wbr>Builder</a></h2><h3><a href="#implementations">Associated Functions</a></h3><ul class="block method"><li><a href="#method.new" title="new">new</a></li><li><a href="#method.new_with_web_context" title="new_with_web_context">new_with_web_context</a></li></ul><h3><a href="#implementations">Methods</a></h3><ul class="block method"><li><a href="#method.build" title="build">build</a></li><li><a href="#method.build_as_child" title="build_as_child">build_as_child</a></li><li><a href="#method.with_accept_first_mouse" title="with_accept_first_mouse">with_accept_first_mouse</a></li><li><a href="#method.with_asynchronous_custom_protocol" title="with_asynchronous_custom_protocol">with_asynchronous_custom_protocol</a></li><li><a href="#method.with_autoplay" title="with_autoplay">with_autoplay</a></li><li><a href="#method.with_back_forward_navigation_gestures" title="with_back_forward_navigation_gestures">with_back_forward_navigation_gestures</a></li><li><a href="#method.with_background_color" title="with_background_color">with_background_color</a></li><li><a href="#method.with_background_throttling" title="with_background_throttling">with_background_throttling</a></li><li><a href="#method.with_bounds" title="with_bounds">with_bounds</a></li><li><a href="#method.with_clipboard" title="with_clipboard">with_clipboard</a></li><li><a href="#method.with_custom_protocol" title="with_custom_protocol">with_custom_protocol</a></li><li><a href="#method.with_devtools" title="with_devtools">with_devtools</a></li><li><a href="#method.with_document_title_changed_handler" title="with_document_title_changed_handler">with_document_title_changed_handler</a></li><li><a href="#method.with_download_completed_handler" title="with_download_completed_handler">with_download_completed_handler</a></li><li><a href="#method.with_download_started_handler" title="with_download_started_handler">with_download_started_handler</a></li><li><a href="#method.with_drag_drop_handler" title="with_drag_drop_handler">with_drag_drop_handler</a></li><li><a href="#method.with_focused" title="with_focused">with_focused</a></li><li><a href="#method.with_general_autofill_enabled" title="with_general_autofill_enabled">with_general_autofill_enabled</a></li><li><a href="#method.with_headers" title="with_headers">with_headers</a></li><li><a href="#method.with_hotkeys_zoom" title="with_hotkeys_zoom">with_hotkeys_zoom</a></li><li><a href="#method.with_html" title="with_html">with_html</a></li><li><a href="#method.with_id" title="with_id">with_id</a></li><li><a href="#method.with_incognito" title="with_incognito">with_incognito</a></li><li><a href="#method.with_initialization_script" title="with_initialization_script">with_initialization_script</a></li><li><a href="#method.with_initialization_script_for_main_only" title="with_initialization_script_for_main_only">with_initialization_script_for_main_only</a></li><li><a href="#method.with_ipc_handler" title="with_ipc_handler">with_ipc_handler</a></li><li><a href="#method.with_javascript_disabled" title="with_javascript_disabled">with_javascript_disabled</a></li><li><a href="#method.with_navigation_handler" title="with_navigation_handler">with_navigation_handler</a></li><li><a href="#method.with_new_window_req_handler" title="with_new_window_req_handler">with_new_window_req_handler</a></li><li><a href="#method.with_on_page_load_handler" title="with_on_page_load_handler">with_on_page_load_handler</a></li><li><a href="#method.with_permission_handler" title="with_permission_handler">with_permission_handler</a></li><li><a href="#method.with_proxy_config" title="with_proxy_config">with_proxy_config</a></li><li><a href="#method.with_transparent" title="with_transparent">with_transparent</a></li><li><a href="#method.with_url" title="with_url">with_url</a></li><li><a href="#method.with_url_and_headers" title="with_url_and_headers">with_url_and_headers</a></li><li><a href="#method.with_user_agent" title="with_user_agent">with_user_agent</a></li><li><a href="#method.with_visible" title="with_visible">with_visible</a></li></ul><h3><a href="#trait-implementations">Trait Implementations</a></h3><ul class="block trait-implementation"><li><a href="#impl-WebViewBuilderExtUnix%3C'a%3E-for-WebViewBuilder%3C'a%3E" title="WebViewBuilderExtUnix&#60;&#39;a&#62;">WebViewBuilderExtUnix&#60;&#39;a&#62;</a></li></ul><h3><a href="#synthetic-implementations">Auto Trait Implementations</a></h3><ul class="block synthetic-implementation"><li><a href="#impl-RefUnwindSafe-for-WebViewBuilder%3C'a%3E" title="!RefUnwindSafe">!RefUnwindSafe</a></li><li><a href="#impl-Send-for-WebViewBuilder%3C'a%3E" title="!Send">!Send</a></li><li><a href="#impl-Sync-for-WebViewBuilder%3C'a%3E" title="!Sync">!Sync</a></li><li><a href="#impl-UnwindSafe-for-WebViewBuilder%3C'a%3E" title="!UnwindSafe">!UnwindSafe</a></li><li><a href="#impl-Freeze-for-WebViewBuilder%3C'a%3E" title="Freeze">Freeze</a></li><li><a href="#impl-Unpin-for-WebViewBuilder%3C'a%3E" title="Unpin">Unpin</a></li><li><a href="#impl-UnsafeUnpin-for-WebViewBuilder%3C'a%3E" title="UnsafeUnpin">UnsafeUnpin</a></li></ul><h3><a href="#blanket-implementations">Blanket Implementations</a></h3><ul class="block blanket-implementation"><li><a href="#impl-Any-for-T" title="Any">Any</a></li><li><a href="#impl-Borrow%3CT%3E-for-T" title="Borrow&#60;T&#62;">Borrow&#60;T&#62;</a></li><li><a href="#impl-BorrowMut%3CT%3E-for-T" title="BorrowMut&#60;T&#62;">BorrowMut&#60;T&#62;</a></li><li><a href="#impl-From%3CT%3E-for-T" title="From&#60;T&#62;">From&#60;T&#62;</a></li><li><a href="#impl-Into%3CU%3E-for-T" title="Into&#60;U&#62;">Into&#60;U&#62;</a></li><li><a href="#impl-TryFrom%3CU%3E-for-T" title="TryFrom&#60;U&#62;">TryFrom&#60;U&#62;</a></li><li><a href="#impl-TryInto%3CU%3E-for-T" title="TryInto&#60;U&#62;">TryInto&#60;U&#62;</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate wry</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">wry</a></div><h1>Struct <span class="struct">WebView<wbr>Builder</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/wry/lib.rs.html#902-907">Source</a> </span></div><pre class="rust item-decl"><code>pub struct WebViewBuilder&lt;'a&gt; { <span class="comment">/* private fields */</span> }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Builder type of <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>.</p>
+<p><a href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder"><code>WebViewBuilder</code></a> / <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a> are the basic building blocks to construct WebView contents and
+scripts for those who prefer to control fine grained window creation and event handling.
+<a href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder"><code>WebViewBuilder</code></a> provides ability to setup initialization before web engine starts.</p>
+</div></details><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-WebViewBuilder%3C'a%3E" class="impl"><a class="src rightside" href="../src/wry/lib.rs.html#909-1577">Source</a><a href="#impl-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.new" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#911-918">Source</a><h4 class="code-header">pub fn <a href="#method.new" class="fn">new</a>() -&gt; Self</h4></section></summary><div class="docblock"><p>Create a new <a href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder"><code>WebViewBuilder</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.new_with_web_context" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#921-933">Source</a><h4 class="code-header">pub fn <a href="#method.new_with_web_context" class="fn">new_with_web_context</a>(web_context: &amp;'a mut <a class="struct" href="struct.WebContext.html" title="struct wry::WebContext">WebContext</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Create a new <a href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder"><code>WebViewBuilder</code></a> with a web context that can be shared with multiple <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>s.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_id" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#936-939">Source</a><h4 class="code-header">pub fn <a href="#method.with_id" class="fn">with_id</a>(self, id: <a class="type" href="type.WebViewId.html" title="type wry::WebViewId">WebViewId</a>&lt;'a&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Set an id that will be passed when this webview makes requests in certain callbacks.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_back_forward_navigation_gestures" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#946-949">Source</a><h4 class="code-header">pub fn <a href="#method.with_back_forward_navigation_gestures" class="fn">with_back_forward_navigation_gestures</a>(self, gesture: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Indicates whether horizontal swipe gestures trigger backward and forward page navigation.</p>
+<h6 id="platform-specific"><a class="doc-anchor" href="#platform-specific">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Android / iOS:</strong> Unsupported.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_transparent" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#956-959">Source</a><h4 class="code-header">pub fn <a href="#method.with_transparent" class="fn">with_transparent</a>(self, transparent: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Sets whether the WebView should be transparent.</p>
+<h6 id="platform-specific-1"><a class="doc-anchor" href="#platform-specific-1">§</a>Platform-specific:</h6>
+<p><strong>Windows 7</strong>: Not supported.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_background_color" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#972-975">Source</a><h4 class="code-header">pub fn <a href="#method.with_background_color" class="fn">with_background_color</a>(self, background_color: <a class="type" href="type.RGBA.html" title="type wry::RGBA">RGBA</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Specify the webview background color. This will be ignored if <code>transparent</code> is set to <code>true</code>.</p>
+<p>The color uses the RGBA format.</p>
+<h6 id="platform-specific-2"><a class="doc-anchor" href="#platform-specific-2">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>macOS</strong>: Disables the default white WKWebView background via the <code>drawsBackground</code> KVC key
+(same as the <code>transparent</code> feature) and sets <code>underPageBackgroundColor</code> (macOS 12+) for overscroll areas.</li>
+<li><strong>Windows</strong>:
+<ul>
+<li>on Windows 7, transparency is not supported and the alpha value will be ignored.</li>
+<li>on Windows higher than 7: translucent colors are not supported so any alpha value other than <code>0</code> will be replaced by <code>255</code></li>
+</ul>
+</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_visible" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#978-981">Source</a><h4 class="code-header">pub fn <a href="#method.with_visible" class="fn">with_visible</a>(self, visible: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Sets whether the WebView should be visible or not.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_autoplay" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#984-987">Source</a><h4 class="code-header">pub fn <a href="#method.with_autoplay" class="fn">with_autoplay</a>(self, autoplay: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Sets whether all media can be played without user interaction.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_initialization_script" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1011-1013">Source</a><h4 class="code-header">pub fn <a href="#method.with_initialization_script" class="fn">with_initialization_script</a>&lt;S: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;&gt;(self, js: S) -&gt; Self</h4></section></summary><div class="docblock"><p>Initialize javascript code when loading new pages. When webview load a new page, this
+initialization code will be executed. It is guaranteed that code is executed before
+<code>window.onload</code>.</p>
+<h6 id="example"><a class="doc-anchor" href="#example">§</a>Example</h6>
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">let </span>webview = WebViewBuilder::new()
+  .with_initialization_script(<span class="string">"console.log('Running inside main frame only')"</span>)
+  .with_url(<span class="string">"https://tauri.app"</span>)
+  .build(<span class="kw-2">&amp;</span>window)
+  .unwrap();</code></pre></div><h6 id="platform-specific-3"><a class="doc-anchor" href="#platform-specific-3">§</a>Platform-specific</h6>
+<ul>
+<li><strong>Windows:</strong> scripts are always added to subframes.</li>
+<li><strong>Android:</strong> When <a href="https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)">addDocumentStartJavaScript</a> is not supported,
+we prepend them to each HTML head (implementation only supported on custom protocol URLs).
+For remote URLs, we use <a href="https://developer.android.com/reference/android/webkit/WebViewClient#onPageStarted(android.webkit.WebView,%20java.lang.String,%20android.graphics.Bitmap)">onPageStarted</a> which is not guaranteed to run before other scripts.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_initialization_script_for_main_only" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1033-1049">Source</a><h4 class="code-header">pub fn <a href="#method.with_initialization_script_for_main_only" class="fn">with_initialization_script_for_main_only</a>&lt;S: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;&gt;(
+    self,
+    js: S,
+    for_main_frame_only: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Same as <a href="struct.WebViewBuilder.html#method.with_initialization_script" title="method wry::WebViewBuilder::with_initialization_script"><code>with_initialization_script</code></a> but with option to inject into main frame only or sub frames.</p>
+<h6 id="example-1"><a class="doc-anchor" href="#example-1">§</a>Example</h6>
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">let </span>webview = WebViewBuilder::new()
+  .with_initialization_script_for_main_only(<span class="string">"console.log('Running inside main frame only')"</span>, <span class="bool-val">true</span>)
+  .with_initialization_script_for_main_only(<span class="string">"console.log('Running  main frame and sub frames')"</span>, <span class="bool-val">false</span>)
+  .with_url(<span class="string">"https://tauri.app"</span>)
+  .build(<span class="kw-2">&amp;</span>window)
+  .unwrap();</code></pre></div><h6 id="platform-specific-4"><a class="doc-anchor" href="#platform-specific-4">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Windows:</strong> scripts are always added to subframes regardless of the <code>for_main_frame_only</code> option.</li>
+<li><strong>Android</strong>: When <a href="https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)">addDocumentStartJavaScript</a> is not supported, scripts are always injected into main frame only.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_custom_protocol" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1076-1109">Source</a><h4 class="code-header">pub fn <a href="#method.with_custom_protocol" class="fn">with_custom_protocol</a>&lt;F&gt;(self, name: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, handler: F) -&gt; Self<div class="where">where
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="type" href="type.WebViewId.html" title="type wry::WebViewId">WebViewId</a>&lt;'_&gt;, <a class="struct" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/request/struct.Request.html" title="struct http::request::Request">Request</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>&gt;&gt;) -&gt; <a class="struct" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/response/struct.Response.html" title="struct http::response::Response">Response</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/alloc/borrow/enum.Cow.html" title="enum alloc::borrow::Cow">Cow</a>&lt;'static, [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>]&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section></summary><div class="docblock"><p>Register custom loading protocols with pairs of scheme uri string and a handling
+closure.</p>
+<p>The closure takes a <a href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/request/struct.Request.html" title="struct http::request::Request">Request</a> and returns a <a href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/response/struct.Response.html" title="struct http::response::Response">Response</a></p>
+<p>When registering a custom protocol with the same name, only the last registered one will be used.</p>
+<h5 id="warning"><a class="doc-anchor" href="#warning">§</a>Warning</h5>
+<p>Pages loaded from custom protocol will have different Origin on different platforms. And
+servers which enforce CORS will need to add exact same Origin header in <code>Access-Control-Allow-Origin</code>
+if you wish to send requests with native <code>fetch</code> and <code>XmlHttpRequest</code> APIs. Here are the
+different Origin headers across platforms:</p>
+<ul>
+<li>macOS, iOS and Linux: <code>&lt;scheme_name&gt;://&lt;path&gt;</code> (so it will be `wry://path/to/page).</li>
+<li>Windows and Android: <code>http://&lt;scheme_name&gt;.&lt;path&gt;</code> by default (so it will be <code>http://wry.path/to/page</code>). To use <code>https</code> instead of <code>http</code>, use [<code>WebViewBuilderExtWindows::with_https_scheme</code>] and [<code>WebViewBuilderExtAndroid::with_https_scheme</code>].</li>
+</ul>
+<h5 id="reading-assets-on-mobile"><a class="doc-anchor" href="#reading-assets-on-mobile">§</a>Reading assets on mobile</h5>
+<ul>
+<li>Android: For loading content from the <code>assets</code> folder (which is copied to the Andorid apk) please
+use the function [<code>with_asset_loader</code>] from [<code>WebViewBuilderExtAndroid</code>] instead.
+This function on Android can only be used to serve assets you can embed in the binary or are
+elsewhere in Android (provided the app has appropriate access), but not from the <code>assets</code>
+folder which lives within the apk. For the cases where this can be used, it works the same as in macOS and Linux.</li>
+<li>iOS: To get the path of your assets, you can call <a href="https://docs.rs/core-foundation/latest/core_foundation/bundle/struct.CFBundle.html#method.resources_path"><code>CFBundle::resources_path</code></a>. So url like <code>wry://assets/index.html</code> could get the html file in assets directory.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_asynchronous_custom_protocol" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1140-1167">Source</a><h4 class="code-header">pub fn <a href="#method.with_asynchronous_custom_protocol" class="fn">with_asynchronous_custom_protocol</a>&lt;F&gt;(
+    self,
+    name: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>,
+    handler: F,
+) -&gt; Self<div class="where">where
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="type" href="type.WebViewId.html" title="type wry::WebViewId">WebViewId</a>&lt;'_&gt;, <a class="struct" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/request/struct.Request.html" title="struct http::request::Request">Request</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>&gt;&gt;, <a class="struct" href="struct.RequestAsyncResponder.html" title="struct wry::RequestAsyncResponder">RequestAsyncResponder</a>) + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section></summary><div class="docblock"><p>Same as <a href="struct.WebViewBuilder.html#method.with_custom_protocol" title="method wry::WebViewBuilder::with_custom_protocol"><code>Self::with_custom_protocol</code></a> but with an asynchronous responder.</p>
+<p>When registering a custom protocol with the same name, only the last registered one will be used.</p>
+<h5 id="warning-1"><a class="doc-anchor" href="#warning-1">§</a>Warning</h5>
+<p>Pages loaded from custom protocol will have different Origin on different platforms. And
+servers which enforce CORS will need to add exact same Origin header in <code>Access-Control-Allow-Origin</code>
+if you wish to send requests with native <code>fetch</code> and <code>XmlHttpRequest</code> APIs. Here are the
+different Origin headers across platforms:</p>
+<ul>
+<li>macOS, iOS and Linux: <code>&lt;scheme_name&gt;://&lt;path&gt;</code> (so it will be `wry://path/to/page).</li>
+<li>Windows and Android: <code>http://&lt;scheme_name&gt;.&lt;path&gt;</code> by default (so it will be <code>http://wry.path/to/page</code>). To use <code>https</code> instead of <code>http</code>, use [<code>WebViewBuilderExtWindows::with_https_scheme</code>] and [<code>WebViewBuilderExtAndroid::with_https_scheme</code>].</li>
+</ul>
+<h5 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>wry::{WebViewBuilder, raw_window_handle};
+WebViewBuilder::new()
+  .with_asynchronous_custom_protocol(<span class="string">"wry"</span>.into(), |_webview_id, request, responder| {
+    <span class="comment">// here you can use a tokio task, thread pool or anything
+    // to do heavy computation to resolve your request
+    // e.g. downloading files, opening the camera...
+    </span>std::thread::spawn(<span class="kw">move </span>|| {
+      std::thread::sleep(std::time::Duration::from_secs(<span class="number">2</span>));
+      responder.respond(http::Response::builder().body(Vec::new()).unwrap());
+    });
+  });</code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="method.with_ipc_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1175-1181">Source</a><h4 class="code-header">pub fn <a href="#method.with_ipc_handler" class="fn">with_ipc_handler</a>&lt;F&gt;(self, handler: F) -&gt; Self<div class="where">where
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="struct" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/request/struct.Request.html" title="struct http::request::Request">Request</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;) + 'static,</div></h4></section></summary><div class="docblock"><p>Set the IPC handler to receive the message from Javascript on webview
+using <code>window.ipc.postMessage("insert_message_here")</code> to host Rust code.</p>
+<h6 id="platform-specific-5"><a class="doc-anchor" href="#platform-specific-5">§</a>Platform-specific</h6>
+<ul>
+<li><strong>Linux / Android</strong>: The request URL is not supported on iframes and the main frame URL is used instead.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_drag_drop_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1198-1204">Source</a><h4 class="code-header">pub fn <a href="#method.with_drag_drop_handler" class="fn">with_drag_drop_handler</a>&lt;F&gt;(self, handler: F) -&gt; Self<div class="where">where
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="enum" href="enum.DragDropEvent.html" title="enum wry::DragDropEvent">DragDropEvent</a>) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> + 'static,</div></h4></section></summary><div class="docblock"><p>A handler closure to process incoming <a href="enum.DragDropEvent.html" title="enum wry::DragDropEvent"><code>DragDropEvent</code></a> of the webview.</p>
+<h6 id="blocking-os-default-behavior"><a class="doc-anchor" href="#blocking-os-default-behavior">§</a>Blocking OS Default Behavior</h6>
+<p>Return <code>true</code> in the callback to block the OS’ default behavior.</p>
+<p>Note, that if you do block this behavior, it won’t be possible to drop files on <code>&lt;input type="file"&gt;</code> forms.
+Also note, that it’s not possible to manually set the value of a <code>&lt;input type="file"&gt;</code> via JavaScript for security reasons.</p>
+<h6 id="platform-specific-6"><a class="doc-anchor" href="#platform-specific-6">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Windows:</strong> This will disable the HTML Drag and Drop APIs like <code>draggable="true"</code>,
+since we replace the drag drop handler of WebView 2 on Windows.
+<code>handler</code>’s return value is ignored on Windows.</li>
+<li><strong>Android / iOS:</strong> Unsupported.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_url_and_headers" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1218-1222">Source</a><h4 class="code-header">pub fn <a href="#method.with_url_and_headers" class="fn">with_url_and_headers</a>(
+    self,
+    url: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;,
+    headers: <a class="struct" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/header/map/struct.HeaderMap.html" title="struct http::header::map::HeaderMap">HeaderMap</a>,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Load the provided URL with given headers when the builder calling <a href="struct.WebViewBuilder.html#method.build" title="method wry::WebViewBuilder::build"><code>WebViewBuilder::build</code></a> to create the <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>.
+The provided URL must be valid.</p>
+<h6 id="note"><a class="doc-anchor" href="#note">§</a>Note</h6>
+<p>Data URLs are not supported, use <a href="struct.WebViewBuilder.html#method.with_html" title="method wry::WebViewBuilder::with_html"><code>html</code></a> option instead.</p>
+<h6 id="platform-specific-7"><a class="doc-anchor" href="#platform-specific-7">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Windows and Android:</strong> if the URL’s scheme is a registered custom protocol,
+a work around is used that changes the URL this navigates to
+from <code>{protocol}://localhost/abc</code> to <code>{http_or_https}://{protocol}.localhost/abc</code></li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_url" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1236-1240">Source</a><h4 class="code-header">pub fn <a href="#method.with_url" class="fn">with_url</a>(self, url: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Load the provided URL when the builder calling <a href="struct.WebViewBuilder.html#method.build" title="method wry::WebViewBuilder::build"><code>WebViewBuilder::build</code></a> to create the <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>.
+The provided URL must be valid.</p>
+<h6 id="note-1"><a class="doc-anchor" href="#note-1">§</a>Note</h6>
+<p>Data URLs are not supported, use <a href="struct.WebViewBuilder.html#method.with_html" title="method wry::WebViewBuilder::with_html"><code>html</code></a> option instead.</p>
+<h6 id="platform-specific-8"><a class="doc-anchor" href="#platform-specific-8">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Windows and Android:</strong> if the URL’s scheme is a registered custom protocol,
+a work around is used that changes the URL this navigates to
+from <code>{protocol}://localhost/abc</code> to <code>{http_or_https}://{protocol}.localhost/abc</code></li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_headers" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1243-1246">Source</a><h4 class="code-header">pub fn <a href="#method.with_headers" class="fn">with_headers</a>(self, headers: <a class="struct" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/header/map/struct.HeaderMap.html" title="struct http::header::map::HeaderMap">HeaderMap</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Set headers used when loading the requested <a href="struct.WebViewBuilder.html#method.with_url" title="method wry::WebViewBuilder::with_url"><code>url</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_html" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1258-1261">Source</a><h4 class="code-header">pub fn <a href="#method.with_html" class="fn">with_html</a>(self, html: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Load the provided HTML string when the builder calling <a href="struct.WebViewBuilder.html#method.build" title="method wry::WebViewBuilder::build"><code>WebViewBuilder::build</code></a> to create the <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>.
+This will be ignored if <code>url</code> is provided.</p>
+<h5 id="warning-2"><a class="doc-anchor" href="#warning-2">§</a>Warning</h5>
+<p>The Page loaded from html string will have <code>null</code> origin.</p>
+<h6 id="platform-specific-9"><a class="doc-anchor" href="#platform-specific-9">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Windows:</strong> the string can not be larger than 2 MB (2 * 1024 * 1024 bytes) in total size</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_user_agent" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1269-1272">Source</a><h4 class="code-header">pub fn <a href="#method.with_user_agent" class="fn">with_user_agent</a>(self, user_agent: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a custom <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/User-Agent">user-agent</a> for the WebView.</p>
+<h6 id="platform-specific-10"><a class="doc-anchor" href="#platform-specific-10">§</a>Platform-specific</h6>
+<ul>
+<li>Windows: Requires WebView2 Runtime version 86.0.616.0 or higher, does nothing on older versions,
+see <a href="https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10790-prerelease">https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10790-prerelease</a></li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_devtools" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1285-1288">Source</a><h4 class="code-header">pub fn <a href="#method.with_devtools" class="fn">with_devtools</a>(self, devtools: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Enable or disable web inspector which is usually called devtools.</p>
+<p>Note this only enables devtools to the webview. To open it, you can call
+<a href="struct.WebView.html#method.open_devtools" title="method wry::WebView::open_devtools"><code>WebView::open_devtools</code></a>, or right click the page and open it from the context menu.</p>
+<h6 id="platform-specific-11"><a class="doc-anchor" href="#platform-specific-11">§</a>Platform-specific</h6>
+<ul>
+<li>macOS: This will call private functions on <strong>macOS</strong>. It is enabled in <strong>debug</strong> builds,
+but requires <code>devtools</code> feature flag to actually enable it in <strong>release</strong> builds.</li>
+<li>Android: Open <code>chrome://inspect/#devices</code> in Chrome to get the devtools window. Wry’s <code>WebView</code> devtools API isn’t supported on Android.</li>
+<li>iOS: Open Safari &gt; Develop &gt; [Your Device Name] &gt; [Your WebView] to get the devtools window.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_hotkeys_zoom" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1298-1301">Source</a><h4 class="code-header">pub fn <a href="#method.with_hotkeys_zoom" class="fn">with_hotkeys_zoom</a>(self, zoom: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Whether page zooming by hotkeys or gestures is enabled</p>
+<h6 id="platform-specific-12"><a class="doc-anchor" href="#platform-specific-12">§</a>Platform-specific</h6>
+<ul>
+<li>
+<p>Windows: Setting to <code>false</code> can’t disable pinch zoom on WebView2 Runtime version before 91.0.865.0,
+see <a href="https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10865-prerelease">https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10865-prerelease</a></p>
+</li>
+<li>
+<p><strong>macOS / Linux / Android / iOS</strong>: Unsupported</p>
+</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_navigation_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1307-1310">Source</a><h4 class="code-header">pub fn <a href="#method.with_navigation_handler" class="fn">with_navigation_handler</a>(
+    self,
+    callback: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> + 'static,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a navigation handler to decide if incoming url is allowed to navigate.</p>
+<p>The closure take a <code>String</code> parameter as url and returns a <code>bool</code> to determine whether the navigation should happen.
+<code>true</code> allows to navigate and <code>false</code> does not.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_permission_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1344-1350">Source</a><h4 class="code-header">pub fn <a href="#method.with_permission_handler" class="fn">with_permission_handler</a>&lt;F&gt;(self, handler: F) -&gt; Self<div class="where">where
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="enum" href="enum.PermissionKind.html" title="enum wry::PermissionKind">PermissionKind</a>) -&gt; <a class="enum" href="enum.PermissionResponse.html" title="enum wry::PermissionResponse">PermissionResponse</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section></summary><div class="docblock"><p>Set a handler to intercept permission requests from the webview.</p>
+<p>The handler receives the <a href="enum.PermissionKind.html" title="enum wry::PermissionKind"><code>PermissionKind</code></a> and should return
+the desired <a href="enum.PermissionResponse.html" title="enum wry::PermissionResponse"><code>PermissionResponse</code></a>.</p>
+<blockquote>
+<p>[!NOTE]
+This handler only triggers for new permission requests. If the user has already
+allowed or denied a permission persistently within the webview, the browser
+will use the saved preference instead of calling this handler.</p>
+</blockquote>
+<h6 id="platform-specific-13"><a class="doc-anchor" href="#platform-specific-13">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>Windows</strong>: Fully supported via WebView2’s PermissionRequested event.</li>
+<li><strong>macOS / iOS</strong>: Fully supported via WKUIDelegate’s requestMediaCapturePermission.</li>
+<li><strong>Linux</strong>: Fully supported via WebKitGTK’s permission-request signal.</li>
+<li><strong>Android</strong>: Supported via JNI bridge for geolocation, microphone, camera,
+protected media, and MIDI requests. Android runtime permissions may still
+trigger native OS prompts before access is granted.</li>
+</ul>
+<h6 id="example-2"><a class="doc-anchor" href="#example-2">§</a>Example</h6>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>webview = WebViewBuilder::new()
+    .with_permission_handler(|kind| {
+        <span class="kw">match </span>kind {
+            PermissionKind::Microphone =&gt; PermissionResponse::Allow,
+            PermissionKind::Camera =&gt; PermissionResponse::Allow,
+            <span class="kw">_ </span>=&gt; PermissionResponse::Default,
+        }
+    });</code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="method.with_download_started_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1360-1366">Source</a><h4 class="code-header">pub fn <a href="#method.with_download_started_handler" class="fn">with_download_started_handler</a>(
+    self,
+    download_started_handler: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnMut.html" title="trait core::ops::function::FnMut">FnMut</a>(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, &amp;mut <a class="struct" href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html" title="struct std::path::PathBuf">PathBuf</a>) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> + 'static,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a download started handler to manage incoming downloads.</p>
+<p>The closure takes two parameters, the first is a <code>String</code> representing the url being downloaded from and the
+second is a mutable <code>PathBuf</code> reference that (possibly) represents where the file will be downloaded to. The latter
+parameter can be used to set the download location by assigning a new path to it, the assigned path <em>must</em> be
+absolute. The closure returns a <code>bool</code> to allow or deny the download.</p>
+<p>By default a handler that allows all downloads is set to match browser behavior.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_download_completed_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1381-1387">Source</a><h4 class="code-header">pub fn <a href="#method.with_download_completed_handler" class="fn">with_download_completed_handler</a>(
+    self,
+    download_completed_handler: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html" title="struct std::path::PathBuf">PathBuf</a>&gt;, <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) + 'static,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Sets a download completion handler to manage downloads that have finished.</p>
+<p>The closure is fired when the download completes, whether it was successful or not.
+The closure takes a <code>String</code> representing the URL of the original download request, an <code>Option&lt;PathBuf&gt;</code>
+potentially representing the filesystem path the file was downloaded to, and a <code>bool</code> indicating if the download
+succeeded. A value of <code>None</code> being passed instead of a <code>PathBuf</code> does not necessarily indicate that the download
+did not succeed, and may instead indicate some other failure, always check the third parameter if you need to
+know if the download succeeded.</p>
+<h6 id="platform-specific-14"><a class="doc-anchor" href="#platform-specific-14">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>macOS</strong>: The second parameter indicating the path the file was saved to, is always empty,
+due to API limitations.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_clipboard" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1393-1396">Source</a><h4 class="code-header">pub fn <a href="#method.with_clipboard" class="fn">with_clipboard</a>(self, clipboard: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Enables clipboard access for the page rendered on <strong>Linux</strong> and <strong>Windows</strong>.</p>
+<p>macOS doesn’t provide such method and is always enabled by default. But your app will still need to add menu
+item accelerators to use the clipboard shortcuts.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_new_window_req_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1405-1411">Source</a><h4 class="code-header">pub fn <a href="#method.with_new_window_req_handler" class="fn">with_new_window_req_handler</a>(
+    self,
+    callback: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, <a class="struct" href="struct.NewWindowFeatures.html" title="struct wry::NewWindowFeatures">NewWindowFeatures</a>) -&gt; <a class="enum" href="enum.NewWindowResponse.html" title="enum wry::NewWindowResponse">NewWindowResponse</a> + 'static,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a new window request handler to decide if incoming url is allowed to be opened.</p>
+<p>A new window is requested to be opened by the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/open">window.open</a> API.</p>
+<p>The closure take the URL to open and the window features object and returns <a href="enum.NewWindowResponse.html" title="enum wry::NewWindowResponse"><code>NewWindowResponse</code></a> to determine whether the window should open.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_accept_first_mouse" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1418-1421">Source</a><h4 class="code-header">pub fn <a href="#method.with_accept_first_mouse" class="fn">with_accept_first_mouse</a>(self, accept_first_mouse: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Sets whether clicking an inactive window also clicks through to the webview. Default is <code>false</code>.</p>
+<h6 id="platform-specific-15"><a class="doc-anchor" href="#platform-specific-15">§</a>Platform-specific</h6>
+<p>This configuration only impacts macOS.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_document_title_changed_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1424-1430">Source</a><h4 class="code-header">pub fn <a href="#method.with_document_title_changed_handler" class="fn">with_document_title_changed_handler</a>(
+    self,
+    callback: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>) + 'static,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a handler closure to process the change of the webview’s document title.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_incognito" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1440-1443">Source</a><h4 class="code-header">pub fn <a href="#method.with_incognito" class="fn">with_incognito</a>(self, incognito: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Run the WebView with incognito mode. Note that WebContext will be ignored if incognito is
+enabled.</p>
+<h6 id="platform-specific-16"><a class="doc-anchor" href="#platform-specific-16">§</a>Platform-specific:</h6>
+<ul>
+<li>Windows: Requires WebView2 Runtime version 101.0.1210.39 or higher, does nothing on older versions,
+see <a href="https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039">https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039</a></li>
+<li><strong>Android:</strong> Unsupported yet.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_on_page_load_handler" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1446-1452">Source</a><h4 class="code-header">pub fn <a href="#method.with_on_page_load_handler" class="fn">with_on_page_load_handler</a>(
+    self,
+    handler: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.Fn.html" title="trait core::ops::function::Fn">Fn</a>(<a class="enum" href="enum.PageLoadEvent.html" title="enum wry::PageLoadEvent">PageLoadEvent</a>, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>) + 'static,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a handler to process page loading events.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_proxy_config" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1458-1461">Source</a><h4 class="code-header">pub fn <a href="#method.with_proxy_config" class="fn">with_proxy_config</a>(self, configuration: <a class="enum" href="enum.ProxyConfig.html" title="enum wry::ProxyConfig">ProxyConfig</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Set a proxy configuration for the webview. Supports HTTP CONNECT and SOCKSv5 proxies</p>
+<ul>
+<li><strong>macOS</strong>: Requires macOS 14.0+ and the <code>mac-proxy</code> feature flag to be enabled.</li>
+<li><strong>Android / iOS:</strong> Not supported.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_focused" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1468-1471">Source</a><h4 class="code-header">pub fn <a href="#method.with_focused" class="fn">with_focused</a>(self, focused: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Set whether the webview should be focused when created.</p>
+<h6 id="platform-specific-17"><a class="doc-anchor" href="#platform-specific-17">§</a>Platform-specific:</h6>
+<ul>
+<li><strong>macOS / Android / iOS:</strong> Unsupported.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_bounds" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1477-1480">Source</a><h4 class="code-header">pub fn <a href="#method.with_bounds" class="fn">with_bounds</a>(self, bounds: <a class="struct" href="struct.Rect.html" title="struct wry::Rect">Rect</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Specify the webview position relative to its parent if it will be created as a child
+or if created using <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk" title="method wry::WebViewBuilderExtUnix::build_gtk"><code>WebViewBuilderExtUnix::build_gtk</code></a> with <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/fixed/struct.Fixed.html" title="struct gtk::auto::fixed::Fixed"><code>gtk::Fixed</code></a>.</p>
+<p>Defaults to <code>x: 0, y: 0, width: 200, height: 200</code>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_background_throttling" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1495-1498">Source</a><h4 class="code-header">pub fn <a href="#method.with_background_throttling" class="fn">with_background_throttling</a>(
+    self,
+    policy: <a class="enum" href="enum.BackgroundThrottlingPolicy.html" title="enum wry::BackgroundThrottlingPolicy">BackgroundThrottlingPolicy</a>,
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Set whether background throttling should be disabled.</p>
+<p>By default, browsers throttle timers and even unload the whole tab (view) to free resources after roughly 5 minutes when
+a view became minimized or hidden. This will permanently suspend all tasks until the documents visibility state
+changes back from hidden to visible by bringing the view back to the foreground.</p>
+<h6 id="platform-specific-18"><a class="doc-anchor" href="#platform-specific-18">§</a>Platform-specific</h6>
+<ul>
+<li><strong>Linux / Windows / Android</strong>: Unsupported. Workarounds like a pending WebLock transaction might suffice.</li>
+<li><strong>iOS</strong>: Supported since version 17.0+.</li>
+<li><strong>macOS</strong>: Supported since version 14.0+.</li>
+</ul>
+<p>see <a href="https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578">https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578</a></p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_javascript_disabled" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1501-1504">Source</a><h4 class="code-header">pub fn <a href="#method.with_javascript_disabled" class="fn">with_javascript_disabled</a>(self) -&gt; Self</h4></section></summary><div class="docblock"><p>Whether JavaScript should be disabled.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.with_general_autofill_enabled" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1522-1525">Source</a><h4 class="code-header">pub fn <a href="#method.with_general_autofill_enabled" class="fn">with_general_autofill_enabled</a>(self, enabled: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Controls the WebView’s browser-level general autofill behavior.</p>
+<p><strong>This option does not disable password or credit card autofill.</strong></p>
+<p>When enabled, the WebView may automatically populate form fields using
+previously stored data such as addresses or contact information.</p>
+<p>If not specified, this is <code>true</code> by default.</p>
+<h6 id="platform-specific-19"><a class="doc-anchor" href="#platform-specific-19">§</a>Platform-specific</h6>
+<ul>
+<li><strong>Windows</strong>: Supported. On Windows, WebView2’s autofill feature (called
+“Suggestions”) may not honor <code>autocomplete="off"</code> attributes on input
+elements in some cases. When this option is <code>false</code>, that autofill
+behavior will be disabled.</li>
+<li><strong>macOS / Linux / Android / iOS</strong>: Unsupported and ignored.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.build" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1543-1547">Source</a><h4 class="code-header">pub fn <a href="#method.build" class="fn">build</a>&lt;W: <a class="trait" href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/borrowed/trait.HasWindowHandle.html" title="trait raw_window_handle::borrowed::HasWindowHandle">HasWindowHandle</a>&gt;(self, window: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;'a W</a>) -&gt; <a class="type" href="type.Result.html" title="type wry::Result">Result</a>&lt;<a class="struct" href="struct.WebView.html" title="struct wry::WebView">WebView</a>&gt;</h4></section></summary><div class="docblock"><p>Consume the builder and create the <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a> from a type that implements <a href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/borrowed/trait.HasWindowHandle.html" title="trait raw_window_handle::borrowed::HasWindowHandle"><code>HasWindowHandle</code></a>.</p>
+<h5 id="platform-specific-20"><a class="doc-anchor" href="#platform-specific-20">§</a>Platform-specific:</h5>
+<ul>
+<li>
+<p><strong>Linux</strong>: Only X11 is supported, if you want to support Wayland too, use <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk" title="method wry::WebViewBuilderExtUnix::build_gtk"><code>WebViewBuilderExtUnix::build_gtk</code></a>.</p>
+<p>Although this method only needs an X11 window handle, we use webkit2gtk, so you still need to initialize gtk
+by callling <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/rt/fn.init.html" title="fn gtk::rt::init"><code>gtk::init</code></a> and advance its loop alongside your event loop using <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/functions/fn.main_iteration_do.html" title="fn gtk::auto::functions::main_iteration_do"><code>gtk::main_iteration_do</code></a>.
+Checkout the <a href="https://docs.rs/wry/latest/wry/#platform-considerations">Platform Considerations</a> section in the crate root documentation.</p>
+</li>
+<li>
+<p><strong>Windows</strong>: The webview will auto-resize when the passed handle is resized.</p>
+</li>
+<li>
+<p><strong>Linux (X11)</strong>: Unlike macOS and Windows, the webview will not auto-resize and you’ll need to call <a href="struct.WebView.html#method.set_bounds" title="method wry::WebView::set_bounds"><code>WebView::set_bounds</code></a> manually.</p>
+</li>
+</ul>
+<h5 id="panics"><a class="doc-anchor" href="#panics">§</a>Panics:</h5>
+<ul>
+<li>Panics if the provided handle was not supported or invalid.</li>
+<li>Panics on Linux, if <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/rt/fn.init.html" title="fn gtk::rt::init"><code>gtk::init</code></a> was not called in this thread.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.build_as_child" class="method"><a class="src rightside" href="../src/wry/lib.rs.html#1571-1576">Source</a><h4 class="code-header">pub fn <a href="#method.build_as_child" class="fn">build_as_child</a>&lt;W: <a class="trait" href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/borrowed/trait.HasWindowHandle.html" title="trait raw_window_handle::borrowed::HasWindowHandle">HasWindowHandle</a>&gt;(
+    self,
+    window: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;'a W</a>,
+) -&gt; <a class="type" href="type.Result.html" title="type wry::Result">Result</a>&lt;<a class="struct" href="struct.WebView.html" title="struct wry::WebView">WebView</a>&gt;</h4></section></summary><div class="docblock"><p>Consume the builder and create the <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a> as a child window inside the provided <a href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/borrowed/trait.HasWindowHandle.html" title="trait raw_window_handle::borrowed::HasWindowHandle"><code>HasWindowHandle</code></a>.</p>
+<h6 id="platform-specific-21"><a class="doc-anchor" href="#platform-specific-21">§</a>Platform-specific</h6>
+<ul>
+<li>
+<p><strong>Windows</strong>: This will create the webview as a child window of the <code>parent</code> window.</p>
+</li>
+<li>
+<p><strong>macOS</strong>: This will create the webview as a <code>NSView</code> subview of the <code>parent</code> window’s
+content view.</p>
+</li>
+<li>
+<p><strong>Linux</strong>: This will create the webview as a child window of the <code>parent</code> window. Only X11
+is supported. This method won’t work on Wayland.</p>
+<p>Although this methods only needs an X11 window handle, you use webkit2gtk, so you still need to initialize gtk
+by callling <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/rt/fn.init.html" title="fn gtk::rt::init"><code>gtk::init</code></a> and advance its loop alongside your event loop using <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/functions/fn.main_iteration_do.html" title="fn gtk::auto::functions::main_iteration_do"><code>gtk::main_iteration_do</code></a>.
+Checkout the <a href="https://docs.rs/wry/latest/wry/#platform-considerations">Platform Considerations</a> section in the crate root documentation.</p>
+<p>If you want to support child webviews on X11 and Wayland at the same time,
+we recommend using <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk" title="method wry::WebViewBuilderExtUnix::build_gtk"><code>WebViewBuilderExtUnix::build_gtk</code></a> with <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/fixed/struct.Fixed.html" title="struct gtk::auto::fixed::Fixed"><code>gtk::Fixed</code></a>.</p>
+</li>
+<li>
+<p><strong>Android/iOS:</strong> Unsupported.</p>
+</li>
+</ul>
+<h5 id="panics-1"><a class="doc-anchor" href="#panics-1">§</a>Panics:</h5>
+<ul>
+<li>Panics if the provided handle was not support or invalid.</li>
+<li>Panics on Linux, if <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/rt/fn.init.html" title="fn gtk::rt::init"><code>gtk::init</code></a> was not called in this thread.</li>
+</ul>
+</div></details></div></details></div><h2 id="trait-implementations" class="section-header">Trait Implementations<a href="#trait-implementations" class="anchor">§</a></h2><div id="trait-implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-WebViewBuilderExtUnix%3C'a%3E-for-WebViewBuilder%3C'a%3E" class="impl"><a class="src rightside" href="../src/wry/lib.rs.html#2058-2078">Source</a><a href="#impl-WebViewBuilderExtUnix%3C'a%3E-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; <a class="trait" href="trait.WebViewBuilderExtUnix.html" title="trait wry::WebViewBuilderExtUnix">WebViewBuilderExtUnix</a>&lt;'a&gt; for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3><span class="item-info"><div class="stab portability">Available on <strong>DragonFly BSD or FreeBSD or Linux or NetBSD or OpenBSD</strong> only.</div></span></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.build_gtk" class="method trait-impl"><a class="src rightside" href="../src/wry/lib.rs.html#2059-2067">Source</a><a href="#method.build_gtk" class="anchor">§</a><h4 class="code-header">fn <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk" class="fn">build_gtk</a>&lt;W&gt;(self, widget: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;'a W</a>) -&gt; <a class="type" href="type.Result.html" title="type wry::Result">Result</a>&lt;<a class="struct" href="struct.WebView.html" title="struct wry::WebView">WebView</a>&gt;<div class="where">where
+    W: <a class="trait" href="https://docs.rs/glib/0.18.5/x86_64-unknown-linux-gnu/glib/object/trait.IsA.html" title="trait glib::object::IsA">IsA</a>&lt;<a class="struct" href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/container/struct.Container.html" title="struct gtk::auto::container::Container">Container</a>&gt;,</div></h4></section></summary><div class='docblock'>Consume the builder and create the webview inside a GTK container widget, such as GTK window. <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk">Read more</a></div></details><details class="toggle method-toggle" open><summary><section id="method.with_extensions_path" class="method trait-impl"><a class="src rightside" href="../src/wry/lib.rs.html#2069-2072">Source</a><a href="#method.with_extensions_path" class="anchor">§</a><h4 class="code-header">fn <a href="trait.WebViewBuilderExtUnix.html#tymethod.with_extensions_path" class="fn">with_extensions_path</a>(self, path: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html" title="struct std::path::PathBuf">PathBuf</a>&gt;) -&gt; Self</h4></section></summary><div class='docblock'>Set the path from which to load extensions from.</div></details><details class="toggle method-toggle" open><summary><section id="method.with_related_view" class="method trait-impl"><a class="src rightside" href="../src/wry/lib.rs.html#2074-2077">Source</a><a href="#method.with_related_view" class="anchor">§</a><h4 class="code-header">fn <a href="trait.WebViewBuilderExtUnix.html#tymethod.with_related_view" class="fn">with_related_view</a>(self, webview: <a class="struct" href="https://docs.rs/webkit2gtk/2.0.2/x86_64-unknown-linux-gnu/webkit2gtk/auto/web_view/struct.WebView.html" title="struct webkit2gtk::auto::web_view::WebView">WebView</a>) -&gt; Self</h4></section></summary><div class='docblock'>Creates a new webview sharing the same web process with the provided webview.
+Useful if you need to link a webview to another, for instance when using the <a href="struct.WebViewBuilder.html#method.with_new_window_req_handler" title="method wry::WebViewBuilder::with_new_window_req_handler"><code>WebViewBuilder::with_new_window_req_handler</code></a>.</div></details></div></details></div><h2 id="synthetic-implementations" class="section-header">Auto Trait Implementations<a href="#synthetic-implementations" class="anchor">§</a></h2><div id="synthetic-implementations-list"><section id="impl-RefUnwindSafe-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-RefUnwindSafe-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; !<a class="trait" href="https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.RefUnwindSafe.html" title="trait core::panic::unwind_safe::RefUnwindSafe">RefUnwindSafe</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section><section id="impl-Send-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-Send-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; !<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section><section id="impl-Sync-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-Sync-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; !<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section><section id="impl-UnwindSafe-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-UnwindSafe-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; !<a class="trait" href="https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.UnwindSafe.html" title="trait core::panic::unwind_safe::UnwindSafe">UnwindSafe</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section><section id="impl-Freeze-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-Freeze-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Freeze.html" title="trait core::marker::Freeze">Freeze</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section><section id="impl-Unpin-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-Unpin-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Unpin.html" title="trait core::marker::Unpin">Unpin</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section><section id="impl-UnsafeUnpin-for-WebViewBuilder%3C'a%3E" class="impl"><a href="#impl-UnsafeUnpin-for-WebViewBuilder%3C'a%3E" class="anchor">§</a><h3 class="code-header">impl&lt;'a&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.UnsafeUnpin.html" title="trait core::marker::UnsafeUnpin">UnsafeUnpin</a> for <a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebViewBuilder</a>&lt;'a&gt;</h3></section></div><h2 id="blanket-implementations" class="section-header">Blanket Implementations<a href="#blanket-implementations" class="anchor">§</a></h2><div id="blanket-implementations-list"><details class="toggle implementors-toggle"><summary><section id="impl-Any-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/any.rs.html#141">Source</a><a href="#impl-Any-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html" title="trait core::any::Any">Any</a> for T<div class="where">where
+    T: 'static + ?<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.type_id" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/any.rs.html#142">Source</a><a href="#method.type_id" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id" class="fn">type_id</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/any/struct.TypeId.html" title="struct core::any::TypeId">TypeId</a></h4></section></summary><div class='docblock'>Gets the <code>TypeId</code> of <code>self</code>. <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id">Read more</a></div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-Borrow%3CT%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#212">Source</a><a href="#impl-Borrow%3CT%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html" title="trait core::borrow::Borrow">Borrow</a>&lt;T&gt; for T<div class="where">where
+    T: ?<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.borrow" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#214">Source</a><a href="#method.borrow" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow" class="fn">borrow</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;T</a></h4></section></summary><div class='docblock'>Immutably borrows from an owned value. <a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow">Read more</a></div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-BorrowMut%3CT%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#221">Source</a><a href="#impl-BorrowMut%3CT%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html" title="trait core::borrow::BorrowMut">BorrowMut</a>&lt;T&gt; for T<div class="where">where
+    T: ?<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.borrow_mut" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#222">Source</a><a href="#method.borrow_mut" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html#tymethod.borrow_mut" class="fn">borrow_mut</a>(&amp;mut self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;mut T</a></h4></section></summary><div class='docblock'>Mutably borrows from an owned value. <a href="https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html#tymethod.borrow_mut">Read more</a></div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-From%3CT%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#787">Source</a><a href="#impl-From%3CT%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.From.html" title="trait core::convert::From">From</a>&lt;T&gt; for T</h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.from" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#790">Source</a><a href="#method.from" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/convert/trait.From.html#tymethod.from" class="fn">from</a>(t: T) -&gt; T</h4></section></summary><div class="docblock"><p>Returns the argument unchanged.</p>
+</div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-Into%3CU%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#769-771">Source</a><a href="#impl-Into%3CU%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T, U&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;U&gt; for T<div class="where">where
+    U: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.From.html" title="trait core::convert::From">From</a>&lt;T&gt;,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.into" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#779">Source</a><a href="#method.into" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into" class="fn">into</a>(self) -&gt; U</h4></section></summary><div class="docblock"><p>Calls <code>U::from(self)</code>.</p>
+<p>That is, this conversion is whatever the implementation of
+<code><a href="https://doc.rust-lang.org/nightly/core/convert/trait.From.html" title="trait core::convert::From">From</a>&lt;T&gt; for U</code> chooses to do.</p>
+</div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-TryFrom%3CU%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#814-816">Source</a><a href="#impl-TryFrom%3CU%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T, U&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html" title="trait core::convert::TryFrom">TryFrom</a>&lt;U&gt; for T<div class="where">where
+    U: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;T&gt;,</div></h3></section></summary><div class="impl-items"><details class="toggle" open><summary><section id="associatedtype.Error" class="associatedtype trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#818">Source</a><a href="#associatedtype.Error" class="anchor">§</a><h4 class="code-header">type <a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error" class="associatedtype">Error</a> = <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.never.html">!</a></h4></section></summary><div class='docblock'>The type returned in the event of a conversion error.</div></details><details class="toggle method-toggle" open><summary><section id="method.try_from" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#821">Source</a><a href="#method.try_from" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#tymethod.try_from" class="fn">try_from</a>(value: U) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.never.html">!</a>&gt;</h4></section></summary><div class='docblock'>Performs the conversion.</div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-TryInto%3CU%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#798-800">Source</a><a href="#impl-TryInto%3CU%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T, U&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html" title="trait core::convert::TryInto">TryInto</a>&lt;U&gt; for T<div class="where">where
+    U: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html" title="trait core::convert::TryFrom">TryFrom</a>&lt;T&gt;,</div></h3></section></summary><div class="impl-items"><details class="toggle" open><summary><section id="associatedtype.Error-1" class="associatedtype trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#802">Source</a><a href="#associatedtype.Error-1" class="anchor">§</a><h4 class="code-header">type <a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html#associatedtype.Error" class="associatedtype">Error</a> = &lt;U as <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html" title="trait core::convert::TryFrom">TryFrom</a>&lt;T&gt;&gt;::<a class="associatedtype" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error" title="type core::convert::TryFrom::Error">Error</a></h4></section></summary><div class='docblock'>The type returned in the event of a conversion error.</div></details><details class="toggle method-toggle" open><summary><section id="method.try_into" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#805">Source</a><a href="#method.try_into" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html#tymethod.try_into" class="fn">try_into</a>(self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;U, &lt;U as <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html" title="trait core::convert::TryFrom">TryFrom</a>&lt;T&gt;&gt;::<a class="associatedtype" href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error" title="type core::convert::TryFrom::Error">Error</a>&gt;</h4></section></summary><div class='docblock'>Performs the conversion.</div></details></div></details></div></section></div></main></div></body></html>

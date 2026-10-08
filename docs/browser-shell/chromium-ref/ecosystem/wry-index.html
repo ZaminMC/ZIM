@@ -1,0 +1,823 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="  License Chat Server website https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg support"><title>wry - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/static/vendored.css?0-0-0-345207b5bd3e08551abe806ac963257c692997f6-2026-10-08" media="all" /><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="/-/rustdoc.static/" data-current-crate="wry" data-themes="" data-resource-suffix="-20260907-1.100.0-nightly-cea272fa3" data-rustdoc-version="1.100.0-nightly (cea272fa3 2026-09-07)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="../crates-20260907-1.100.0-nightly-cea272fa3.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"><link rel="stylesheet" href="/-/static/rustdoc-2025-08-20.css?0-0-0-345207b5bd3e08551abe806ac963257c692997f6-2026-10-08" media="all" /><link rel="stylesheet" href="/-/static/font-awesome.css?0-0-0-345207b5bd3e08551abe806ac963257c692997f6-2026-10-08" media="all" />
+
+<link rel="search" href="/-/static/opensearch.xml" type="application/opensearchdescription+xml" title="Docs.rs" />
+
+<script type="text/javascript">(function() {
+    function applyTheme(theme) {
+        if (theme) {
+            document.documentElement.dataset.docsRsTheme = theme;
+        }
+    }
+
+    window.addEventListener("storage", ev => {
+        if (ev.key === "rustdoc-theme") {
+            applyTheme(ev.newValue);
+        }
+    });
+
+    // see ./storage-change-detection.html for details
+    window.addEventListener("message", ev => {
+        if (ev.data && ev.data.storage && ev.data.storage.key === "rustdoc-theme") {
+            applyTheme(ev.data.storage.value);
+        }
+    });
+
+    applyTheme(window.localStorage.getItem("rustdoc-theme"));
+})();</script></head><body class="rustdoc-page">
+<div class="nav-container">
+    <div class="container">
+        <div class="pure-menu pure-menu-horizontal" role="navigation" aria-label="Main navigation">
+            <form action="/releases/search"
+                  method="GET"
+                  id="nav-search-form"
+                  class="landing-search-form-nav  ">
+
+                
+                <a href="/" class="pure-menu-heading pure-menu-link docsrs-logo" aria-label="Docs.rs">
+                    <span title="Docs.rs"><span class="fa fa-solid fa-cubes " aria-hidden="true"></span></span>
+                    <span class="title">Docs.rs</span>
+                </a><ul class="pure-menu-list">
+    <script id="crate-metadata" type="application/json">
+        
+        {
+            "name": "wry",
+            "version": "0.57.0"
+        }
+    </script><li class="pure-menu-item pure-menu-has-children crate-dropdown">
+            <a href="#" class="pure-menu-link crate-name" title="Cross-platform WebView rendering library">
+                <span class="fa fa-solid fa-cube " aria-hidden="true"></span>
+                <span class="title">wry-0.57.0</span>
+            </a><div class="pure-menu-children package-details-menu">
+                
+                <ul class="pure-menu-list menu-item-divided">
+                    <li class="pure-menu-heading" id="crate-title">
+                        wry 0.57.0
+                        <span id="clipboard" class="svg-clipboard" title="Copy crate name and version information"></span>
+                    </li><li class="pure-menu-item">
+                        <a href="/wry/0.57.0/wry/" class="pure-menu-link description" id="permalink" title="Get a link to this specific version"><span class="fa fa-solid fa-link " aria-hidden="true"></span> Permalink
+                        </a>
+                    </li><li class="pure-menu-item">
+                        <a href="/crate/wry/latest" class="pure-menu-link description" title="See wry in docs.rs">
+                            <span class="fa fa-solid fa-cube " aria-hidden="true"></span> Docs.rs crate page
+                        </a>
+                    </li><li class="pure-menu-item">
+                            <span class="pure-menu-link description license"><span class="fa fa-solid fa-scale-unbalanced-flip " aria-hidden="true"></span>
+                            <a href="https://spdx.org/licenses/Apache-2.0" class="pure-menu-sublink">Apache-2.0</a> OR <a href="https://spdx.org/licenses/MIT" class="pure-menu-sublink">MIT</a></span>
+                        </li><li class="pure-menu-item">
+                            <span class="pure-menu-link description" title="Built with rustc 1.100.0-nightly (cea272fa3 2026-09-07)">
+                                <span class="fa fa-solid fa-gears " aria-hidden="true"></span> 08 September 2026
+                            </span>
+                        </li></ul>
+
+                <div class="pure-g menu-item-divided">
+                    <div class="pure-u-1-2 right-border">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Links</li>
+
+                            <li class="pure-menu-item">
+                                    <a href="https://github.com/tauri-apps/wry" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-code-branch " aria-hidden="true"></span> Repository
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                <a href="https://crates.io/crates/wry" class="pure-menu-link" title="See wry in crates.io">
+                                    <span class="fa fa-solid fa-cube " aria-hidden="true"></span> crates.io
+                                </a>
+                            </li>
+
+                            
+                            <li class="pure-menu-item">
+                                <a href="/crate/wry/latest/source/" title="Browse source of wry-0.57.0" class="pure-menu-link">
+                                    <span class="fa fa-solid fa-folder-open " aria-hidden="true"></span> Source
+                                </a>
+                            </li>
+                        </ul>
+                    </div><div class="pure-u-1-2">
+                        <ul class="pure-menu-list" id="topbar-owners">
+                            <li class="pure-menu-heading">Owners</li><li class="pure-menu-item">
+                                    <a href="https://crates.io/users/wusyong" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-user " aria-hidden="true"></span> wusyong
+                                    </a>
+                                </li><li class="pure-menu-item">
+                                    <a href="https://crates.io/users/tauri-bot" class="pure-menu-link">
+                                        <span class="fa fa-solid fa-user " aria-hidden="true"></span> tauri-bot
+                                    </a>
+                                </li></ul>
+                    </div>
+                </div>
+
+                <div class="pure-g menu-item-divided">
+                    <div class="pure-u-1-2 right-border">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Dependencies</li>
+
+                            
+                            <li class="pure-menu-item">
+                                <div class="pure-menu pure-menu-scrollable sub-menu" tabindex="-1">
+                                    <ul class="pure-menu-list">
+                                        <li class="pure-menu-item"><a href="/cookie/^0.18/" class="pure-menu-link">
+                cookie ^0.18
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dpi/^0.1/" class="pure-menu-link">
+                dpi ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/http/^1.1/" class="pure-menu-link">
+                http ^1.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/once_cell/^1/" class="pure-menu-link">
+                once_cell ^1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/raw-window-handle/^0.6/" class="pure-menu-link">
+                raw-window-handle ^0.6
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/thiserror/^2.0/" class="pure-menu-link">
+                thiserror ^2.0
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tracing/^0.1/" class="pure-menu-link">
+                tracing ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/base64/^0.22/" class="pure-menu-link">
+                base64 ^0.22
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dom_query/^0.28.0/" class="pure-menu-link">
+                dom_query ^0.28.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/getrandom/^0.3/" class="pure-menu-link">
+                getrandom ^0.3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/glow/^0.18.0/" class="pure-menu-link">
+                glow ^0.18.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/http-range/^0.1/" class="pure-menu-link">
+                http-range ^0.1
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/libloading/^0.8.9/" class="pure-menu-link">
+                libloading ^0.8.9
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/percent-encoding/^2.3/" class="pure-menu-link">
+                percent-encoding ^2.3
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/pollster/^1.0.0/" class="pure-menu-link">
+                pollster ^1.0.0
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/sha2/^0.10/" class="pure-menu-link">
+                sha2 ^0.10
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tao/^0.37/" class="pure-menu-link">
+                tao ^0.37
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/wgpu/^23/" class="pure-menu-link">
+                wgpu ^23
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/winit/^0.30/" class="pure-menu-link">
+                winit ^0.30
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dirs/^7/" class="pure-menu-link">
+                dirs ^7
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/gdkx11/^0.18/" class="pure-menu-link">
+                gdkx11 ^0.18
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/gtk/^0.18/" class="pure-menu-link">
+                gtk ^0.18
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/javascriptcore-rs/=1.1.2/" class="pure-menu-link">
+                javascriptcore-rs =1.1.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/percent-encoding/^2.3/" class="pure-menu-link">
+                percent-encoding ^2.3
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/soup3/^0.5/" class="pure-menu-link">
+                soup3 ^0.5
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/webkit2gtk/=2.0.2/" class="pure-menu-link">
+                webkit2gtk =2.0.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/webkit2gtk-sys/=2.0.2/" class="pure-menu-link">
+                webkit2gtk-sys =2.0.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/x11-dl/^2.21/" class="pure-menu-link">
+                x11-dl ^2.21
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                        <i>optional</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/x11-dl/^2.21/" class="pure-menu-link">
+                x11-dl ^2.21
+                
+                    <i class="dependencies dev">dev</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/base64/^0.22/" class="pure-menu-link">
+                base64 ^0.22
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/crossbeam-channel/^0.5/" class="pure-menu-link">
+                crossbeam-channel ^0.5
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dom_query/^0.28.0/" class="pure-menu-link">
+                dom_query ^0.28.0
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/jni/^0.21/" class="pure-menu-link">
+                jni ^0.21
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/libc/^0.2/" class="pure-menu-link">
+                libc ^0.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/ndk/^0.9/" class="pure-menu-link">
+                ndk ^0.9
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/sha2/^0.10/" class="pure-menu-link">
+                sha2 ^0.10
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/tao-macros/^0.1.4/" class="pure-menu-link">
+                tao-macros ^0.1.4
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-ui-kit/^0.3.2/" class="pure-menu-link">
+                objc2-ui-kit ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-app-kit/^0.3.2/" class="pure-menu-link">
+                objc2-app-kit ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dunce/^1/" class="pure-menu-link">
+                dunce ^1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/webview2-com/^0.39/" class="pure-menu-link">
+                webview2-com ^0.39
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/windows/^0.62/" class="pure-menu-link">
+                windows ^0.62
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/windows-core/^0.62/" class="pure-menu-link">
+                windows-core ^0.62
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/windows-version/^0.1/" class="pure-menu-link">
+                windows-version ^0.1
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/block2/^0.6/" class="pure-menu-link">
+                block2 ^0.6
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/dirs/^7/" class="pure-menu-link">
+                dirs ^7
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2/^0.6.4/" class="pure-menu-link">
+                objc2 ^0.6.4
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-core-foundation/^0.3.2/" class="pure-menu-link">
+                objc2-core-foundation ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-foundation/^0.3.2/" class="pure-menu-link">
+                objc2-foundation ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-web-kit/^0.3.2/" class="pure-menu-link">
+                objc2-web-kit ^0.3.2
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/url/^2.5/" class="pure-menu-link">
+                url ^2.5
+                
+                    <i class="dependencies normal">normal</i>
+                    
+                
+            </a>
+        </li><li class="pure-menu-item"><a href="/objc2-foundation/^0.3.2/" class="pure-menu-link">
+                objc2-foundation ^0.3.2
+                
+                    <i class="dependencies build">build</i>
+                    
+                
+            </a>
+        </li>
+                                    </ul>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="pure-u-1-2">
+                        <ul class="pure-menu-list">
+                            <li class="pure-menu-heading">Versions</li>
+
+                            <li class="pure-menu-item">
+                                <div class="pure-menu pure-menu-scrollable sub-menu" id="releases-list" tabindex="-1" data-url="/crate/wry/latest/menus/releases/wry/">
+                                    <span class="rotate"><span class="fa fa-solid fa-spinner " aria-hidden="true"></span></span>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                    
+                    
+                    <div class="pure-g">
+                        <div class="pure-u-1">
+                            <ul class="pure-menu-list">
+                                <li>
+                                    <a href="/crate/wry/latest" class="pure-menu-link">
+                                        <b>83.24%</b>
+                                        of the crate is documented
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div></div>
+        </li><li class="pure-menu-item pure-menu-has-children">
+                <a href="#" class="pure-menu-link" aria-label="Platform">
+                    <span class="fa fa-solid fa-gears " aria-hidden="true"></span>
+                    <span class="title">Platform</span>
+                </a>
+
+                
+                <ul class="pure-menu-children" id="platforms" data-url="/crate/wry/latest/menus/platforms/wry/"><li class="pure-menu-item">
+            <a href="/crate/wry/latest/target-redirect/x86_64-apple-darwin/wry/" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-apple-darwin</a>
+        </li><li class="pure-menu-item">
+            <a href="/crate/wry/latest/target-redirect/x86_64-pc-windows-msvc/wry/" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-pc-windows-msvc</a>
+        </li><li class="pure-menu-item">
+            <a href="/crate/wry/latest/target-redirect/wry/" class="pure-menu-link" data-fragment="retain" rel="nofollow">x86_64-unknown-linux-gnu</a>
+        </li></ul>
+            </li><li class="pure-menu-item">
+                <a href="/crate/wry/latest/features" title="Browse available feature flags of wry-0.57.0" class="pure-menu-link">
+                    <span class="fa fa-solid fa-flag " aria-hidden="true"></span>
+                    <span class="title">Feature flags</span>
+                </a>
+            </li>
+        
+    
+    <li id="crate-warnings" class="pure-menu-item hidden" data-url="/-/partial/crate-warnings/wry/"></li>
+</ul><div class="spacer"></div>
+                
+                <div id="abnormalities" class="hidden"></div>
+
+                <ul class="pure-menu-list">
+                    <li class="pure-menu-item pure-menu-has-children">
+                        <a href="#" class="pure-menu-link" aria-label="docs.rs">docs.rs</a>
+                        <ul class="pure-menu-children aligned-icons"><li class="pure-menu-item"><a class="pure-menu-link" href="/about"><span class="fa fa-solid fa-circle-info " aria-hidden="true"></span> About docs.rs</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/badges"><span class="fa fa-brands fa-fonticons " aria-hidden="true"></span> Badges</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/builds"><span class="fa fa-solid fa-gears " aria-hidden="true"></span> Builds</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/metadata"><span class="fa fa-solid fa-table " aria-hidden="true"></span> Metadata</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/redirections"><span class="fa fa-solid fa-road " aria-hidden="true"></span> Shorthand URLs</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/download"><span class="fa fa-solid fa-download " aria-hidden="true"></span> Download</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/about/rustdoc-json"><span class="fa fa-solid fa-file-code " aria-hidden="true"></span> Rustdoc JSON</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="/releases/queue"><span class="fa fa-solid fa-gears " aria-hidden="true"></span> Build queue</a></li><li class="pure-menu-item"><a class="pure-menu-link" href="https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs" target="_blank"><span class="fa fa-solid fa-shield-halved " aria-hidden="true"></span> Privacy policy</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                <ul class="pure-menu-list"><li class="pure-menu-item pure-menu-has-children">
+                        <a href="#" class="pure-menu-link" aria-label="Rust">Rust</a>
+                        <ul class="pure-menu-children">
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://www.rust-lang.org/" target="_blank">Rust website</a></li>
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/book/" target="_blank">The Book</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/std/" target="_blank">Standard Library API Reference</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/rust-by-example/" target="_blank">Rust by Example</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/cargo/guide/" target="_blank">The Cargo Guide</a></li>
+
+                            <li class="pure-menu-item"><a class="pure-menu-link" href="https://doc.rust-lang.org/nightly/clippy" target="_blank">Clippy Documentation</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <div id="search-input-nav">
+                    <label for="nav-search">
+                        <span class="fa fa-solid fa-magnifying-glass " aria-hidden="true"></span>
+                    </label>
+
+                    
+                    
+                    <input id="nav-search" name="query" type="text" aria-label="Find crate by search query" tabindex="-1"
+                        placeholder="Find crate"
+                        >
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<div id="alerts" class="hidden"></div><div class="rustdoc mod crate container-rustdoc" id="rustdoc_body_wrapper" tabindex="-1"><script async src="/-/static/menu.js?0-0-0-345207b5bd3e08551abe806ac963257c692997f6-2026-10-08"></script>
+<script async src="/-/static/index.js?0-0-0-345207b5bd3e08551abe806ac963257c692997f6-2026-10-08"></script>
+
+<iframe src="/-/storage-change-detection.html" width="0" height="0" style="display: none"></iframe><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate wry</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../wry/index.html">wry</a><span class="version">0.57.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a></li><li><a href="#child-webviews" title="Child webviews">Child webviews</a></li><li><a href="#platform-considerations" title="Platform Considerations">Platform Considerations</a><ul><li><a href="#linux" title="Linux">Linux</a></li><li><a href="#macos" title="macOS">macOS</a></li><li><a href="#windows" title="Windows">Windows</a></li><li><a href="#android" title="Android">Android</a></li></ul></li><li><a href="#feature-flags" title="Feature flags">Feature flags</a></li><li><a href="#partners" title="Partners">Partners</a></li><li><a href="#license" title="License">License</a></li></ul><h3><a href="#reexports">Crate Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#types" title="Type Aliases">Type Aliases</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>wry</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/wry/lib.rs.html#5-2636">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p align="center"><img height="100" src="https://raw.githubusercontent.com/tauri-apps/wry/refs/heads/dev/.github/splash.png" alt="WRY Webview Rendering library" /></p>
+<p><a href="https://crates.io/crates/wry"><img src="https://img.shields.io/crates/v/wry?style=flat-square" alt="" /></a> <a href="https://docs.rs/wry/"><img src="https://img.shields.io/docsrs/wry?style=flat-square" alt="" /></a>
+<a href="https://opencollective.com/tauri"><img src="https://img.shields.io/badge/License-MIT%20or%20Apache%202-green.svg" alt="License" /></a>
+<a href="https://discord.gg/SpmNs4S"><img src="https://img.shields.io/badge/chat-discord-7289da.svg" alt="Chat Server" /></a>
+<a href="https://tauri.app"><img src="https://img.shields.io/badge/website-tauri.app-purple.svg" alt="website" /></a>
+<a href="https://good-labs.github.io/greater-good-affirmation"><img src="https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg" alt="https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg" /></a>
+<a href="https://opencollective.com/tauri"><img src="https://img.shields.io/badge/sponsor-Open%20Collective-blue.svg" alt="support" /></a></p>
+<p>Wry is a cross-platform WebView rendering library.</p>
+<p>The webview requires a running event loop and a window type that implements <a href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/borrowed/trait.HasWindowHandle.html" title="trait raw_window_handle::borrowed::HasWindowHandle"><code>HasWindowHandle</code></a>,
+or a gtk container widget if you need to support X11 and Wayland.
+You can use a windowing library like <a href="https://docs.rs/tao"><code>tao</code></a> or <a href="https://docs.rs/winit"><code>winit</code></a>.</p>
+<h3 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h3>
+<p>This example leverages the <a href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/borrowed/trait.HasWindowHandle.html" title="trait raw_window_handle::borrowed::HasWindowHandle"><code>HasWindowHandle</code></a> and supports Windows, macOS, iOS, Android and Linux (X11 Only).
+See the following example using <a href="https://docs.rs/winit"><code>winit</code></a>:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(Default)]
+</span><span class="kw">struct </span>App {
+  window: <span class="prelude-ty">Option</span>&lt;Window&gt;,
+  webview: <span class="prelude-ty">Option</span>&lt;wry::WebView&gt;,
+}
+
+<span class="kw">impl </span>ApplicationHandler <span class="kw">for </span>App {
+  <span class="kw">fn </span>resumed(<span class="kw-2">&amp;mut </span><span class="self">self</span>, event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop) {
+    <span class="kw">let </span>window = event_loop.create_window(Window::default_attributes()).unwrap();
+    <span class="kw">let </span>webview = WebViewBuilder::new()
+      .with_url(<span class="string">"https://tauri.app"</span>)
+      .build(<span class="kw-2">&amp;</span>window)
+      .unwrap();
+
+    <span class="self">self</span>.window = <span class="prelude-val">Some</span>(window);
+    <span class="self">self</span>.webview = <span class="prelude-val">Some</span>(webview);
+  }
+
+  <span class="kw">fn </span>window_event(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+}
+
+<span class="kw">let </span>event_loop = EventLoop::new().unwrap();
+<span class="kw">let </span><span class="kw-2">mut </span>app = App::default();
+event_loop.run_app(<span class="kw-2">&amp;mut </span>app).unwrap();</code></pre></div>
+<p>If you also want to support Wayland too, then we recommend you use <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk" title="method wry::WebViewBuilderExtUnix::build_gtk"><code>WebViewBuilderExtUnix::build_gtk</code></a> on Linux.
+See the following example using <a href="https://docs.rs/tao"><code>tao</code></a>:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>event_loop = EventLoop::new();
+<span class="kw">let </span>window = WindowBuilder::new().build(<span class="kw-2">&amp;</span>event_loop).unwrap();
+
+<span class="kw">let </span>builder = WebViewBuilder::new().with_url(<span class="string">"https://tauri.app"</span>);
+
+<span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))]
+</span><span class="kw">let </span>webview = builder.build(<span class="kw-2">&amp;</span>window).unwrap();
+<span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+</span><span class="kw">let </span>webview = builder.build_gtk(window.gtk_window()).unwrap();</code></pre></div><h3 id="child-webviews"><a class="doc-anchor" href="#child-webviews">§</a>Child webviews</h3>
+<p>You can use <a href="struct.WebViewBuilder.html#method.build_as_child" title="method wry::WebViewBuilder::build_as_child"><code>WebViewBuilder::build_as_child</code></a> to create the webview as a child inside another window. This is supported on
+macOS, Windows and Linux (X11 Only).</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(Default)]
+</span><span class="kw">struct </span>App {
+  window: <span class="prelude-ty">Option</span>&lt;Window&gt;,
+  webview: <span class="prelude-ty">Option</span>&lt;wry::WebView&gt;,
+}
+
+<span class="kw">impl </span>ApplicationHandler <span class="kw">for </span>App {
+  <span class="kw">fn </span>resumed(<span class="kw-2">&amp;mut </span><span class="self">self</span>, event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop) {
+    <span class="kw">let </span>window = event_loop.create_window(Window::default_attributes()).unwrap();
+    <span class="kw">let </span>webview = WebViewBuilder::new()
+      .with_url(<span class="string">"https://tauri.app"</span>)
+      .with_bounds(Rect {
+        position: LogicalPosition::new(<span class="number">100</span>, <span class="number">100</span>).into(),
+        size: LogicalSize::new(<span class="number">200</span>, <span class="number">200</span>).into(),
+      })
+      .build_as_child(<span class="kw-2">&amp;</span>window)
+      .unwrap();
+
+    <span class="self">self</span>.window = <span class="prelude-val">Some</span>(window);
+    <span class="self">self</span>.webview = <span class="prelude-val">Some</span>(webview);
+  }
+
+  <span class="kw">fn </span>window_event(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+}
+
+<span class="kw">let </span>event_loop = EventLoop::new().unwrap();
+<span class="kw">let </span><span class="kw-2">mut </span>app = App::default();
+event_loop.run_app(<span class="kw-2">&amp;mut </span>app).unwrap();</code></pre></div>
+<p>If you want to support X11 and Wayland at the same time, we recommend using
+<a href="trait.WebViewExtUnix.html#tymethod.new_gtk" title="associated function wry::WebViewExtUnix::new_gtk"><code>WebViewExtUnix::new_gtk</code></a> or <a href="trait.WebViewBuilderExtUnix.html#tymethod.build_gtk" title="method wry::WebViewBuilderExtUnix::build_gtk"><code>WebViewBuilderExtUnix::build_gtk</code></a> with <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/fixed/struct.Fixed.html" title="struct gtk::auto::fixed::Fixed"><code>gtk::Fixed</code></a>.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>event_loop = EventLoop::new();
+<span class="kw">let </span>window = WindowBuilder::new().build(<span class="kw-2">&amp;</span>event_loop).unwrap();
+
+<span class="kw">let </span>builder = WebViewBuilder::new()
+  .with_url(<span class="string">"https://tauri.app"</span>)
+  .with_bounds(Rect {
+    position: LogicalPosition::new(<span class="number">100</span>, <span class="number">100</span>).into(),
+    size: LogicalSize::new(<span class="number">200</span>, <span class="number">200</span>).into(),
+  });
+
+<span class="attr">#[cfg(not(target_os = <span class="string">"linux"</span>))]
+</span><span class="kw">let </span>webview = builder.build_as_child(<span class="kw-2">&amp;</span>window).unwrap();
+<span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+</span><span class="kw">let </span>webview = {
+  <span class="kw">let </span>vbox = window.default_vbox().unwrap(); <span class="comment">// tao adds a gtk::Box by default
+  </span><span class="kw">let </span>fixed = gtk::Fixed::new();
+  fixed.show_all();
+  vbox.pack_start(<span class="kw-2">&amp;</span>fixed, <span class="bool-val">true</span>, <span class="bool-val">true</span>, <span class="number">0</span>);
+  builder.build_gtk(<span class="kw-2">&amp;</span>fixed).unwrap()
+};</code></pre></div><h3 id="platform-considerations"><a class="doc-anchor" href="#platform-considerations">§</a>Platform Considerations</h3>
+<p>Here is the underlying web engine each platform uses, and some dependencies you might need to install.</p>
+<h4 id="linux"><a class="doc-anchor" href="#linux">§</a>Linux</h4>
+<p><a href="https://webkitgtk.org/">WebKitGTK</a> is used to provide webviews on Linux which requires GTK,
+so if the windowing library doesn’t support GTK (as in <a href="https://docs.rs/winit"><code>winit</code></a>)
+you’ll need to call <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/rt/fn.init.html" title="fn gtk::rt::init"><code>gtk::init</code></a> before creating the webview and then call <a href="https://docs.rs/gtk/0.18.2/x86_64-unknown-linux-gnu/gtk/auto/functions/fn.main_iteration_do.html" title="fn gtk::auto::functions::main_iteration_do"><code>gtk::main_iteration_do</code></a> alongside
+your windowing library event loop.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(Default)]
+</span><span class="kw">struct </span>App {
+  webview_window: <span class="prelude-ty">Option</span>&lt;(Window, WebView)&gt;,
+}
+
+<span class="kw">impl </span>ApplicationHandler <span class="kw">for </span>App {
+  <span class="kw">fn </span>resumed(<span class="kw-2">&amp;mut </span><span class="self">self</span>, event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop) {
+    <span class="kw">let </span>window = event_loop.create_window(Window::default_attributes()).unwrap();
+    <span class="kw">let </span>webview = WebViewBuilder::new()
+      .with_url(<span class="string">"https://tauri.app"</span>)
+      .build(<span class="kw-2">&amp;</span>window)
+      .unwrap();
+
+    <span class="self">self</span>.webview_window = <span class="prelude-val">Some</span>((window, webview));
+  }
+
+  <span class="kw">fn </span>window_event(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+
+  <span class="comment">// Advance GTK event loop &lt;!----- IMPORTANT
+  </span><span class="kw">fn </span>about_to_wait(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _event_loop: <span class="kw-2">&amp;</span>ActiveEventLoop) {
+    <span class="attr">#[cfg(target_os = <span class="string">"linux"</span>)]
+    </span><span class="kw">while </span>gtk::events_pending() {
+      gtk::main_iteration_do(<span class="bool-val">false</span>);
+    }
+  }
+}
+
+<span class="kw">let </span>event_loop = EventLoop::new().unwrap();
+<span class="kw">let </span><span class="kw-2">mut </span>app = App::default();
+event_loop.run_app(<span class="kw-2">&amp;mut </span>app).unwrap();</code></pre></div><h5 id="linux-dependencies"><a class="doc-anchor" href="#linux-dependencies">§</a>Linux Dependencies</h5><h6 id="arch-linux--manjaro"><a class="doc-anchor" href="#arch-linux--manjaro">§</a>Arch Linux / Manjaro:</h6><div class="example-wrap"><pre class="language-bash"><code>sudo pacman -S webkit2gtk-4.1</code></pre></div><h6 id="debian--ubuntu"><a class="doc-anchor" href="#debian--ubuntu">§</a>Debian / Ubuntu:</h6><div class="example-wrap"><pre class="language-bash"><code>sudo apt install libwebkit2gtk-4.1-dev</code></pre></div><h6 id="fedora"><a class="doc-anchor" href="#fedora">§</a>Fedora</h6><div class="example-wrap"><pre class="language-bash"><code>sudo dnf install gtk3-devel webkit2gtk4.1-devel</code></pre></div><h6 id="nix--nixos"><a class="doc-anchor" href="#nix--nixos">§</a>Nix &amp; NixOS</h6><div class="example-wrap"><pre class="language-nix"><code># shell.nix
+
+let
+   # Unstable Channel | Rolling Release
+   pkgs = import (fetchTarball(&quot;channel:nixpkgs-unstable&quot;)) { };
+   packages = with pkgs; [
+     pkg-config
+     webkitgtk_4_1
+   ];
+ in
+ pkgs.mkShell {
+   buildInputs = packages;
+ }</code></pre></div><div class="example-wrap"><pre class="language-sh"><code>nix-shell shell.nix</code></pre></div><h6 id="guix"><a class="doc-anchor" href="#guix">§</a>GUIX</h6><div class="example-wrap"><pre class="language-scheme"><code>;; manifest.scm
+
+(specifications-&gt;manifest
+  &#39;(&quot;pkg-config&quot;                ; Helper tool used when compiling
+    &quot;webkitgtk&quot;                 ; Web content engine fot GTK+
+ ))</code></pre></div><div class="example-wrap"><pre class="language-bash"><code>guix shell -m manifest.scm</code></pre></div><h4 id="macos"><a class="doc-anchor" href="#macos">§</a>macOS</h4>
+<p>WebKit is native on macOS so everything should be fine.</p>
+<p>If you are cross-compiling for macOS using <a href="https://github.com/tpoechtrager/osxcross">osxcross</a> and encounter a runtime panic like <code>Class with name WKWebViewConfiguration could not be found</code> it’s possible that <code>WebKit.framework</code> has not been linked correctly, to fix this set the <code>RUSTFLAGS</code> environment variable:</p>
+<div class="example-wrap"><pre class="language-bash"><code>RUSTFLAGS=&quot;-l framework=WebKit&quot; cargo build --target=x86_64-apple-darwin --release</code></pre></div><h4 id="windows"><a class="doc-anchor" href="#windows">§</a>Windows</h4>
+<p>WebView2 provided by Microsoft Edge Chromium is used. So wry supports Windows 7, 8, 10 and 11.</p>
+<h4 id="android"><a class="doc-anchor" href="#android">§</a>Android</h4>
+<p>In order for <code>wry</code> to be able to create webviews on Android, there are a few requirements that your application needs to uphold:</p>
+<ol>
+<li>You need to set a few environment variables that will be used to generate the necessary kotlin
+files that you need to include in your Android application for wry to function properly.
+<ul>
+<li><code>WRY_ANDROID_PACKAGE</code>: which is the reversed domain name of your android project and the app name in snake_case, for example, <code>com.wry.example.wry_app</code></li>
+<li><code>WRY_ANDROID_LIBRARY</code>: for example, if your cargo project has a lib name <code>wry_app</code>, it will generate <code>libwry_app.so</code> so you set this env var to <code>wry_app</code></li>
+<li><code>WRY_ANDROID_KOTLIN_FILES_OUT_DIR</code>: for example, <code>path/to/app/src/main/kotlin/com/wry/example</code></li>
+</ul>
+</li>
+<li>Your main Android Activity needs to inherit <code>AppCompatActivity</code>, preferably it should use the generated <code>WryActivity</code> or inherit it.</li>
+<li>Your Rust app needs to call <code>wry::android_setup</code> function to setup the necessary logic to be able to create webviews later on.</li>
+<li>Your Rust app needs to call <code>wry::android_binding!</code> macro to setup the JNI functions that will be called by <code>WryActivity</code> and various other places.</li>
+</ol>
+<p>It is recommended to use the <a href="https://docs.rs/tao/latest/tao/"><code>tao</code></a> crate as it provides maximum compatibility with <code>wry</code>.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[cfg(target_os = <span class="string">"android"</span>)]
+</span>{
+  <span class="macro">tao::android_binding!</span>(
+      com_example,
+      wry_app,
+      WryActivity,
+      wry::android_setup, <span class="comment">// pass the wry::android_setup function to tao which will be invoked when the event loop is created
+      </span>_start_app
+  );
+  <span class="macro">wry::android_binding!</span>(com_example, ttt);
+}</code></pre></div>
+<p>If this feels overwhelming, you can just use the preconfigured template from <a href="https://github.com/tauri-apps/cargo-mobile2"><code>cargo-mobile2</code></a>.</p>
+<p>For more information, check out <a href="https://github.com/tauri-apps/wry/blob/dev/MOBILE.md">MOBILE.md</a>.</p>
+<h3 id="feature-flags"><a class="doc-anchor" href="#feature-flags">§</a>Feature flags</h3>
+<p>Wry uses a set of feature flags to toggle several advanced features.</p>
+<ul>
+<li><code>os-webview</code> (default): Enables the default WebView framework on the platform. This must be enabled
+for the crate to work. This feature was added in preparation of other ports like cef and servo.</li>
+<li><code>x11</code> (default): Enables x11 support and dependencies on Linux.</li>
+<li><code>serde</code>: Enables <code>dpi</code>’s <code>serde</code> feature.</li>
+<li><code>devtools</code>: Enables devtools on release builds. Devtools are always enabled in debug builds.
+On <strong>macOS</strong>, enabling devtools, requires calling private APIs so you should not enable this flag in release
+build if your app needs to publish to App Store.</li>
+<li><code>mac-proxy</code>: Enables <code>WebViewBuilder::with_proxy_config</code> on macOS.</li>
+<li><code>linux-body</code>: Enables body support of custom protocol request on Linux. Requires
+WebKit2GTK v2.40 or above.</li>
+<li><code>tracing</code>: enables <a href="https://docs.rs/tracing"><code>tracing</code></a> for <code>evaluate_script</code>, <code>ipc_handler</code>, and <code>custom_protocols</code>.</li>
+</ul>
+<h3 id="partners"><a class="doc-anchor" href="#partners">§</a>Partners</h3><table>
+  <tbody>
+    <tr>
+      <td align="center" valign="middle">
+        <a href="https://crabnebula.dev" target="_blank">
+          <img src=".github/sponsors/crabnebula.svg" alt="CrabNebula" width="283">
+        </a>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p>For the complete list of sponsors please visit our <a href="https://tauri.app#sponsors">website</a> and <a href="https://opencollective.com/tauri">Open Collective</a>.</p>
+<h3 id="license"><a class="doc-anchor" href="#license">§</a>License</h3>
+<p>Apache-2.0/MIT</p>
+</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.raw_window_handle"><code>pub use <a class="mod" href="https://docs.rs/raw-window-handle/0.6.2/x86_64-unknown-linux-gnu/raw_window_handle/index.html" title="mod raw_window_handle">raw_window_handle</a>;</code></dt><dt id="reexport.cookie"><code>pub use <a class="mod" href="https://docs.rs/cookie/0.18.2/x86_64-unknown-linux-gnu/cookie/index.html" title="mod cookie">cookie</a>;</code></dt><dt id="reexport.dpi"><code>pub use <a class="mod" href="https://docs.rs/dpi/0.1.2/x86_64-unknown-linux-gnu/dpi/index.html" title="mod dpi">dpi</a>;</code></dt><dt id="reexport.http"><code>pub use <a class="mod" href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/index.html" title="mod http">http</a>;</code></dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.InitializationScript.html" title="struct wry::InitializationScript">Initialization<wbr>Script</a></dt><dd>An initialization script</dd><dt><a class="struct" href="struct.NewWindowFeatures.html" title="struct wry::NewWindowFeatures">NewWindow<wbr>Features</a></dt><dd>Window features of a window requested to open.</dd><dt><a class="struct" href="struct.NewWindowOpener.html" title="struct wry::NewWindowOpener">NewWindow<wbr>Opener</a></dt><dd>Information about the webview that initiated a new window request.</dd><dt><a class="struct" href="struct.ProxyEndpoint.html" title="struct wry::ProxyEndpoint">Proxy<wbr>Endpoint</a></dt><dt><a class="struct" href="struct.Rect.html" title="struct wry::Rect">Rect</a></dt><dd>A rectangular region.</dd><dt><a class="struct" href="struct.RequestAsyncResponder.html" title="struct wry::RequestAsyncResponder">Request<wbr>Async<wbr>Responder</a></dt><dd>Resolves a custom protocol <a href="https://docs.rs/http/1.5.0/x86_64-unknown-linux-gnu/http/request/struct.Request.html" title="struct http::request::Request"><code>Request</code></a> asynchronously.</dd><dt><a class="struct" href="struct.WebContext.html" title="struct wry::WebContext">WebContext</a></dt><dd>A context that is shared between multiple <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>s.</dd><dt><a class="struct" href="struct.WebView.html" title="struct wry::WebView">WebView</a></dt><dd>The fundamental type to present a <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>.</dd><dt><a class="struct" href="struct.WebViewBuilder.html" title="struct wry::WebViewBuilder">WebView<wbr>Builder</a></dt><dd>Builder type of <a href="struct.WebView.html" title="struct wry::WebView"><code>WebView</code></a>.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.BackgroundThrottlingPolicy.html" title="enum wry::BackgroundThrottlingPolicy">Background<wbr>Throttling<wbr>Policy</a></dt><dd>Background throttling policy</dd><dt><a class="enum" href="enum.DragDropEvent.html" title="enum wry::DragDropEvent">Drag<wbr>Drop<wbr>Event</a></dt><dd>An event describing drag and drop operations on the webview.</dd><dt><a class="enum" href="enum.Error.html" title="enum wry::Error">Error</a></dt><dd>Errors returned by wry.</dd><dt><a class="enum" href="enum.NewWindowResponse.html" title="enum wry::NewWindowResponse">NewWindow<wbr>Response</a></dt><dd>Response for the new window request handler.</dd><dt><a class="enum" href="enum.PageLoadEvent.html" title="enum wry::PageLoadEvent">Page<wbr>Load<wbr>Event</a></dt><dd>Type of of page loading event</dd><dt><a class="enum" href="enum.PermissionKind.html" title="enum wry::PermissionKind">Permission<wbr>Kind</a></dt><dd>Permission types that can be requested by the webview.</dd><dt><a class="enum" href="enum.PermissionResponse.html" title="enum wry::PermissionResponse">Permission<wbr>Response</a></dt><dd>Response for permission requests.</dd><dt><a class="enum" href="enum.ProxyConfig.html" title="enum wry::ProxyConfig">Proxy<wbr>Config</a></dt><dt><a class="enum" href="enum.Theme.html" title="enum wry::Theme">Theme</a></dt><dd>WebView theme.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.WebViewBuilderExtUnix.html" title="trait wry::WebViewBuilderExtUnix">WebView<wbr>Builder<wbr>ExtUnix</a><wbr><span class="stab portability" title="Available on DragonFly BSD or FreeBSD or Linux or NetBSD or OpenBSD only">DragonFly BSD or FreeBSD or Linux or NetBSD or OpenBSD</span></dt><dt><a class="trait" href="trait.WebViewExtUnix.html" title="trait wry::WebViewExtUnix">WebView<wbr>ExtUnix</a><wbr><span class="stab portability" title="Available on `gtk` only"><code>gtk</code></span></dt><dd>Additional methods on <code>WebView</code> that are specific to Linux.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.webview_version.html" title="fn wry::webview_version">webview_<wbr>version</a><wbr><span class="stab portability" title="Available on crate feature `os-webview` only"><code>os-webview</code></span></dt><dd>Get WebView/Webkit version on current platform.</dd></dl><h2 id="types" class="section-header">Type Aliases<a href="#types" class="anchor">§</a></h2><dl class="item-table"><dt><a class="type" href="type.RGBA.html" title="type wry::RGBA">RGBA</a></dt><dd>Type alias for a color in the RGBA format.</dd><dt><a class="type" href="type.Result.html" title="type wry::Result">Result</a></dt><dd>Convenient type alias of Result type for wry.</dd><dt><a class="type" href="type.WebViewId.html" title="type wry::WebViewId">WebView<wbr>Id</a></dt><dd>An id for a webview</dd></dl><script type="text/json" id="notable-traits-data">{"IntoIter<T>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/core/result/struct.IntoIter.html\" title=\"struct core::result::IntoIter\">IntoIter</a>&lt;T&gt;</code></h3><pre><code><div class=\"where\">impl&lt;T&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/core/result/struct.IntoIter.html\" title=\"struct core::result::IntoIter\">IntoIter</a>&lt;T&gt;</div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = T;</div>","Iter<'_, T>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/core/result/struct.Iter.html\" title=\"struct core::result::Iter\">Iter</a>&lt;'a, T&gt;</code></h3><pre><code><div class=\"where\">impl&lt;'a, T&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/core/result/struct.Iter.html\" title=\"struct core::result::Iter\">Iter</a>&lt;'a, T&gt;</div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = <a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.reference.html\">&amp;'a T</a>;</div>","IterMut<'_, T>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/core/result/struct.IterMut.html\" title=\"struct core::result::IterMut\">IterMut</a>&lt;'a, T&gt;</code></h3><pre><code><div class=\"where\">impl&lt;'a, T&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/core/result/struct.IterMut.html\" title=\"struct core::result::IterMut\">IterMut</a>&lt;'a, T&gt;</div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = <a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.reference.html\">&amp;'a mut T</a>;</div>"}</script></section></div></main></div></body></html>
