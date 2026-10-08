@@ -585,7 +585,7 @@ pub async fn shell_command(
             }
             // Window verbs touch the OS, not the model — deferred below.
             cmd::WINDOW_MINIMIZE | cmd::WINDOW_TOGGLE_MAXIMIZE | cmd::WINDOW_CLOSE
-            | cmd::FOCUS_LOCATION => {
+            | cmd::FOCUS_LOCATION | cmd::TOGGLE_PALETTE => {
                 window_verb = Some(id);
             }
             _ => {
@@ -724,6 +724,18 @@ pub async fn shell_command(
         Some(cmd::FOCUS_LOCATION) => {
             let _ = app.emit_to(frame_label(&window_name), "shell://focus-address", ());
             return Ok(()); // frame-local; no model change, no sync
+        }
+        Some(cmd::TOGGLE_PALETTE) => {
+            // The palette renders in the active tab's webview; the frame
+            // only asks. Frame-local truth, no model change, no sync.
+            let active = {
+                let inner = state.lock();
+                inner.strip(&window_name).active
+            };
+            if let Some(tab) = active {
+                let _ = app.emit_to(tab_label(&window_name, tab), "shell://toggle-palette", ());
+            }
+            return Ok(());
         }
         _ => {}
     }

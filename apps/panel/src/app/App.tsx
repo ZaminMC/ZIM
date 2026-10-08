@@ -165,6 +165,14 @@ export function App() {
         if (event.payload.reload != null) setReloadToken(event.payload.reload);
       }),
     );
+    // The frame's Ctrl+K arrives through the host (a CustomEvent never
+    // crosses webviews) — ring the palette open/closed.
+    unlisteners.push(
+      listen("shell://toggle-palette", () => {
+        if (disposed) return;
+        setPaletteOpen(!useUi.getState().paletteOpen);
+      }),
+    );
     return () => {
       disposed = true;
       for (const promise of unlisteners) void promise.then((off) => off());

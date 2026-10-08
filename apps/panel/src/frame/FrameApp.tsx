@@ -69,6 +69,7 @@ const CMD = {
   WINDOW_MINIMIZE: 50010,
   WINDOW_TOGGLE_MAXIMIZE: 50011,
   WINDOW_CLOSE: 50012,
+  TOGGLE_PALETTE: 50013,
 } as const;
 
 const GROUP_COLOR_VARS = [
@@ -262,7 +263,10 @@ export function FrameApp() {
         bookmarkActive: () => void shellCommand(CMD.BOOKMARK_THIS_TAB),
         toggleBookmarksBar: () => void shellCommand(CMD.SHOW_BOOKMARK_BAR),
         togglePalette: () => {
-          window.dispatchEvent(new CustomEvent("zamin:toggle-palette"));
+          // The palette lives in the active tab's webview — a CustomEvent
+          // never crosses webviews, so the frame asks the host to ring
+          // the tab's bell (shell://toggle-palette).
+          void shellCommand(CMD.TOGGLE_PALETTE);
         },
         paletteOpen: () => false,
       };

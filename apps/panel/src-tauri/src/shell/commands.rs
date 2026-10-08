@@ -64,3 +64,8 @@ pub const NAV_FORWARD: u32 = 50007;
 pub const WINDOW_MINIMIZE: u32 = 50010;
 pub const WINDOW_TOGGLE_MAXIMIZE: u32 = 50011;
 pub const WINDOW_CLOSE: u32 = 50012;
+
+/// The command palette lives in the ACTIVE TAB's webview, but Ctrl+K
+/// can land while the frame holds focus — the frame can only reach the
+/// palette through the host (a CustomEvent never crosses webviews).
+pub const TOGGLE_PALETTE: u32 = 50013;
