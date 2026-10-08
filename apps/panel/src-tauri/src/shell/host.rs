@@ -273,7 +273,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     let Some(host_window) = app.get_window(window_label) else {
         return Ok(()); // window gone mid-sync; nothing to lay out
     };
-    let size = host_window
+    let size: LogicalSize<f64> = host_window
         .inner_size()
         .map_err(|e| e.to_string())?
         .to_logical(host_window.scale_factor().unwrap_or(1.0));
