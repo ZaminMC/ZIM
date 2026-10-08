@@ -2,6 +2,9 @@
 
 .page {
   max-width: 1240px;
+  /* Center the capped column in wide windows — the head's button hugs
+     the page edge, not drift toward the window's left. */
+  margin-inline: auto;
   padding: var(--space-6) var(--space-6) var(--space-7);
   display: flex;
   flex-direction: column;
@@ -188,7 +191,8 @@
   border-radius: var(--radius-l);
   padding: var(--space-7) var(--space-5);
   max-width: 560px;
-  margin: var(--space-6) auto 0;
+  width: 100%;
+  margin: auto;
 }
 
 .emptyIcon {

@@ -90,6 +90,26 @@
   --term-bg: #0b0f15;
 }
 
+/* -- Document reset (ADR-0033): the tab-content document owns the whole
+   webview. No UA margins, dark from the first pixel, full-height root —
+   destination pages hang their own 100% geometry off this chain. The
+   2026-10-09 screenshot showed the failure mode when this was missing:
+   the new-tab page collapsed to its content height on a white body,
+   inset 8px by the UA margin, and the window read as broken. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  color-scheme: dark;
+}
+
+#root {
+  height: 100%;
+}
+
 /* Reduced motion is a hard floor, not a preference token: durations go
    to zero, loops run once, literals the tokens never reached are caught
    by the global guard. Nothing moves forever; animations land on their

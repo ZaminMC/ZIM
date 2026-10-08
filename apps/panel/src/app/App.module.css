@@ -1,38 +1,30 @@
-/* Browser shell (ADR-0015): tab strip on top, tool bar under it, one
-   destination at a time below. Compact frame — §5: navigation never
-   wastes vertical space. §54: the shell has a second presentation — the
-   strip becomes a left rail and the frame stacks beside it. */
+/* One tab's content document (ADR-0033): the strip and toolbar live in
+   their own frame webview, so this document IS the content — the whole
+   webview viewport, edge to edge. The strip/toolbar chrome is not here
+   (§54's rail presentation retired with the browser-shell split).
+   Geometry law: the root carries a definite height; destination pages
+   hang 100% off it. Before 2026-10-09 this relied on a `.shell` parent
+   that no longer rendered, so every page collapsed to content height —
+   the new-tab page floated as a small dark island on white. */
 
-.shell {
+.content {
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-m);
 }
 
-.shellVertical {
-  flex-direction: row;
-}
-
-/* The frame column beside a vertical rail: tool bar, bookmarks bar,
-   update notice, and the content share it; the strip owns the left. */
-.column {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-.content {
+/* Every destination view fills the band it is given; pages with inner
+   scroll regions (the console, log viewers) hang their flex:1 off
+   this. Fixed-position overlays (modals, palette) ignore flex and are
+   untouched. */
+.content > * {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 /* The beat before a lazy evidence page lands — quiet, not a spinner. */
