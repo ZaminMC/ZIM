@@ -183,6 +183,36 @@ body {
   background: var(--tab-group-color, var(--group-sky));
 }
 
+/* The group's header chip (tab_group_header.h): every group leads with
+   it, a collapsed group IS it. Quiet color fill, the group's own hue
+   for the label; click toggles collapse. */
+.group-chip {
+  position: absolute;
+  bottom: 7px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: none;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 26%, transparent);
+  cursor: default;
+  transition: background 120ms ease-out;
+}
+.group-chip:hover {
+  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 40%, transparent);
+}
+.group-chip-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--tab-group-color, var(--group-sky));
+}
+
 .tab-dragging {
   z-index: 3;
   box-shadow: 0 4px 14px rgb(0 0 0 / 45%);

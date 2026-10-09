@@ -95,10 +95,28 @@ pub struct Slot {
     /// A closing tab's slot shrinks to the overlap width and fades
     /// (`TransformForPinnednessAndOpenness`, IsClosed branch).
     pub closing: bool,
+    /// True for a group's header chip: `id` is then the GROUP id, not a
+    /// tab id (tab_group_header.h — every group leads with its chip, and
+    /// a collapsed group IS the chip).
+    pub header: bool,
+}
+
+/// The group header chip's width. Upstream measures the label with the
+/// real font (tab_group_header.cc lays out its title); without text
+/// shaping here the width approximates at ~7 DIP per label character
+/// inside fixed padding — a documented divergence, porting-spec §1.
+fn group_header_width(label: &str) -> f32 {
+    const PAD: f32 = 14.0;
+    const PER_CHAR: f32 = 7.0;
+    const MIN: f32 = 28.0;
+    const MAX: f32 = 140.0;
+    (PAD + PER_CHAR * label.chars().count() as f32).clamp(MIN, MAX)
 }
 
 /// The width law, ported from tab_width_constraints.cc: closed ⇒ overlap,
 /// pinned ⇒ pinned width, otherwise min(active/inactive) .. standard.
+/// Group law (tab_group_header.h / tab_group_views.cc): every group
+/// leads with its header chip; a collapsed group reduces to the chip.
 ///
 /// Distribution rule (documented divergence, porting spec §1): when the
 /// strip overflows, inactive tabs shrink to their minimum first, then the
@@ -106,8 +124,9 @@ pub struct Slot {
 /// with chevron buttons — reserved, not ported in this phase).
 pub fn compute_layout(
     strip_width: f32,
-    tabs: &[(u32, bool, bool)], // (id, pinned, closing)
+    tabs: &[(u32, bool, bool, Option<u32>)], // (id, pinned, closing, group)
     active: u32,
+    groups: &[(u32, bool, &str)], // (id, collapsed, label)
 ) -> Vec<Slot> {
     if tabs.is_empty() {
         return Vec::new();
@@ -118,88 +137,165 @@ pub fn compute_layout(
     // the new-tab button, and the caption area carved off the right end.
     let budget =
         (strip_width - STRIP_PADDING - NEW_TAB_BUTTON_W - WINDOW_CONTROLS_W).max(0.0);
-    let unpinned: Vec<&(u32, bool, bool)> = tabs.iter().filter(|t| !t.1 && !t.2).collect();
-    let pinned_count = tabs.iter().filter(|t| t.1 && !t.2).count();
-    let pinned_total = pinned_count as f32 * pinned_width();
 
-    let preferred = unpinned.len() as f32 * standard_width()
-        + pinned_total
-        - overlap * (tabs.len().max(1) as f32 - 1.0);
-    let mut widths: Vec<f32> = tabs
-        .iter()
-        .map(|(_, pinned, closing)| {
-            if *closing {
-                overlap
-            } else if *pinned {
-                pinned_width()
-            } else {
-                standard_width()
-            }
-        })
-        .collect();
-
-    if preferred > budget && !unpinned.is_empty() {
-        // Shrink inactive to their minimum, keep the active tab alive
-        // longest (the LayoutDomain crossover, simplified).
-        for (i, (id, pinned, closing)) in tabs.iter().enumerate() {
-            if !*pinned && !*closing && *id != active {
-                widths[i] = min_inactive_width();
-            }
-        }
-        let total: f32 =
-            widths.iter().sum::<f32>() - overlap * (tabs.len().max(1) as f32 - 1.0);
-        if total > budget {
-            // Even the active tab goes to its minimum.
-            for (i, (id, pinned, closing)) in tabs.iter().enumerate() {
-                if !*pinned && !*closing && *id == active {
-                    widths[i] = min_active_width();
+    // The group walk: which group leads where, and which tabs are
+    // visible at all (a collapsed group's tabs are not laid out — the
+    // chip stands for the whole group).
+    let collapsed_of = |gid: u32| groups.iter().find(|g| g.0 == gid).map(|g| g.1).unwrap_or(false);
+    let label_of = |gid: u32| {
+        groups
+            .iter()
+            .find(|g| g.0 == gid)
+            .map(|g| g.2.to_owned())
+            .unwrap_or_default()
+    };
+    let mut seen: Vec<u32> = Vec::new();
+    let mut visible: Vec<bool> = Vec::new();
+    let mut headers: Vec<Option<u32>> = Vec::new(); // header slot before tab i?
+    for tab in tabs {
+        let group = tab.3;
+        let leads = match group {
+            Some(gid) => {
+                if seen.contains(&gid) {
+                    false
+                } else {
+                    seen.push(gid);
+                    true
                 }
             }
-            let total: f32 =
-                widths.iter().sum::<f32>() - overlap * (tabs.len().max(1) as f32 - 1.0);
+            None => false,
+        };
+        headers.push(if leads { group } else { None });
+        let hidden = group.map(collapsed_of).unwrap_or(false);
+        visible.push(!hidden);
+    }
+
+    let laid_out: Vec<usize> = (0..tabs.len())
+        .filter(|i| visible[*i] || headers[*i].is_some())
+        .collect();
+    if laid_out.is_empty() {
+        return Vec::new();
+    }
+
+    let width_of = |i: usize| -> f32 {
+        let (id, pinned, closing, _) = tabs[i];
+        if closing {
+            return overlap;
+        }
+        let floor = if id == active { min_active_width() } else { min_inactive_width() };
+        if pinned { pinned_width().max(floor) } else { standard_width().max(floor) }
+    };
+
+    let preferred: f32 = laid_out
+        .iter()
+        .map(|i| {
+            headers[*i]
+                .map(|gid| group_header_width(&label_of(gid)))
+                .unwrap_or(0.0)
+                + if visible[*i] { width_of(*i) } else { 0.0 }
+        })
+        .sum::<f32>()
+        - overlap * (laid_out.len().max(1) as f32 - 1) as f32;
+
+    let mut widths: Vec<f32> = laid_out
+        .iter()
+        .map(|i| if visible[*i] { width_of(*i) } else { 0.0 })
+        .collect();
+    let header_w: Vec<Option<f32>> = laid_out
+        .iter()
+        .map(|i| headers[*i].map(|gid| group_header_width(&label_of(gid))))
+        .collect();
+
+    if preferred > budget {
+        // Shrink inactive to their minimum, keep the active tab alive
+        // longest (the LayoutDomain crossover, simplified).
+        for (k, i) in laid_out.iter().enumerate() {
+            let (id, pinned, closing, _) = tabs[*i];
+            if !pinned && !closing && id != active && visible[*i] {
+                widths[k] = min_inactive_width();
+            }
+        }
+        // The laid-out units' total width (tabs + chips minus overlaps).
+        let sum_units = |widths: &[f32], header_w: &[Option<f32>]| -> f32 {
+            widths
+                .iter()
+                .zip(header_w)
+                .map(|(w, h)| w + h.unwrap_or(0.0))
+                .sum::<f32>()
+                - overlap * (widths.len().max(1) as f32 - 1) as f32
+        };
+        let mut total = sum_units(&widths, &header_w);
+        if total > budget {
+            // Even the active tab goes to its minimum.
+            for (k, i) in laid_out.iter().enumerate() {
+                let (id, pinned, closing, _) = tabs[*i];
+                if !pinned && !closing && id == active && visible[*i] {
+                    widths[k] = min_active_width();
+                }
+            }
+            total = sum_units(&widths, &header_w);
             if total > budget {
                 // Clamped overflow: upstream would scroll (reserved).
-                return finish(tabs, widths, overlap);
+                return finish(tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap);
             }
         }
         // Distribute the leftover to the active tab first, then evenly to
         // the inactive ones, up to standard width.
-        let mut free = budget
-            - (widths.iter().sum::<f32>() - overlap * (tabs.len().max(1) as f32 - 1.0));
-        for (i, (id, pinned, closing)) in tabs.iter().enumerate() {
+        let mut free = budget - total;
+        for (k, i) in laid_out.iter().enumerate() {
             if free <= 0.0 {
                 break;
             }
-            if !*pinned && !*closing {
-                let room = standard_width() - widths[i];
-                let give = if *id == active { room.min(free) } else { room.min(free * 0.5) };
-                widths[i] += give;
+            let (id, pinned, closing, _) = tabs[*i];
+            if !pinned && !closing && visible[*i] {
+                let room = standard_width() - widths[k];
+                let give = if id == active { room.min(free) } else { room.min(free * 0.5) };
+                widths[k] += give;
                 free -= give;
             }
         }
     }
-    finish(tabs, widths, overlap)
+    finish(tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap)
 }
 
-fn finish(tabs: &[(u32, bool, bool)], widths: Vec<f32>, overlap: f32) -> Vec<Slot> {
-    // The first tab never touches the window edge: the strip's leading
-    // inset (kTabStripPadding) leads, as it does upstream.
+/// Emit the laid-out units: each unit is [header chip?] + [tab?], the
+/// overlap chain runs between units (chip and its own tab are adjacent,
+/// not overlapped — the chip is the group's leading edge).
+#[allow(clippy::too_many_arguments)]
+fn finish(
+    tabs: &[(u32, bool, bool, Option<u32>)],
+    laid_out: &[usize],
+    headers: &[Option<u32>],
+    visible: &[bool],
+    widths: &[f32],
+    header_w: &[Option<f32>],
+    overlap: f32,
+) -> Vec<Slot> {
     let mut x = STRIP_PADDING;
-    tabs.iter()
-        .zip(widths)
-        .map(|((id, pinned, closing), w)| {
-            let slot = Slot { id: *id, x, width: w, pinned: *pinned, closing: *closing };
-            x += w - overlap;
-            slot
-        })
-        .collect()
+    let mut slots = Vec::new();
+    for (k, i) in laid_out.iter().enumerate() {
+        let mut unit_end = x;
+        if let (Some(gid), Some(w)) = (headers[*i], header_w[k]) {
+            slots.push(Slot { id: gid, x, width: w, pinned: false, closing: false, header: true });
+            unit_end = x + w;
+        }
+        if visible[*i] {
+            let (id, pinned, closing, _) = tabs[*i];
+            slots.push(Slot { id, x: unit_end, width: widths[k], pinned, closing, header: false });
+            unit_end += widths[k];
+        }
+        x = unit_end - overlap;
+    }
+    slots
 }
 
 /// Which tab index a drop at `x` lands on (drag reorder): the slot whose
-/// center is past the point, per Chrome's reorder hit-testing.
+/// center is past the point, per Chrome's reorder hit-testing. Header
+/// chips are not drop targets — only real tabs count.
 pub fn drop_index(slots: &[Slot], x: f32) -> usize {
-    let mut index = slots.len();
-    for (i, slot) in slots.iter().enumerate() {
+    let tabs: Vec<&Slot> = slots.iter().filter(|s| !s.header).collect();
+    let mut index = tabs.len();
+    for (i, slot) in tabs.iter().enumerate() {
         if x < slot.x + slot.width * 0.5 {
             index = i;
             break;
@@ -212,6 +308,10 @@ pub fn drop_index(slots: &[Slot], x: f32) -> usize {
 mod tests {
     use super::*;
 
+    fn plain(tabs: &[(u32, bool, bool)]) -> Vec<(u32, bool, bool, Option<u32>)> {
+        tabs.iter().map(|(id, p, c)| (*id, *p, *c, None)).collect()
+    }
+
     #[test]
     fn constants_match_the_source() {
         assert_eq!(tab_overlap(), 18.0);
@@ -223,8 +323,8 @@ mod tests {
 
     #[test]
     fn preferred_tabs_get_standard_width() {
-        let tabs = vec![(1u32, false, false), (2, false, false), (3, false, false)];
-        let slots = compute_layout(1200.0, &tabs, 1);
+        let tabs = plain(&[(1u32, false, false), (2, false, false), (3, false, false)]);
+        let slots = compute_layout(1200.0, &tabs, 1, &[]);
         assert!(slots.iter().all(|s| (s.width - 256.0).abs() < 0.01));
         assert_eq!(slots[0].x, STRIP_PADDING);
         assert_eq!(slots[1].x, STRIP_PADDING + 256.0 - 18.0);
@@ -235,8 +335,9 @@ mod tests {
         // Enough tabs to overflow: every slot must end before the window
         // controls' left edge (the strip_width minus the controls). That
         // is the whole point of the budget's caption reservation.
-        let tabs: Vec<(u32, bool, bool)> = (1..=30).map(|i| (i, false, false)).collect();
-        let slots = compute_layout(900.0, &tabs, 1);
+        let tabs: Vec<(u32, bool, bool, Option<u32>)> =
+            (1..=30).map(|i| (i, false, false, None)).collect();
+        let slots = compute_layout(900.0, &tabs, 1, &[]);
         let controls_left = 900.0 - WINDOW_CONTROLS_W;
         for slot in &slots {
             assert!(
@@ -251,16 +352,17 @@ mod tests {
 
     #[test]
     fn pinned_tabs_are_fixed_width() {
-        let tabs = vec![(1u32, true, false), (2, false, false)];
-        let slots = compute_layout(1200.0, &tabs, 2);
+        let tabs = plain(&[(1u32, true, false), (2, false, false)]);
+        let slots = compute_layout(1200.0, &tabs, 2, &[]);
         assert_eq!(slots[0].width, 40.0);
         assert_eq!(slots[1].width, 256.0);
     }
 
     #[test]
     fn overflow_shrinks_inactive_first() {
-        let tabs: Vec<(u32, bool, bool)> = (1..=20).map(|i| (i, false, false)).collect();
-        let slots = compute_layout(600.0, &tabs, 1);
+        let tabs: Vec<(u32, bool, bool, Option<u32>)> =
+            (1..=20).map(|i| (i, false, false, None)).collect();
+        let slots = compute_layout(600.0, &tabs, 1, &[]);
         let active = slots.iter().find(|s| s.id == 1).unwrap();
         let inactive = slots.iter().find(|s| s.id == 10).unwrap();
         assert!(active.width >= inactive.width);
@@ -269,18 +371,62 @@ mod tests {
 
     #[test]
     fn closing_tab_collapses_to_overlap() {
-        let tabs = vec![(1u32, false, false), (2, false, true)];
-        let slots = compute_layout(1200.0, &tabs, 1);
+        let tabs = plain(&[(1u32, false, false), (2, false, true)]);
+        let slots = compute_layout(1200.0, &tabs, 1, &[]);
         assert_eq!(slots[1].width, tab_overlap());
         assert!(slots[1].closing);
     }
 
     #[test]
     fn drop_index_follows_centers() {
-        let tabs = vec![(1u32, false, false), (2, false, false), (3, false, false)];
-        let slots = compute_layout(1200.0, &tabs, 1);
+        let tabs = plain(&[(1u32, false, false), (2, false, false), (3, false, false)]);
+        let slots = compute_layout(1200.0, &tabs, 1, &[]);
         assert_eq!(drop_index(&slots, 10.0), 0);
         assert_eq!(drop_index(&slots, 240.0), 1);
         assert_eq!(drop_index(&slots, 5000.0), 3);
+    }
+
+    #[test]
+    fn every_group_leads_with_its_header_chip() {
+        // Tabs 2 and 3 share group 7: a chip precedes tab 2, tab 3
+        // follows directly (no second chip mid-group).
+        let tabs = vec![
+            (1u32, false, false, None),
+            (2, false, false, Some(7)),
+            (3, false, false, Some(7)),
+        ];
+        let slots = compute_layout(1200.0, &tabs, 1, &[(7, false, "survival")]);
+        let chip = slots.iter().find(|s| s.header).expect("the chip");
+        assert_eq!(chip.id, 7);
+        assert_eq!(chip.width, group_header_width("survival"));
+        assert!(
+            chip.x < slots.iter().find(|s| s.id == 2).unwrap().x,
+            "the chip leads its group",
+        );
+        assert_eq!(slots.iter().filter(|s| s.header).count(), 1);
+    }
+
+    #[test]
+    fn a_collapsed_group_is_only_its_chip() {
+        let tabs = vec![
+            (1u32, false, false, None),
+            (2, false, false, Some(7)),
+            (3, false, false, Some(7)),
+        ];
+        let slots = compute_layout(1200.0, &tabs, 1, &[(7, true, "survival")]);
+        assert_eq!(slots.iter().filter(|s| s.header).count(), 1);
+        assert!(slots.iter().all(|s| s.header || s.id == 1), "group tabs hide");
+    }
+
+    #[test]
+    fn drop_index_skips_header_chips() {
+        let tabs = vec![(1u32, false, false, Some(7)), (2, false, false, Some(7))];
+        let slots = compute_layout(1200.0, &tabs, 1, &[(7, false, "g")]);
+        // A drop on the chip itself still lands by the tab centers.
+        let first_tab = slots.iter().find(|s| !s.header).unwrap();
+        let mid_chip = slots.iter().find(|s| s.header).unwrap().x + 2.0;
+        assert_eq!(drop_index(&slots, mid_chip), 0);
+        let mid_first = first_tab.x + first_tab.width * 0.5 + 1.0;
+        assert_eq!(drop_index(&slots, mid_first), 1);
     }
 }

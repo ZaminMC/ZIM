@@ -95,9 +95,19 @@ export function FrameApp() {
   // Three spaced retries, then an honest error panel with a manual retry.
   const [bootError, setBootError] = useState<string | null>(null);
 
-  const selectSlotIndex = useCallback((slotIndex: number) => {
-    void shellCommand(CMD.SELECT_TAB_0 + slotIndex);
-  }, []);
+  // The model's tab order is snapshot.tabs' order (the host maps it
+  // straight from strip.tabs) — the slot view interleaves group chips
+  // and hides collapsed tabs, so positions must come from the model's
+  // array, never from the rendered slot sequence.
+  const selectTab = useCallback(
+    (tabId: number) => {
+      if (snap) {
+        const index = snap.tabs.findIndex((t) => t.id === tabId);
+        if (index >= 0) void shellCommand(CMD.SELECT_TAB_0 + index);
+      }
+    },
+    [snap],
+  );
 
   const boot = useCallback((attempt = 0) => {
     bootFrame()
@@ -393,7 +403,33 @@ export function FrameApp() {
           }
         }}
       >
-        {snap.slots.map((slot, index) => {
+        {snap.slots.map((slot) => {
+          // A header slot is the group's chip — not a tab. Clicking it
+          // toggles the group's collapse (the chip IS the collapsed
+          // group, tab_group_views.cc).
+          if (slot.header) {
+            const group = snap.groups.find((g) => g.id === slot.id);
+            if (!group) return null;
+            return (
+              <button
+                key={`group-${group.id}`}
+                data-group-chip
+                className="group-chip"
+                style={{
+                  left: slot.x,
+                  width: slot.width,
+                  ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
+                }}
+                title={`Group ${group.label}${group.collapsed ? " — collapsed" : ""}`}
+                aria-label={`Toggle group ${group.label}`}
+                onClick={() =>
+                  void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, { group_id: group.id })
+                }
+              >
+                <span className="group-chip-label">{group.label}</span>
+              </button>
+            );
+          }
           const tab = snap.tabs.find((t) => t.id === slot.id);
           if (!tab) return null;
           const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
@@ -415,7 +451,7 @@ export function FrameApp() {
                 ...(group ? { ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6] } : {}),
               }}
               title={tab.title}
-              onClick={() => selectSlotIndex(index)}
+              onClick={() => selectTab(tab.id)}
               onAuxClick={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();

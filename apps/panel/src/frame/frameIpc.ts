@@ -17,6 +17,8 @@ export interface Slot {
   width: number;
   pinned: boolean;
   closing: boolean;
+  /** True for a group's header chip — id is then the GROUP id. */
+  header: boolean;
 }
 
 export interface TabView {
@@ -201,8 +203,10 @@ const demo = {
 function demoSnapshot(): Snapshot {
   // The layout law's demo echo — Chromium widths, the strip's leading
   // inset (kTabStripPadding), the caption area reserved, the shrink law
-  // (inactive to minimum, then the active, then clamped). A faithful
-  // mirror of shell/layout.rs at fixture scale.
+  // (inactive to minimum, then the active, then clamped), and the group
+  // law: every group leads with its header chip; a collapsed group is
+  // only the chip. A faithful mirror of shell/layout.rs at fixture
+  // scale.
   const overlap = 18;
   const LEADING = 6; // STRIP_PADDING
   const NEW_TAB_W = 36; // NEW_TAB_BUTTON_W
@@ -211,33 +215,55 @@ function demoSnapshot(): Snapshot {
   const PINNED_W = 40; // pinned_width()
   const MIN_INACTIVE = 32; // min_inactive_width()
   const MIN_ACTIVE = 32; // min_active_width()
+  const headerWidth = (label: string): number =>
+    Math.min(Math.max(14 + 7 * label.length, 28), 140);
 
   const ordered = [...demo.tabs].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  const budget = Math.max(demo.strip_width - LEADING - NEW_TAB_W - CONTROLS_W, 0);
-  const widths: number[] = ordered.map((t) => (t.pinned ? PINNED_W : STANDARD));
-  const preferred =
-    widths.reduce((a, b) => a + b, 0) - overlap * Math.max(ordered.length - 1, 0);
-  const widthAt = (i: number): number => widths[i] ?? STANDARD;
-  const isPinned = (i: number): boolean => ordered[i]?.pinned ?? false;
+  const collapsedOf = (gid: number | null): boolean =>
+    gid == null ? false : (demo.groups.find((g) => g.id === gid)?.collapsed ?? false);
+  // The group walk: a header chip before each group's first tab; a
+  // collapsed group's tabs disappear (the chip stands for the group).
+  const seen: number[] = [];
+  const units: { header: { gid: number; w: number } | null; tab: DemoTab | null }[] = [];
+  for (const tab of ordered) {
+    let header: { gid: number; w: number } | null = null;
+    if (tab.group != null && !seen.includes(tab.group)) {
+      seen.push(tab.group);
+      const label = demo.groups.find((g) => g.id === tab.group)?.label ?? "";
+      header = { gid: tab.group, w: headerWidth(label) };
+    }
+    units.push({ header, tab: collapsedOf(tab.group) ? null : tab });
+  }
 
-  if (preferred > budget && ordered.length > 0) {
-    const activeIndex = ordered.findIndex((t) => t.id === demo.active);
+  const laidOut = units.filter((u) => u.tab != null || u.header != null);
+  const budget = Math.max(demo.strip_width - LEADING - NEW_TAB_W - CONTROLS_W, 0);
+  const widthOf = (t: DemoTab): number => (t.pinned ? PINNED_W : STANDARD);
+  const preferred =
+    laidOut.reduce((a, u) => a + (u.header?.w ?? 0) + (u.tab ? widthOf(u.tab) : 0), 0) -
+    overlap * Math.max(laidOut.length - 1, 0);
+
+  const widths: number[] = laidOut.map((u) => (u.tab ? widthOf(u.tab) : 0));
+  if (preferred > budget && laidOut.length > 0) {
+    const activeIndex = laidOut.findIndex((u) => u.tab?.id === demo.active);
+    const widthAt = (i: number): number => widths[i] ?? STANDARD;
     // Inactive tabs down to their minimum first…
-    for (let i = 0; i < ordered.length; i++) {
-      if (!isPinned(i) && i !== activeIndex) widths[i] = MIN_INACTIVE;
+    for (let i = 0; i < laidOut.length; i++) {
+      const tab = laidOut[i]?.tab;
+      if (tab && !tab.pinned && i !== activeIndex) widths[i] = MIN_INACTIVE;
     }
     let total =
-      widths.reduce((a, b) => a + b, 0) - overlap * Math.max(ordered.length - 1, 0);
+      widths.reduce((a, b) => a + b, 0) - overlap * Math.max(laidOut.length - 1, 0);
     // …then the active tab, if even that is not enough.
-    if (total > budget && activeIndex >= 0 && !isPinned(activeIndex)) {
+    if (total > budget && activeIndex >= 0) {
       widths[activeIndex] = MIN_ACTIVE;
       total =
-        widths.reduce((a, b) => a + b, 0) - overlap * Math.max(ordered.length - 1, 0);
+        widths.reduce((a, b) => a + b, 0) - overlap * Math.max(laidOut.length - 1, 0);
     }
     // Leftover: the active tab first, then evenly, up to standard width.
     let free = budget - total;
-    for (let i = 0; i < ordered.length && free > 0; i++) {
-      if (isPinned(i)) continue;
+    for (let i = 0; i < laidOut.length && free > 0; i++) {
+      const tab = laidOut[i]?.tab;
+      if (!tab || tab.pinned) continue;
       const room = STANDARD - widthAt(i);
       const give = i === activeIndex ? Math.min(room, free) : Math.min(room, free * 0.5);
       widths[i] = widthAt(i) + give;
@@ -247,9 +273,25 @@ function demoSnapshot(): Snapshot {
 
   const slots: Snapshot["slots"] = [];
   let x = LEADING;
-  ordered.forEach((tab, i) => {
-    slots.push({ id: tab.id, x, width: widthAt(i), pinned: tab.pinned, closing: false });
-    x += widthAt(i) - overlap;
+  laidOut.forEach((u, i) => {
+    let unitEnd = x;
+    if (u.header) {
+      slots.push({
+        id: u.header.gid,
+        x,
+        width: u.header.w,
+        pinned: false,
+        closing: false,
+        header: true,
+      });
+      unitEnd = x + u.header.w;
+    }
+    if (u.tab) {
+      const w = widths[i] ?? widthOf(u.tab);
+      slots.push({ id: u.tab.id, x: unitEnd, width: w, pinned: u.tab.pinned, closing: false, header: false });
+      unitEnd += w;
+    }
+    x = unitEnd - overlap;
   });
   const active = demo.tabs.find((t) => t.id === demo.active) ?? null;
   return {
@@ -347,6 +389,12 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
     case 50001: { // TOGGLE_PINNED
       const tab = byId(Number(arg?.tab_id ?? demo.active));
       if (tab) tab.pinned = !tab.pinned;
+      break;
+    }
+    case 50005: { // TOGGLE_GROUP_COLLAPSE
+      const gid = Number(arg?.group_id);
+      const group = demo.groups.find((g) => g.id === gid);
+      if (group) group.collapsed = !group.collapsed;
       break;
     }
     case 50003: { // TOGGLE_MUTE

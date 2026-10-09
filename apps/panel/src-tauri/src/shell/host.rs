@@ -190,10 +190,18 @@ impl ShellInner {
 fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
     let empty = Strip::new();
     let strip = inner.strips.get(window).unwrap_or(&empty);
-    let tab_tuples: Vec<(u32, bool, bool)> =
-        strip.tabs.iter().map(|t| (t.id, t.pinned, false)).collect();
+    let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
+        .tabs
+        .iter()
+        .map(|t| (t.id, t.pinned, false, t.group))
+        .collect();
+    let group_tuples: Vec<(u32, bool, &str)> = strip
+        .groups
+        .values()
+        .map(|g| (g.id, g.collapsed, g.label.as_str()))
+        .collect();
     let active = strip.active.unwrap_or(0);
-    let slots = layout::compute_layout(inner.strip_width, &tab_tuples, active);
+    let slots = layout::compute_layout(inner.strip_width, &tab_tuples, active, &group_tuples);
     let tabs = strip
         .tabs
         .iter()
@@ -1000,10 +1008,18 @@ pub async fn shell_drag(
                     let mut inner = state.lock();
                     let slots = {
                         let strip = inner.strip(&window_name);
-                        let tab_tuples: Vec<(u32, bool, bool)> =
-                            strip.tabs.iter().map(|t| (t.id, t.pinned, false)).collect();
+                        let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
+                            .tabs
+                            .iter()
+                            .map(|t| (t.id, t.pinned, false, t.group))
+                            .collect();
+                        let group_tuples: Vec<(u32, bool, &str)> = strip
+                            .groups
+                            .values()
+                            .map(|g| (g.id, g.collapsed, g.label.as_str()))
+                            .collect();
                         let active = strip.active.unwrap_or(0);
-                        layout::compute_layout(inner.strip_width, &tab_tuples, active)
+                        layout::compute_layout(inner.strip_width, &tab_tuples, active, &group_tuples)
                     };
                     if let Some(x) = x {
                         let index = layout::drop_index(&slots, x);
