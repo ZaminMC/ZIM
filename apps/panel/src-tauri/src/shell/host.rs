@@ -268,7 +268,7 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
         .unwrap_or_default();
     Snapshot {
         window: window.to_owned(),
-        strip_width: inner.strip_width,
+        strip_width,
         header_height: layout::header_height(inner.bookmarks.bar_visible),
         bookmarks_bar_visible: inner.bookmarks.bar_visible,
         slots,
@@ -1132,10 +1132,6 @@ pub async fn shell_popup(
     Ok(())
 }
 
-/// The popup's own window size lookup — the popup_rect call above needs
-/// the HOST window's size, which the command resolved before opening.
-/// (Kept next to shell_popup for the reading order.)
-
 /// The overlay asks for its context: kind, the addressed tab, and the
 /// menu-relevant posture of that tab (pinned/muted/zoom) plus the
 /// window's bookmarks-bar state for the app menu's checkmark.
@@ -1271,11 +1267,11 @@ pub async fn shell_drag(
                 // bands — a drop over one of them MOVES the tab there
                 // (drag between windows); only a drop on empty screen
                 // tears off into a new window at the pointer.
-                if let Some((target, local_x)) = window_strip_at(&app, state, &window_name, sx, sy)
+                if let Some((target, local_x)) = window_strip_at(&app, &state, &window_name, sx, sy)
                 {
                     return move_tab_between_windows(
                         &app,
-                        state,
+                        &state,
                         &window_name,
                         &target,
                         id,
@@ -1287,7 +1283,7 @@ pub async fn shell_drag(
                     let strip = inner.strip(&window_name);
                     strip.detach(id).ok_or("tab vanished")?.0
                 };
-                spawn_tearoff(&app, state, tab.destination().clone(), sx, sy)
+                spawn_tearoff(&app, &state, tab.destination().clone(), sx, sy)
             } else {
                 {
                     let mut inner = state.lock();
@@ -1373,9 +1369,9 @@ fn window_strip_at(
         let Ok(size) = window.outer_size() else {
             continue;
         };
-        let x = outer.x as f32 / scale;
-        let y = outer.y as f32 / scale;
-        let w = size.width as f32 / scale;
+        let x = outer.x as f32 / scale as f32;
+        let y = outer.y as f32 / scale as f32;
+        let w = size.width as f32 / scale as f32;
         if screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + band {
             return Some((name, screen_x - x));
         }
