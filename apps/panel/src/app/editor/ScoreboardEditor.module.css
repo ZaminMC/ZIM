@@ -139,7 +139,7 @@
   border-radius: 10px;
   padding: 18px 12px;
   background:
-    linear-gradient(160deg, #35435c 0%, #2b3750 100%);
+    linear-gradient(160deg, var(--surface-4) 0%, var(--surface-3) 100%);
   border: 1px solid var(--border);
   min-height: 220px;
   display: flex;

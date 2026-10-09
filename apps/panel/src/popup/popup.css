@@ -189,9 +189,9 @@ body {
 .group-actions .ghost:hover { background: var(--frame-hover, rgba(233, 238, 246, 0.07)); color: var(--frame-fg); }
 .group-actions .primary {
   background: var(--frame-accent, #5c9df4);
-  color: #071120;
+  color: var(--accent-contrast);
 }
-.group-actions .primary:hover { background: #85b7f8; }
+.group-actions .primary:hover { background: var(--accent-strong); }
 .group-actions .primary:disabled { opacity: 0.45; }
 
 @media (prefers-reduced-motion: reduce) {

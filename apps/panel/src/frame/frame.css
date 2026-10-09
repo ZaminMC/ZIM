@@ -545,11 +545,11 @@ body {
   font-size: 12px;
   font-weight: 500;
   background: var(--frame-accent);
-  color: #071120;
+  color: var(--accent-contrast);
   box-shadow: 0 4px 16px rgb(0 0 0 / 45%);
   cursor: pointer;
 }
-.update-pill:hover { background: #85b7f8; }
+.update-pill:hover { background: var(--accent-strong); }
 
 /* Reduced motion floor (ADR-0030): no stylesheet can outrun it. */
 @media (prefers-reduced-motion: reduce) {
@@ -596,11 +596,11 @@ body {
   border: none;
   border-radius: 7px;
   background: var(--frame-accent);
-  color: #071120;
+  color: var(--accent-contrast);
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
 }
 
-.frame-error-retry:hover { background: #85b7f8; }
+.frame-error-retry:hover { background: var(--accent-strong); }
