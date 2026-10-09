@@ -58,8 +58,8 @@ PASS / FAIL+describe. A FAIL on any row 1–24 keeps P0.2 open.
 
 | # | Item | What "fixed" looks like |
 |---|---|---|
-| 25 | Window drag | The window MOVES from any bare strip area (the ACL now grants start-dragging; before this pass the undecorated window was locked) |
-| 26 | Responsiveness | Clicking tabs/verbs answers immediately; no disk stall behind every beat (session saves are debounced + atomic now) |
-| 27 | Group underline containment | An inactive group member's colored underline never reads as a line crossing into the neighbor tab (22px insets inside the visible span) |
-| 28 | Tray laws | Close parks in the tray with a tooltip; tray Open restores; tray Quit ends the process fully |
-| 29 | Updater lane | The pill never closes the app on its own; download is automatic (when enabled), apply is only the explicit restart click |
+| 25 | Window drag | The window MOVES from any bare strip area (the ACL now grants start-dragging; before this pass the undecorated window was locked). *Code-verified locally (drag ACL + rail hit-test in shell/host.rs); the physical drag needs the Windows app.* |
+| 26 | Responsiveness | Clicking tabs/verbs answers immediately; no disk stall behind every beat (session saves are debounced + atomic now). *Code-verified locally; the feel needs the Windows app.* |
+| 27 | Group underline containment | An inactive group member's colored underline never reads as a line crossing into the neighbor tab (22px insets inside the visible span). **2026-10-10: PASS (harness).** `shots/looktest-groupband-zoom.png` / `looktest-activemember-zoom.png`: member underlines weld into one band, the band pauses around the active tab's curve, non-member boundaries keep the 22px containment law. |
+| 28 | Tray laws | Close parks in the tray with a tooltip; tray Open restores; tray Quit ends the process fully. **2026-10-10: code-verified** (`main.rs`: CloseRequested→prevent+hide on the primary only, `tray-open`/`tray-quit` items, left-click shows, tooltip "ZIM — servers keep running in the background", Quit = `app.exit(0)`; daemon deliberately detached). The icon itself needs the Windows app. |
+| 29 | Updater lane | The pill never closes the app on its own; download is automatic (when enabled), apply is only the explicit restart click. *Verified against the v0.4.29 release: the feed answers, the installer builds, the pill renders from `updatePhase` with an explicit restart button only.* |
