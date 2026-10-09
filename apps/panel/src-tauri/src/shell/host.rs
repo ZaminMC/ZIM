@@ -78,6 +78,8 @@ pub struct TabView {
     active: bool,
     can_back: bool,
     can_forward: bool,
+    /// The tab's contents zoom (Chromium's per-contents zoom factor).
+    zoom: f32,
 }
 
 #[derive(Serialize, Clone)]
@@ -106,6 +108,20 @@ pub struct ShellState {
     inner: Mutex<ShellInner>,
 }
 
+impl ShellState {
+    /// A runtime window went away (tear-off closed): its strip dies with
+    /// it. The primary window's strip IS the session — never dropped
+    /// here, or a quit would wipe the restore set.
+    pub fn drop_strip(&self, window_label: &str) {
+        if window_label == "main" {
+            return;
+        }
+        let mut inner = self.lock();
+        inner.strips.remove(window_label);
+        inner.strip_widths.remove(window_label);
+        inner.save();
+    }
+}
 struct ShellInner {
     /// One strip per window; the primary window's strip is the one the
     /// session restores.
@@ -115,9 +131,10 @@ struct ShellInner {
     bookmarks_path: Option<PathBuf>,
     drag: DragSession,
     next_window: u32,
-    /// The frame's viewport width (reported on boot/resize; it sizes the
-    /// layout law).
-    strip_width: f32,
+    /// The frame's viewport width per window (reported on boot/resize;
+    /// each window's layout law runs on its own width — a single scalar
+    /// went stale the moment a second window synced).
+    strip_widths: HashMap<String, f32>,
 }
 
 impl ShellState {
@@ -130,7 +147,7 @@ impl ShellState {
                 bookmarks_path: None,
                 drag: DragSession::default(),
                 next_window: 1,
-                strip_width: 1024.0,
+                strip_widths: HashMap::new(),
             }),
         }
     }
@@ -194,6 +211,7 @@ impl ShellInner {
 fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
     let empty = Strip::new();
     let strip = inner.strips.get(window).unwrap_or(&empty);
+    let strip_width = inner.strip_widths.get(window).copied().unwrap_or(1024.0);
     let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
         .tabs
         .iter()
@@ -205,7 +223,7 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
         .map(|g| (g.id, g.collapsed, g.label.as_str()))
         .collect();
     let active = strip.active.unwrap_or(0);
-    let slots = layout::compute_layout(inner.strip_width, &tab_tuples, active, &group_tuples);
+    let slots = layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples);
     let tabs = strip
         .tabs
         .iter()
@@ -219,6 +237,7 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
             active: strip.active == Some(t.id),
             can_back: t.history_index > 0,
             can_forward: t.history_index + 1 < t.history.len(),
+            zoom: t.zoom,
         })
         .collect();
     let groups = strip
@@ -311,7 +330,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     let (snap, header, create_tab) = {
         let mut inner = state.lock();
-        inner.strip_width = size.width as f32;
+        inner.strip_widths.insert(window_label.to_owned(), size.width as f32);
         let header = layout::header_height(inner.bookmarks.bar_visible);
         let create_tab = {
             let strip = inner.strip(window_label);
@@ -336,7 +355,8 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         size: LogicalSize::new(size.width, (size.height - header as f64).max(0.0)).into(),
     };
 
-    // Show the active tab's webview at its slot; hide the rest.
+    // Show the active tab's webview at its slot; hide the rest. Every
+    // tab's own zoom rides its webview (Chromium zooms per-contents).
     for tab in &snap.tabs {
         let Some(webview) = app.get_webview(&tab_label(window_label, tab.id)) else {
             continue;
@@ -344,8 +364,25 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         if tab.active {
             let _ = webview.set_bounds(content_bounds);
             let _ = webview.show();
+            let _ = webview.set_zoom(tab.zoom as f64);
         } else {
             let _ = webview.hide();
+        }
+    }
+
+    // Webview hygiene: a tab the model no longer knows (closed,
+    // detached, moved between windows) must not survive as a hidden
+    // child — its renderer would keep running forever. Remove every
+    // orphan of this window.
+    let live: std::collections::HashSet<String> = snap
+        .tabs
+        .iter()
+        .map(|t| tab_label(window_label, t.id))
+        .collect();
+    for webview in host_window.webviews() {
+        let label = webview.label();
+        if label.starts_with(&format!("tab-{window_label}-")) && !live.contains(label) {
+            let _ = host_window.remove_child(&webview);
         }
     }
 
@@ -617,11 +654,13 @@ pub async fn shell_command(
                 inner.bookmarks.toggle_bar();
             }
             // Window verbs touch the OS, not the model — deferred below.
+            // NEW_WINDOW tears off a fresh window from the model too.
             cmd::WINDOW_MINIMIZE
             | cmd::WINDOW_TOGGLE_MAXIMIZE
             | cmd::WINDOW_CLOSE
             | cmd::FOCUS_LOCATION
-            | cmd::TOGGLE_PALETTE => {
+            | cmd::TOGGLE_PALETTE
+            | cmd::NEW_WINDOW => {
                 window_verb = Some(id);
             }
             _ => {
@@ -713,6 +752,21 @@ pub async fn shell_command(
                             t.muted = !t.muted;
                         }
                     }
+                    cmd::ZOOM_IN | cmd::ZOOM_OUT | cmd::ZOOM_RESET => {
+                        // Contents zoom on the addressed tab (default:
+                        // the active one), one rung along the ladder.
+                        let direction = match id {
+                            cmd::ZOOM_IN => 1,
+                            cmd::ZOOM_OUT => -1,
+                            _ => 0,
+                        };
+                        let target = arg_id.or(strip.active);
+                        if let Some(t) =
+                            target.and_then(|id| strip.tabs.iter_mut().find(|t| t.id == id))
+                        {
+                            t.zoom = crate::shell::tabs::zoom_step(t.zoom, direction);
+                        }
+                    }
                     cmd::NAVIGATE_ACTIVE => {
                         let Some(destination) = arg_destination else {
                             return Err("NAVIGATE_ACTIVE needs a destination".into());
@@ -780,6 +834,14 @@ pub async fn shell_command(
             if let Some(tab) = active {
                 let _ = app.emit_to(tab_label(&window_name, tab), "shell://toggle-palette", ());
             }
+            return Ok(());
+        }
+        Some(cmd::NEW_WINDOW) => {
+            // A fresh top-level browser window with one New tab, opened
+            // in a cascade so consecutive windows don't stack dead-on.
+            let cascade = state.lock().next_window as f32;
+            let (sx, sy) = (140.0 + 26.0 * cascade, 90.0 + 26.0 * cascade);
+            spawn_tearoff(&app, &state, Destination::New, sx, sy)?;
             return Ok(());
         }
         _ => {}
@@ -1077,25 +1139,29 @@ pub async fn shell_drag(
                 )
             };
             let (detached, id, x, sx, sy) = decision;
+            let Some(id) = id else { return Ok(()) };
             if detached {
-                // DetachIntoNewBrowserAndRunMoveLoop, adapted: the new
-                // window opens where the pointer let go.
-                let Some(id) = id else {
-                    return Err("no drag tab".into());
-                };
+                // DetachIntoNewBrowserAndRunMoveLoop, drop-based
+                // adaptation: first hit-test the OTHER windows' strip
+                // bands — a drop over one of them MOVES the tab there
+                // (drag between windows); only a drop on empty screen
+                // tears off into a new window at the pointer.
+                if let Some((target, local_x)) = window_strip_at(&app, state, &window_name, sx, sy)
+                {
+                    return move_tab_between_windows(&app, state, &window_name, &target, id, local_x);
+                }
                 let tab = {
                     let mut inner = state.lock();
                     let strip = inner.strip(&window_name);
                     strip.detach(id).ok_or("tab vanished")?.0
                 };
-                spawn_tearoff(&app, &state, tab.destination().clone(), sx, sy)
+                spawn_tearoff(&app, state, tab.destination().clone(), sx, sy)
             } else {
-                let Some(id) = id else { return Ok(()) };
                 {
                     let mut inner = state.lock();
                     // The width reads before the strip's mutable borrow:
                     // the guard can't serve both at once (E0502's law).
-                    let strip_width = inner.strip_width;
+                    let strip_width = inner.strip_widths.get(&window_name).copied().unwrap_or(1024.0);
                     let slots = {
                         let strip = inner.strip(&window_name);
                         let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
@@ -1112,8 +1178,16 @@ pub async fn shell_drag(
                         layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
                     };
                     if let Some(x) = x {
-                        let index = layout::drop_index(&slots, x);
-                        inner.strip(&window_name).move_to(id, index);
+                        // The lift-out rule: the insertion index runs over
+                        // the REMAINING tabs — the dragged tab's own slot
+                        // never participates in its own drop verdict.
+                        let others: Vec<layout::Slot> = slots
+                            .iter()
+                            .filter(|s| !s.header && s.id != id)
+                            .cloned()
+                            .collect();
+                        let index = layout::drop_index(&others, x);
+                        inner.strip(&window_name).reorder_drop(id, index);
                     }
                 }
                 emit_tab_state(&app, &state, &window_name);
@@ -1128,6 +1202,104 @@ pub async fn shell_drag(
         }
         _ => Err(format!("unknown drag phase {phase}")),
     }
+}
+
+/// Which OTHER window's strip band does this screen point land on, and
+/// where within it? (The drag-between-windows drop: Chromium tears off
+/// into a NEW window only when the drop lands on no existing strip.)
+/// Returns the target window's label and the pointer's x in that
+/// window's logical coordinates.
+fn window_strip_at(
+    app: &AppHandle,
+    state: &ShellState,
+    source: &str,
+    screen_x: f32,
+    screen_y: f32,
+) -> Option<(String, f32)> {
+    let names: Vec<String> = {
+        let inner = state.lock();
+        inner
+            .strips
+            .keys()
+            .filter(|k| k.as_str() != source)
+            .cloned()
+            .collect()
+    };
+    let band = layout::header_height(state.lock().bookmarks.bar_visible);
+    for name in names {
+        let Some(window) = app.get_window(&name) else {
+            continue;
+        };
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let Ok(outer) = window.outer_position() else {
+            continue;
+        };
+        let Ok(size) = window.outer_size() else {
+            continue;
+        };
+        let x = outer.x as f32 / scale;
+        let y = outer.y as f32 / scale;
+        let w = size.width as f32 / scale;
+        if screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + band {
+            return Some((name, screen_x - x));
+        }
+    }
+    None
+}
+
+/// The between-windows move: the tab leaves the source strip as a
+/// DetachedTab and re-inserts at the drop point of the target strip
+/// (the pinned block law rides insert/set_pinned; the history travels
+/// intact). No second server process is possible — destinations are
+/// views; the daemon owns the processes.
+fn move_tab_between_windows(
+    app: &AppHandle,
+    state: &ShellState,
+    source: &str,
+    target: &str,
+    id: TabId,
+    local_x: f32,
+) -> Result<(), String> {
+    let tab = {
+        let mut inner = state.lock();
+        let strip = inner.strips.get_mut(source).ok_or("source strip vanished")?;
+        strip.detach(id).ok_or("tab vanished")?.0
+    };
+    {
+        let mut inner = state.lock();
+        let strip_width = inner.strip_widths.get(target).copied().unwrap_or(1024.0);
+        let drop_index = {
+            let strip = inner.strip(target);
+            let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> =
+                strip.tabs.iter().map(|t| (t.id, t.pinned, false, t.group)).collect();
+            let group_tuples: Vec<(u32, bool, &str)> = strip
+                .groups
+                .values()
+                .map(|g| (g.id, g.collapsed, g.label.as_str()))
+                .collect();
+            let active = strip.active.unwrap_or(0);
+            let slots = layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples);
+            layout::drop_index(&slots, local_x)
+        };
+        let strip = inner.strip(target);
+        let at = drop_index.min(strip.tabs.len());
+        let new_id = strip.insert(at, tab.destination().clone(), true);
+        // The insert minted a fresh tab id (the model's own business);
+        // carry the DetachedTab's history, posture, and pinned-ness.
+        if let Some(inserted) = strip.tabs.iter_mut().find(|t| t.id == new_id) {
+            inserted.history = tab.history;
+            inserted.history_index = tab.history_index;
+            inserted.muted = tab.muted;
+            inserted.zoom = tab.zoom;
+        }
+        if tab.pinned {
+            strip.set_pinned(new_id, true);
+        }
+    }
+    emit_tab_state(app, state, source);
+    emit_tab_state(app, state, target);
+    sync(app, state, source)?;
+    sync(app, state, target)
 }
 
 /// A tear-off: a new window with its own frame and the detached tab.
@@ -1186,7 +1358,9 @@ pub async fn shell_window_resized(
     let label = window.label().to_owned();
     {
         let mut inner = state.lock();
-        inner.strip_width = width as f32;
+        inner
+            .strip_widths
+            .insert(label.clone(), width as f32);
         let _ = height;
     }
     sync(&app, &state, &label)

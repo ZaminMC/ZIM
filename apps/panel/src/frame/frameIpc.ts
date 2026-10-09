@@ -31,6 +31,8 @@ export interface TabView {
   active: boolean;
   can_back: boolean;
   can_forward: boolean;
+  /** The tab's contents zoom (the host applies it to the webview). */
+  zoom: number;
 }
 
 export interface GroupView {
@@ -140,6 +142,9 @@ export function onSnapshot(handler: (snap: Snapshot) => void): Promise<UnlistenF
 }
 
 export function onFocusAddress(handler: () => void): Promise<UnlistenFn> {
+  // No host, no event lane (the demo lane never receives focus pushes);
+  // subscribing through @tauri-apps/api outside Tauri would throw.
+  if (!isTauri()) return Promise.resolve(() => {});
   return listen("shell://focus-address", () => handler());
 }
 
@@ -152,6 +157,60 @@ export function onAskGroupLabel(
   return listen<{ tab_id: number }>("shell://ask-group-label", (event) =>
     handler(event.payload.tab_id),
   );
+}
+
+// -- View-side geometry mirrors (tested against the model's law) -------------
+
+/** drop_index's view mirror — shell/layout.rs is authoritative; the frame
+ *  needs the SAME verdict live, during a drag, to place its insertion
+ *  indicator before any model round-trip. Header chips are not drop
+ *  targets; the boundary follows slot centers (drop_index follows
+ *  centers). */
+export function dropIndexFromSlots(slots: Snapshot["slots"], x: number): number {
+  const tabs = slots.filter((s) => !s.header);
+  let index = tabs.length;
+  for (let i = 0; i < tabs.length; i++) {
+    const slot = tabs[i];
+    if (slot && x < slot.x + slot.width * 0.5) {
+      index = i;
+      break;
+    }
+  }
+  return index;
+}
+
+/** The strip's scroll state over the model's slots (tab_strip scrolling):
+ *  the layout law shrinks tabs first; when even the minimum run exceeds
+ *  the budget the strip scrolls. `max` is how far the lane may translate;
+ *  `clamped` is the usable value. The reserve mirrors the + button's
+ *  clamp zone (NEW_TAB_BUTTON_W 36 + WINDOW_CONTROLS_W 138) plus the
+ *  overlap tail the last tab sheds. */
+export function stripScroll(slots: Snapshot["slots"], stripWidth: number, wanted: number): { max: number; value: number } {
+  const usedEnd = slots.reduce((end, s) => Math.max(end, s.x + s.width), 0);
+  const overlapTail = 18; // tab_overlap(): the chain's last slot sheds it
+  const reserve = 36 + 138;
+  const max = Math.max(0, usedEnd - overlapTail + reserve + 4 - stripWidth);
+  return { max, value: Math.min(Math.max(0, wanted), max) };
+}
+
+/** Reveal law: the smallest scroll shift that brings the active tab's
+ *  slot into the visible range [0, limit] (Chrome scrolls just enough,
+ *  never recenters), clamped to the strip's own scroll maximum. */
+export function revealSlot(
+  slot: { x: number; width: number } | undefined,
+  stripWidth: number,
+  scroll: number,
+  maxScroll: number,
+): number {
+  if (!slot) return scroll;
+  const limit = Math.max(stripWidth - 174, 0);
+  let wanted = scroll;
+  if (slot.x - scroll < 0) {
+    wanted = slot.x;
+  } else if (slot.x + slot.width - scroll > limit) {
+    wanted = slot.x + slot.width - limit;
+  }
+  return Math.min(Math.max(0, wanted), maxScroll);
 }
 
 // -- Demo mode (?demo, browser only) -----------------------------------------
@@ -178,6 +237,7 @@ interface DemoTab {
   group: number | null;
   can_back: boolean;
   can_forward: boolean;
+  zoom: number;
 }
 
 const demo = {
@@ -186,10 +246,10 @@ const demo = {
   active: 2,
   bar_visible: false,
   tabs: [
-    { id: 1, title: "Set up the docs", address: "zim://settings/", pinned: true, muted: false, group: null, can_back: true, can_forward: false },
-    { id: 2, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false },
-    { id: 3, title: "Server survival", address: "zim://server/survival", pinned: false, muted: false, group: 1, can_back: true, can_forward: false },
-    { id: 4, title: "Console hub", address: "zim://console/hub", pinned: false, muted: false, group: 1, can_back: false, can_forward: true },
+    { id: 1, title: "Set up the docs", address: "zim://settings/", pinned: true, muted: false, group: null, can_back: true, can_forward: false, zoom: 1 },
+    { id: 2, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false, zoom: 1 },
+    { id: 3, title: "Server survival", address: "zim://server/survival", pinned: false, muted: false, group: 1, can_back: true, can_forward: false, zoom: 1 },
+    { id: 4, title: "Console hub", address: "zim://console/hub", pinned: false, muted: false, group: 1, can_back: false, can_forward: true, zoom: 1 },
   ] as DemoTab[],
   groups: [{ id: 1, label: "survival", color: 1, collapsed: false }],
   bookmarks: [
@@ -327,6 +387,7 @@ function demoSnapshot(): Snapshot {
       active: t.id === demo.active,
       can_back: t.can_back,
       can_forward: t.can_forward,
+      zoom: t.zoom,
     })),
     groups: demo.groups,
     active: demo.active,
@@ -355,7 +416,7 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
   const indexOfActive = () => demo.tabs.findIndex((t) => t.id === demo.active);
   switch (id) {
     case 34014: { // NEW_TAB
-      const tab: DemoTab = { id: demo.next_id++, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false };
+      const tab: DemoTab = { id: demo.next_id++, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false, zoom: 1 };
       demo.tabs.splice(indexOfActive() + 1, 0, tab);
       demo.active = tab.id;
       break;

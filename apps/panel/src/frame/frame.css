@@ -85,24 +85,32 @@ body {
   font-weight: 450;
   line-height: 1;
   border-radius: 10px 10px 0 0; /* CORNER_TOP */
-  transition: background 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1);
+  transition: background 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1),
+    left 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.tab-inactive { background: transparent; color: var(--frame-fg-dim); }
+.tab-inactive { background: transparent; color: var(--frame-fg-dim); z-index: 1; }
 .tab-inactive:hover { background: var(--frame-hover); color: var(--frame-fg); }
 .tab-active {
   background: var(--frame-surface);
   color: var(--frame-fg);
   font-weight: 500;
+  /* Chromium paints the active tab LAST (TabContainer renders active
+     above its siblings) — its body and both bottom curls must cover a
+     neighbor's hover fill or a chip's corner, never the reverse. */
+  z-index: 2;
 }
 
 /* The active tab melts into the toolbar: bottom corner extensions,
-   radius 12 (CORNER_BOTTOM). Each side only renders over a see-through
-   neighbor — the view gates them with .flare-* (a flare over a chip or
-   another active tab would paint on top of it). */
+   radius 12 (CORNER_BOTTOM). Each extension is a 12×12 square OUTSIDE
+   the tab's span whose TOP-OUTER corner is cut away — the surface fills
+   the region hugging the tab and the toolbar, the strip shows through
+   the quarter-disc toward the tab strip's ground (TabStyleViews'
+   GetTabPath extend-to-bottom arms). They always render: the active
+   tab paints above every neighbor, so the curl wins the overlap zone. */
 .tab-active::before,
 .tab-active::after {
-  content: none;
+  content: "";
   position: absolute;
   bottom: 0;
   width: 12px;
@@ -110,8 +118,8 @@ body {
   background: inherit;
   pointer-events: none;
 }
-.tab-active.flare-left::before { content: ""; left: -12px; border-bottom-right-radius: 12px; }
-.tab-active.flare-right::after { content: ""; right: -12px; border-bottom-left-radius: 12px; }
+.tab-active::before { left: -12px; border-top-left-radius: 12px; }
+.tab-active::after { right: -12px; border-top-right-radius: 12px; }
 
 .tab-glyph {
   flex: none;
@@ -138,6 +146,11 @@ body {
   padding: 0 18px 0 0;
 }
 .tab-pinned .tab-glyph { color: var(--frame-fg); }
+
+/* The dragged tab lifts above everything (Chromium's dragging tab is
+   the top-most view in the strip) and follows the pointer without the
+   settle transitions. */
+.tab-dragging { z-index: 4; cursor: grabbing; }
 
 /* Minimum-width tabs (the shrink law's 32 DIP floor): the glyph alone
    fits — title, mute state, and close give way. */
@@ -176,19 +189,30 @@ body {
 .tab .tab-close:hover { opacity: 1; background: var(--frame-hover-strong); }
 .tab-pinned .tab-close { display: none; }
 
-/* Separators between inactive tabs: 2 × 20 (SEPARATOR_W × SEPARATOR_H). */
-.tab-inactive + .tab-inactive::after {
-  content: "";
+/* Separators: explicit 2×20 marks the VIEW renders at the boundary
+   between two adjacent inactive, undragged tab slots (SEPARATOR_W ×
+   SEPARATOR_H). The old CSS sibling selector could not see across a
+   group chip or an absolutely-positioned slot run — the view owns the
+   adjacency truth, so the view owns the separators. Hover of either
+   neighbor and the drag session hide them (tab_style's separator
+   visibility rule). */
+.tab-separator {
   position: absolute;
-  left: -1px;
-  top: 50%;
+  bottom: 0;
+  z-index: 1;
   width: 2px;
   height: 20px;
-  transform: translateY(-50%);
+  margin-bottom: 7.5px; /* centers 20px in the 35px tab band */
   background: var(--frame-line);
+  transition: opacity 100ms ease-out;
 }
-.tab-inactive:hover + .tab-inactive::after,
-.tab-inactive + .tab-inactive:hover::after { opacity: 0; }
+.tab-separator[hidden] { display: none; }
+/* Chromium's separator visibility rule: hover on either neighbor hides
+   the mark; a live drag session hides them all (the DOM order the view
+   emits — tab, mark, tab — makes both a sibling and a :has() reach). */
+.tab:hover + .tab-separator,
+.tab-separator:has(+ .tab:hover) { opacity: 0; }
+.strip:has(.tab-dragging) .tab-separator { opacity: 0; }
 
 .tab-group-underline {
   position: absolute;
@@ -204,7 +228,9 @@ body {
    it, a collapsed group IS it. Upstream it is a TAB-SHAPED element, not
    a floating pill — the slot's overlap paints over the previous tab's
    curve zone, and a translucent pill would bleed that tab through. So:
-   full tab height, tab radius, opaque tint over the strip's ground. */
+   full tab height, tab radius, opaque tint over the strip's ground.
+   z-index 1: the ACTIVE tab (z 2) paints its body and curl above the
+   chip's corner, exactly as upstream's paint order does. */
 .group-chip {
   position: absolute;
   bottom: 0;
@@ -216,7 +242,8 @@ body {
   border-radius: 10px 10px 0 0; /* CORNER_TOP */
   background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 20%, var(--frame-bg));
   cursor: default;
-  transition: background 120ms ease-out;
+  transition: background 120ms ease-out, left 200ms cubic-bezier(0.2, 0, 0, 1);
+  z-index: 1;
 }
 .group-chip:hover {
   background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 30%, var(--frame-bg));
@@ -232,15 +259,62 @@ body {
   color: var(--tab-group-color, var(--group-sky));
 }
 
-.tab-dragging {
-  z-index: 3;
+.tab-dragging-live {
   box-shadow: 0 4px 14px rgb(0 0 0 / 45%);
-  transition: none;
 }
 
 /* A closing tab collapses to the overlap width (the model's law) — let
    the eye see it go: fade while the slot shrinks, then it's gone. */
 .tab-closing { opacity: 0; transition: opacity 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1); }
+
+/* The drag session's insertion indicator — a 2px surface bar at the
+   preview boundary, the DOM stand-in for Chromium's
+   DragInsertionIndicator (drag insertion markers are edge-anchored
+   bars, not gaps). */
+.drag-insert {
+  position: absolute;
+  bottom: 0;
+  z-index: 3;
+  width: 2px;
+  height: 27px;
+  margin-bottom: 2px;
+  border-radius: 1px;
+  background: var(--frame-accent);
+  pointer-events: none;
+}
+
+/* The overflow lane: the model's slots translate inside it while the
+   strip's own chrome (+ button, chevrons, caption) stays put. The lane
+   never eats clicks — bare areas must stay the window's drag region —
+   so it is pointer-transparent; tabs and chips re-enable themselves. */
+.strip-lane {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.strip-lane .tab,
+.strip-lane .group-chip,
+.strip-lane .tab-separator,
+.strip-lane .drag-insert { pointer-events: auto; }
+
+/* The scroll chevrons (tab_strip scrolling): they ride the strip's
+   right reserve only while the layout overflows — the view mounts them
+   conditionally, exactly like upstream's arrow buttons. */
+.strip-chev {
+  position: absolute;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 35px;
+  border: none;
+  background: transparent;
+  color: var(--frame-fg-dim);
+  cursor: default;
+}
+.strip-chev:hover { background: var(--frame-hover); color: var(--frame-fg); }
+.strip-chev[disabled] { opacity: 0.3; }
 
 .new-tab {
   position: absolute;
@@ -262,14 +336,17 @@ body {
   position: absolute;
   right: 0;
   top: 0;
-  height: 35px;
+  /* Caption buttons span the WHOLE strip band (41 = 35 + 6): a dead
+     6px band under them reads as a broken hover target, and upstream's
+     frame layout gives the caption the full tabstrip height. */
+  height: 41px;
   display: flex;
 }
 .window-controls button {
   display: grid;
   place-items: center;
   width: 46px;
-  height: 35px;
+  height: 41px;
   border: none;
   background: transparent;
   color: var(--frame-fg-dim);

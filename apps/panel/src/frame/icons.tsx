@@ -235,3 +235,95 @@ export function IconGlobe(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconChevLeft(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9.5 4 6 8l3.5 4" />
+    </svg>
+  );
+}
+
+export function IconChevRight(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6.5 4 10 8l-3.5 4" />
+    </svg>
+  );
+}
+
+export function IconDots(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="3.2" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="12.8" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconZoomIn(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="7" cy="7" r="4.4" />
+      <path d="M10.4 10.4 13.5 13.5" />
+      <path d="M7 5.2v3.6M5.2 7h3.6" />
+    </svg>
+  );
+}
+
+export function IconZoomOut(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="7" cy="7" r="4.4" />
+      <path d="M10.4 10.4 13.5 13.5" />
+      <path d="M5.2 7h3.6" />
+    </svg>
+  );
+}
+
+export function IconZoomReset(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M13 8a5 5 0 1 1-1.5-3.6" />
+      <path d="M13 2.8v2.4h-2.4" />
+      <path d="M5.6 8h4.8" />
+    </svg>
+  );
+}
+
+export function IconDevTools(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="m5.5 5.5-2.5 2.5 2.5 2.5" />
+      <path d="m10.5 5.5 2.5 2.5-2.5 2.5" />
+      <path d="M9 3.5 7 12.5" />
+    </svg>
+  );
+}
+
+export function IconLogs(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 4h10M3 8h10M3 12h6" />
+    </svg>
+  );
+}
+
+export function IconNewWindow(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.6" y="4.6" width="10.8" height="8.8" rx="1.6" />
+      <path d="M2.6 7.4h10.8" />
+      <path d="M10 2.6h3.4V6" />
+    </svg>
+  );
+}
+
+export function IconCheck(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="m3.5 8.5 3 3 6-7" />
+    </svg>
+  );
+}

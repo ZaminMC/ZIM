@@ -254,13 +254,27 @@ fn main() {
         // must never birth a webview (the re-entrancy law, shell/host.rs:
         // on Windows it deadlocks the boot IPC and whites the window).
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Resized(_) = event {
-                let app = window.app_handle().clone();
-                let label = window.label().to_owned();
-                tauri::async_runtime::spawn(async move {
-                    let state = app.state::<ShellState>();
-                    shell::host::relayout_window(&app, &state, &label);
-                });
+            match event {
+                tauri::WindowEvent::Resized(_) => {
+                    let app = window.app_handle().clone();
+                    let label = window.label().to_owned();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app.state::<ShellState>();
+                        shell::host::relayout_window(&app, &state, &label);
+                    });
+                }
+                // A runtime window's death drops its strip (shell
+                // hygiene); the primary window's strip IS the session
+                // and is never dropped (drop_strip's own law).
+                tauri::WindowEvent::Destroyed => {
+                    let app = window.app_handle().clone();
+                    let label = window.label().to_owned();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app.state::<ShellState>();
+                        state.drop_strip(&label);
+                    });
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

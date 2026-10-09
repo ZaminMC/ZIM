@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bootFrame,
+  dropIndexFromSlots,
   isTauri,
   omniboxClassify,
   omniboxCommit,
@@ -25,8 +26,10 @@ import {
   onSnapshot,
   onFocusAddress,
   reportFrameSize,
+  revealSlot,
   shellCommand,
   shellDrag,
+  stripScroll,
   tabContextMenu,
   type Snapshot,
 } from "./frameIpc";
@@ -53,6 +56,8 @@ import {
   IconApps,
   IconDownload,
   IconGlobe,
+  IconChevLeft,
+  IconChevRight,
 } from "./icons";
 import "./frame.css";
 
@@ -133,6 +138,20 @@ export function FrameApp() {
   // The boot must never fail silently: a white window teaches nothing.
   // Three spaced retries, then an honest error panel with a manual retry.
   const [bootError, setBootError] = useState<string | null>(null);
+  // The strip's scroll posture (tab_strip scrolling): the model's layout
+  // law shrinks the tabs first; when even the minimum run overflows, the
+  // lane translates. A ref mirror rides along so the drag session's drop
+  // can convert view coordinates to model coordinates without a render.
+  const [scroll, setScroll] = useState(0);
+  const scrollRef = useRef(0);
+  scrollRef.current = scroll;
+  // The live drag session's pointer (frame coordinates), non-null only
+  // once the drag crosses its threshold — the render reads it to lift
+  // the dragged tab and place the insertion indicator.
+  const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
+  // When a drag session released: its pointerup also dispatches a click,
+  // and the release must never select the tab it just dragged.
+  const dragJustEnded = useRef(0);
 
   // The model's tab order is snapshot.tabs' order (the host maps it
   // straight from strip.tabs) — the slot view interleaves group chips
@@ -147,6 +166,82 @@ export function FrameApp() {
     },
     [snap],
   );
+
+  // The drag session — Chromium's TabDragController, frame side. A
+  // pointerdown captures the pointer, a 10 DIP threshold arms the drag
+  // (the porting spec's threshold), and from there the session reports
+  // rAF-coalesced moves (the host's detach magnetism watches y), lifts
+  // the tab, and places the insertion indicator over a drop-index mirror.
+  // Drop: view x converts to model x (the lane's scroll), then the host
+  // reorders — or tears off when the pointer left the strip.
+  const startDragSession = useCallback((event: React.PointerEvent, tabId: number) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let moved = false;
+    let raf = 0;
+    let last = { x: event.clientX, y: event.clientY, sx: event.screenX, sy: event.screenY };
+    dragRef.current = { tab: tabId, start_x: startX, start_y: startY, moved: false };
+    // Capture: the session must survive the pointer leaving the webview —
+    // a tear-off drop lands past the window's edge.
+    try {
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    } catch {
+      // A failed capture still drags inside the window; the drop just
+      // loses its beyond-the-edge reach.
+    }
+    void shellDrag("start", { tab_id: tabId, screen_x: event.screenX, screen_y: event.screenY });
+
+    const onMove = (ev: PointerEvent) => {
+      last = { x: ev.clientX, y: ev.clientY, sx: ev.screenX, sy: ev.screenY };
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10) {
+        moved = true;
+        if (dragRef.current) dragRef.current.moved = true;
+      }
+      if (!moved) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        setDragPointer({ x: last.x, y: last.y });
+        void shellDrag("move", {
+          tab_id: tabId,
+          x: last.x,
+          y: last.y,
+          screen_x: last.sx,
+          screen_y: last.sy,
+        });
+      });
+    };
+    const finish = (commit: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKey);
+      cancelAnimationFrame(raf);
+      dragRef.current = null;
+      setDragPointer(null);
+      if (commit && moved) dragJustEnded.current = performance.now();
+      if (commit) {
+        void shellDrag("drop", {
+          tab_id: tabId,
+          x: last.x + scrollRef.current, // view → model: the lane's shift
+          y: last.y,
+          screen_x: last.sx,
+          screen_y: last.sy,
+        });
+      } else {
+        void shellDrag("cancel", { tab_id: tabId });
+      }
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") finish(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKey);
+  }, []);
 
   const boot = useCallback((attempt = 0) => {
     bootFrame()
@@ -223,6 +318,23 @@ export function FrameApp() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [snap?.header_height, snap?.bookmarks_bar_visible]);
+
+  // The reveal law + the scroll clamp, applied on every snapshot: the
+  // active tab must be visible (Chrome scrolls just enough), and the
+  // lane's shift can never outrun the layout's own maximum. The setter
+  // bails out when the value is unchanged, so this is safe on every
+  // snapshot, not only on selection changes.
+  useEffect(() => {
+    if (!snap) return;
+    const { max } = stripScroll(snap.slots, snap.strip_width, 0);
+    const activeSlot = snap.slots.find((s) => !s.header && s.id === snap.active);
+    setScroll((cur) => {
+      const clamped = Math.min(cur, max);
+      return revealSlot(activeSlot, snap.strip_width, clamped, max) === clamped
+        ? clamped
+        : revealSlot(activeSlot, snap.strip_width, clamped, max);
+    });
+  }, [snap]);
 
   // FOCUS_LOCATION → focus the omnibox; its resting text rides snapshots.
   useEffect(() => {
@@ -391,10 +503,51 @@ export function FrameApp() {
   const stripUsedEnd = snap.slots.length
     ? Math.max(...snap.slots.map((s) => s.x + s.width))
     : 0;
-  // The + never slides under the caption area, even at the clamped
-  // overflow branch: it stops at the strip's right reserve
-  // (WINDOW_CONTROLS_W + NEW_TAB_BUTTON_W, shell/layout.rs).
-  const newTabLeft = Math.min(stripUsedEnd + 4, Math.max(snap.strip_width - 174, 0));
+  // The scroll posture: the model's law shrank the tabs; whatever still
+  // overflows scrolls (stripScroll's reserve mirrors the + clamp zone).
+  const { max: maxScroll } = stripScroll(snap.slots, snap.strip_width, 0);
+  const scrollValue = Math.min(Math.max(scroll, 0), maxScroll);
+  // The + never slides under the caption area: unscrolled it follows the
+  // last slot; once the strip scrolls it pins at the right reserve
+  // (WINDOW_CONTROLS_W + NEW_TAB_BUTTON_W, shell/layout.rs) and the tabs
+  // slide beneath it, as upstream's scrolled strip does.
+  const newTabLeft =
+    scrollValue > 0
+      ? Math.max(snap.strip_width - 174, 0)
+      : Math.min(stripUsedEnd + 4, Math.max(snap.strip_width - 174, 0));
+
+  // The drag session's visuals: the lifted tab and its insertion
+  // indicator. The indicator computes over the slots MINUS the dragged
+  // tab (the lift-out rule the host's drop applies) and only while the
+  // pointer stays in the strip band — beyond it the drop is a tear-off
+  // and no in-strip insertion exists.
+  const dragTabId = dragPointer != null ? (dragRef.current?.tab ?? null) : null;
+  const inStripBand = dragPointer != null && dragPointer.y <= 41 + 15;
+  let insertX: number | null = null;
+  if (dragTabId != null && inStripBand) {
+    const others = snap.slots.filter((s) => s.header || s.id !== dragTabId);
+    const preview = dropIndexFromSlots(others, dragPointer.x + scrollValue);
+    const tabsOnly = others;
+    const prev = tabsOnly[preview - 1];
+    const next = tabsOnly[preview];
+    if (prev && next) {
+      insertX = (prev.x + prev.width + next.x) / 2;
+    } else if (next) {
+      insertX = Math.max(next.x - 9, 6);
+    } else if (prev) {
+      insertX = prev.x + prev.width - 18;
+    }
+  }
+  // The dragged tab follows the pointer, clamped to the window's span
+  // (translate is rigid, so local and visual deltas agree).
+  const dragDx = (slotX: number, width: number): number | null => {
+    if (dragTabId == null || dragPointer == null) return null;
+    const visualX = slotX - scrollValue;
+    const raw = dragPointer.x - (dragRef.current?.start_x ?? dragPointer.x);
+    const min = -(visualX - 6);
+    const maxDx = snap.strip_width - visualX - width + 12;
+    return Math.min(Math.max(raw, min), Math.max(min, maxDx));
+  };
 
   const commitOmnibox = async () => {
     if (omniboxText == null) return;
@@ -442,120 +595,183 @@ export function FrameApp() {
           }
         }}
       >
-        {snap.slots.map((slot, idx) => {
-          // A header slot is the group's chip — not a tab. Clicking it
-          // toggles the group's collapse (the chip IS the collapsed
-          // group, tab_group_views.cc).
-          if (slot.header) {
-            const group = snap.groups.find((g) => g.id === slot.id);
-            if (!group) return null;
-            return (
-              <button
-                key={`group-${group.id}`}
-                data-group-chip
-                className="group-chip"
+        {/* The overflow lane — the model's slots translate inside it
+            while the strip's own chrome stays put. The lane is
+            pointer-transparent: bare areas remain the window's drag
+            region and the double-click maximize law keeps working. */}
+        <div
+          className="strip-lane"
+          style={{ transform: `translateX(${-scrollValue}px)` }}
+          onWheel={(e) => {
+            if (maxScroll === 0) return;
+            const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+            setScroll(stripScroll(snap.slots, snap.strip_width, scrollRef.current + delta).value);
+          }}
+        >
+          {snap.slots.flatMap((slot, idx) => {
+            const parts: React.JSX.Element[] = [];
+            // Separators: the VIEW owns the adjacency truth — an
+            // explicit 2×20 mark between two adjacent inactive tab
+            // slots (the old CSS sibling selector could not see across
+            // a chip or an absolutely-positioned run). The span sits
+            // BETWEEN the tab divs in DOM order so hover of either
+            // neighbor hides it through the sibling/:has() rules.
+            const prevSlot = idx > 0 ? snap.slots[idx - 1] : undefined;
+            if (prevSlot && !slot.header && !prevSlot.header && !slot.closing && !prevSlot.closing) {
+              const prevTab = snap.tabs.find((t) => t.id === prevSlot.id);
+              const curTab = snap.tabs.find((t) => t.id === slot.id);
+              if (prevTab && curTab && !prevTab.active && !curTab.active) {
+                parts.push(
+                  <span
+                    key={`sep-${slot.id}`}
+                    className="tab-separator"
+                    style={{ left: slot.x - 1 }}
+                  />,
+                );
+              }
+            }
+            // A header slot is the group's chip — not a tab. Clicking it
+            // toggles the group's collapse (the chip IS the collapsed
+            // group, tab_group_views.cc).
+            if (slot.header) {
+              const group = snap.groups.find((g) => g.id === slot.id);
+              if (!group) return parts;
+              parts.push(
+                <button
+                  key={`group-${group.id}`}
+                  data-group-chip
+                  className="group-chip"
+                  style={{
+                    left: slot.x,
+                    width: slot.width,
+                    ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
+                  }}
+                  title={`Group ${group.label}${group.collapsed ? " — collapsed" : ""}`}
+                  aria-label={`Toggle group ${group.label}`}
+                  onClick={() =>
+                    void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, { group_id: group.id })
+                  }
+                >
+                  <span className="group-chip-label">{group.label}</span>
+                </button>,
+              );
+              return parts;
+            }
+            const tab = snap.tabs.find((t) => t.id === slot.id);
+            if (!tab) return parts;
+            const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
+            // The drag session's lift: the moved tab follows the pointer
+            // (clamped to the window) with the settle transitions off.
+            const dragging = dragTabId === tab.id;
+            const dx = dragging ? dragDx(slot.x, slot.width) : null;
+            // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
+            // cannot fit beside a glyph — the slot shows its glyph alone,
+            // centered in the visible span, the way Chromium's minimum
+            // tabs render (min_inactive_width, interior 16).
+            const tight = slot.width < 64;
+            parts.push(
+              <div
+                key={tab.id}
+                data-tab
+                className={[
+                  "tab",
+                  tab.active ? "tab-active" : "tab-inactive",
+                  slot.pinned ? "tab-pinned" : "",
+                  tight ? "tab-tight" : "",
+                  dragging ? "tab-dragging tab-dragging-live" : "",
+                  slot.closing ? "tab-closing" : "",
+                ].join(" ")}
                 style={{
                   left: slot.x,
                   width: slot.width,
-                  ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
+                  ...(dx != null
+                    ? { transform: `translateX(${dx}px)`, transition: "none", willChange: "transform" }
+                    : {}),
+                  ...(group ? { ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6] } : {}),
                 }}
-                title={`Group ${group.label}${group.collapsed ? " — collapsed" : ""}`}
-                aria-label={`Toggle group ${group.label}`}
-                onClick={() =>
-                  void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, { group_id: group.id })
-                }
-              >
-                <span className="group-chip-label">{group.label}</span>
-              </button>
-            );
-          }
-          const tab = snap.tabs.find((t) => t.id === slot.id);
-          if (!tab) return null;
-          const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
-          const dragging = dragRef.current?.tab === tab.id && dragRef.current.moved;
-          // The active tab's melt corners only tell the truth over a
-          // transparent neighbor (bare strip or an inactive tab's ghost
-          // body) — over an opaque neighbor (a chip, the active tab) the
-          // flare would paint on top of it, so it stays off.
-          const seeThrough = (s: (typeof snap.slots)[number] | undefined): boolean => {
-            if (!s) return true;
-            if (s.header) return false;
-            const neighbor = snap.tabs.find((t) => t.id === s.id);
-            return !!neighbor && !neighbor.active;
-          };
-          const flareLeft = seeThrough(snap.slots[idx - 1]);
-          const flareRight = seeThrough(snap.slots[idx + 1]);
-          // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
-          // cannot fit beside a glyph — the slot shows its glyph alone,
-          // centered in the visible span, the way Chromium's minimum
-          // tabs render (min_inactive_width, interior 16).
-          const tight = slot.width < 64;
-          return (
-            <div
-              key={tab.id}
-              data-tab
-              className={[
-                "tab",
-                tab.active ? "tab-active" : "tab-inactive",
-                slot.pinned ? "tab-pinned" : "",
-                tight ? "tab-tight" : "",
-                dragging ? "tab-dragging" : "",
-                slot.closing ? "tab-closing" : "",
-                flareLeft ? "flare-left" : "",
-                flareRight ? "flare-right" : "",
-              ].join(" ")}
-              style={{
-                left: slot.x,
-                width: slot.width,
-                ...(group ? { ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6] } : {}),
-              }}
-              title={tab.title}
-              onClick={() => selectTab(tab.id)}
-              onAuxClick={(e) => {
-                if (e.button === 1) {
-                  e.preventDefault();
-                  void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                // The OS menu under the host (the band clips a DOM
-                // menu); the DOM stand-in only wears the demo hat.
-                void tabContextMenu(tab.id).then((native) => {
-                  if (!native) setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
-                });
-              }}
-              onPointerDown={(e) => {
-                if (e.button !== 0 || slot.pinned) return;
-                dragRef.current = { tab: tab.id, start_x: e.clientX, start_y: e.clientY, moved: false };
-                void shellDrag("start", { tab_id: tab.id, screen_x: e.screenX, screen_y: e.screenY });
-              }}
-            >
-              <span className="tab-glyph" aria-hidden>
-                <Glyph url={tab.url} />
-              </span>
-              {!slot.pinned ? <span className="tab-title">{tab.title}</span> : null}
-              {tab.muted ? (
-                <span className="tab-muted" aria-label="muted">
-                  <IconMuted />
-                </span>
-              ) : null}
-              {!slot.pinned ? (
-                <button
-                  className="tab-close"
-                  aria-label={`Close ${tab.title}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                title={tab.title}
+                onClick={() => {
+                  // A drag session's release also dispatches a click —
+                  // the just-ended drag never selects.
+                  if (performance.now() - dragJustEnded.current < 200) return;
+                  selectTab(tab.id);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
                     void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
-                  }}
-                >
-                  <IconClose />
-                </button>
-              ) : null}
-              {group ? <span className="tab-group-underline" /> : null}
-            </div>
-          );
-        })}
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  // The OS menu under the host (the band clips a DOM
+                  // menu); the DOM stand-in only wears the demo hat.
+                  void tabContextMenu(tab.id).then((native) => {
+                    if (!native) setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
+                  });
+                }}
+                onPointerDown={(e) => startDragSession(e, tab.id)}
+              >
+                <span className="tab-glyph" aria-hidden>
+                  <Glyph url={tab.url} />
+                </span>
+                {!slot.pinned ? <span className="tab-title">{tab.title}</span> : null}
+                {tab.muted ? (
+                  <span className="tab-muted" aria-label="muted">
+                    <IconMuted />
+                  </span>
+                ) : null}
+                {!slot.pinned ? (
+                  <button
+                    className="tab-close"
+                    aria-label={`Close ${tab.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
+                    }}
+                  >
+                    <IconClose />
+                  </button>
+                ) : null}
+                {group ? <span className="tab-group-underline" /> : null}
+              </div>,
+            );
+            return parts;
+          })}
+          {/* The insertion indicator — the drag session's drop preview
+              (DragInsertionIndicator): a 2px accent bar at the boundary
+              the drop would land on. It only exists while the pointer
+              stays in the strip band; beyond it the drop tears off. */}
+          {insertX != null ? <div className="drag-insert" style={{ left: insertX }} /> : null}
+        </div>
+        {/* Scroll chevrons (tab_strip scrolling): only while the layout
+            overflows its minimum run, riding the strip's right reserve. */}
+        {maxScroll > 0 ? (
+          <>
+            <button
+              className="strip-chev"
+              style={{ left: Math.max(snap.strip_width - 174 - 58, 0) }}
+              aria-label="Scroll tabs left"
+              disabled={scrollValue <= 0}
+              onClick={() =>
+                setScroll(stripScroll(snap.slots, snap.strip_width, scrollValue - 240).value)
+              }
+            >
+              <IconChevLeft />
+            </button>
+            <button
+              className="strip-chev"
+              style={{ left: Math.max(snap.strip_width - 174 - 30, 0) }}
+              aria-label="Scroll tabs right"
+              disabled={scrollValue >= maxScroll}
+              onClick={() =>
+                setScroll(stripScroll(snap.slots, snap.strip_width, scrollValue + 240).value)
+              }
+            >
+              <IconChevRight />
+            </button>
+          </>
+        ) : null}
         <button
           className="new-tab"
           style={{ left: newTabLeft }}

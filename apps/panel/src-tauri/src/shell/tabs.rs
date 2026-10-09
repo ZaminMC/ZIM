@@ -134,6 +134,13 @@ pub struct Tab {
     /// §60: bumped on demand; the content view keys off it and rebuilds.
     /// Never touches the server process.
     pub reload: u32,
+    /// The tab's contents zoom factor (Chromium's per-contents zoom).
+    #[serde(default = "default_zoom")]
+    pub zoom: f32,
+}
+
+fn default_zoom() -> f32 {
+    1.0
 }
 
 impl Tab {
@@ -153,7 +160,28 @@ impl Tab {
             opener,
             muted: false,
             reload: 0,
+            zoom: 1.0,
         }
+    }
+}
+
+/// Chromium's zoom ladder (components/zoom/zoom_controller.cc's preset
+/// levels): zoom moves through these factors, never arbitrary values.
+const ZOOM_LADDER: [f32; 16] = [
+    0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0,
+];
+
+/// One step along the ladder: +1 zooms in, -1 zooms out, anything else
+/// resets. An unknown current factor lands on 1.0's rung first.
+pub fn zoom_step(current: f32, direction: i32) -> f32 {
+    let rung = ZOOM_LADDER
+        .iter()
+        .position(|z| (*z - current).abs() < 0.001)
+        .unwrap_or(6);
+    match direction {
+        1 => ZOOM_LADDER[(rung + 1).min(ZOOM_LADDER.len() - 1)],
+        -1 => ZOOM_LADDER[rung.saturating_sub(1)],
+        _ => 1.0,
     }
 }
 
@@ -317,6 +345,28 @@ impl Strip {
         self.move_to(id, to)
     }
 
+    /// The drag drop's reorder (TabDragController's move semantics): the
+    /// dragged tab is conceptually lifted OUT of the strip — the
+    /// insertion index runs over the REMAINING tabs — and
+    /// [`Strip::move_to`] already interprets its target exactly that way
+    /// (remove, clamp, insert). On top of the move, the drop policies:
+    /// a pinned tab dropped at or after the unpinned block UNPINS
+    /// (upstream's drag-out-of-block unpin; the reverse never pins — an
+    /// unpinned tab dropped into the pinned block lands at its edge,
+    /// move_to's clamp).
+    pub fn reorder_drop(&mut self, id: TabId, index_among_others: usize) -> Option<usize> {
+        let pinned = self
+            .tabs
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.pinned)
+            .unwrap_or(false);
+        if pinned && index_among_others >= self.block_edge(true) {
+            self.set_pinned(id, false);
+        }
+        self.move_to(id, index_among_others)
+    }
+
     /// SelectTabAt.
     pub fn select(&mut self, id: TabId) -> bool {
         if self.index_of(id).is_none() {
@@ -413,6 +463,7 @@ impl Strip {
                 opener: None,
                 muted: false,
                 reload: 0,
+                zoom: 1.0,
             },
         );
         self.active = Some(id);
@@ -437,6 +488,7 @@ impl Strip {
                 opener: source.opener,
                 muted: source.muted,
                 reload: 0,
+                zoom: source.zoom,
             },
         );
         self.active = Some(new_id);
@@ -748,6 +800,49 @@ mod tests {
         let (tab, _index) = strip.detach(a).unwrap();
         assert_eq!(tab.destination(), &Destination::Servers);
         assert!(!strip.tabs.is_empty()); // the strip repaired itself
+    }
+
+    #[test]
+    fn reorder_drop_lifts_the_tab_out_before_inserting() {
+        let mut strip = Strip::new();
+        let a = strip.append(Destination::Servers, true);
+        let b = strip.append(Destination::Jobs, true);
+        let c = strip.append(Destination::About, true);
+        // Drag a (index 0) past both others: the insertion index runs
+        // over the REMAINING tabs [b, c], so 2 lands after c.
+        strip.reorder_drop(a, 2);
+        let order: Vec<TabId> = strip.tabs.iter().map(|t| t.id).collect();
+        assert_eq!(order, vec![b, c, a]);
+    }
+
+    #[test]
+    fn a_pinned_tab_dropped_beyond_the_block_unpins() {
+        let mut strip = Strip::new();
+        let a = strip.append(Destination::Servers, true);
+        let b = strip.append(Destination::Jobs, true);
+        strip.set_pinned(a, true);
+        // The block edge is 1 (b is the first unpinned tab); dropping a
+        // at index 1 among the others lands it after the block → unpin.
+        strip.reorder_drop(a, 1);
+        let tab = strip.tabs.iter().find(|t| t.id == a).unwrap();
+        assert!(!tab.pinned);
+        assert_eq!(strip.tabs.last().unwrap().id, a);
+    }
+
+    #[test]
+    fn a_pinned_tab_dropped_inside_the_block_stays_pinned() {
+        let mut strip = Strip::new();
+        let a = strip.append(Destination::Servers, true);
+        let b = strip.append(Destination::Jobs, true);
+        let c = strip.append(Destination::About, true);
+        strip.set_pinned(a, true);
+        strip.set_pinned(b, true);
+        // Block [a, b], edge 2. Drop b at 0 among the others → still
+        // pinned, reordered within the block.
+        strip.reorder_drop(b, 0);
+        let tab = strip.tabs.iter().find(|t| t.id == b).unwrap();
+        assert!(tab.pinned);
+        assert_eq!(strip.tabs[0].id, b);
     }
 
     #[test]

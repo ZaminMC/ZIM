@@ -71,3 +71,15 @@ pub const WINDOW_CLOSE: u32 = 50012;
 /// can land while the frame holds focus — the frame can only reach the
 /// palette through the host (a CustomEvent never crosses webviews).
 pub const TOGGLE_PALETTE: u32 = 50013;
+
+/// ⓩ Local: contents zoom for the ACTIVE tab (Chromium routes zoom
+/// through the zoom controller with its preset ladder; the app menu's
+/// zoom row and the keyboard contract both land here).
+pub const ZOOM_IN: u32 = 50015;
+pub const ZOOM_OUT: u32 = 50016;
+pub const ZOOM_RESET: u32 = 50017;
+
+/// ⓩ Local: open a new top-level browser window (the app menu's
+/// "New window"; upstream owns IDC_NEW_WINDOW 34000 — kept clear of the
+/// ported block).
+pub const NEW_WINDOW: u32 = 50018;
