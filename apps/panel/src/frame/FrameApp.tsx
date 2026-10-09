@@ -618,7 +618,15 @@ export function FrameApp() {
             if (prevSlot && !slot.header && !prevSlot.header && !slot.closing && !prevSlot.closing) {
               const prevTab = snap.tabs.find((t) => t.id === prevSlot.id);
               const curTab = snap.tabs.find((t) => t.id === slot.id);
-              if (prevTab && curTab && !prevTab.active && !curTab.active) {
+              // Same-group members never carry a separator between them:
+              // the group's underline band is the connector (upstream's
+              // TabStyleViews draws no divider inside a group's run).
+              const sameGroup =
+                prevTab != null &&
+                curTab != null &&
+                prevTab.group != null &&
+                prevTab.group === curTab.group;
+              if (prevTab && curTab && !sameGroup && !prevTab.active && !curTab.active) {
                 parts.push(
                   <span
                     key={`sep-${slot.id}`}
@@ -658,6 +666,31 @@ export function FrameApp() {
             const tab = snap.tabs.find((t) => t.id === slot.id);
             if (!tab) return parts;
             const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
+            // The underline's continuity law (TabStyleViews' group band):
+            // toward a SAME-GROUP neighbor the underline runs to the slot
+            // edge — the neighbor's own underline overlaps it in the 18px
+            // paint zone, one color, one band. Toward anyone else the
+            // 22px containment inset holds (row 27: a line must never
+            // cross into a tab outside the group).
+            const nextSlot = visualSlots[idx + 1];
+            const prevVisibleTab =
+              prevSlot && !prevSlot.header && !prevSlot.closing
+                ? snap.tabs.find((t) => t.id === prevSlot.id)
+                : undefined;
+            const nextVisibleTab =
+              nextSlot && !nextSlot.header && !nextSlot.closing
+                ? snap.tabs.find((t) => t.id === nextSlot.id)
+                : undefined;
+            const memberLeft =
+              group != null &&
+              prevVisibleTab != null &&
+              prevVisibleTab.group != null &&
+              prevVisibleTab.group === tab.group;
+            const memberRight =
+              group != null &&
+              nextVisibleTab != null &&
+              nextVisibleTab.group != null &&
+              nextVisibleTab.group === tab.group;
             // The drag session's lift: the moved tab follows the pointer
             // (clamped to the window) with the settle transitions off.
             // The translate's base is the MODEL slot — the visual layout
@@ -693,7 +726,13 @@ export function FrameApp() {
                   ...(dx != null
                     ? { transform: `translateX(${dx}px)`, transition: "none", willChange: "transform" }
                     : {}),
-                  ...(group ? { ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6] } : {}),
+                  ...(group
+                    ? {
+                        ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
+                        ["--ul-left" as string]: memberLeft ? "0px" : undefined,
+                        ["--ul-right" as string]: memberRight ? "0px" : undefined,
+                      }
+                    : {}),
                 }}
                 title={tab.title}
                 onClick={() => {

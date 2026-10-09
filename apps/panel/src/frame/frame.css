@@ -224,9 +224,15 @@ body {
      line leaking onto the neighbor. The same inset guards the left
      edge (the previous unit's overlap zone). Chromium clips the
      underline to the tab's path; the insets are that clip, stated in
-     layout units. */
-  left: 22px;
-  right: 22px;
+     layout units.
+     The continuity exception (--ul-left/--ul-right = 0): toward a
+     SAME-GROUP neighbor the underline runs to the slot edge — the
+     neighbor's own underline overlaps it in the 18px zone, one color,
+     so the members read as ONE band (TabStyleViews' group band), not
+     disconnected dashes. The view sets the vars only where a member
+     stands; every other boundary keeps the 22px law. */
+  left: var(--ul-left, 22px);
+  right: var(--ul-right, 22px);
   bottom: 0;
   height: 2px;
   border-radius: 1px;
