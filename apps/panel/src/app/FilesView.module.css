@@ -210,7 +210,10 @@
   width: 100%;
   min-height: 360px;
   resize: vertical;
-  background: var(--term-bg);
+  /* A code field, not a terminal: the theme's own light ground. (The
+     old dark canvas under the theme's now-dark text read as an empty
+     black box.) */
+  background: var(--surface-3);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);

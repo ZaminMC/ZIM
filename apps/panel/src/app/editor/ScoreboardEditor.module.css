@@ -150,6 +150,10 @@
 .board {
   width: 100%;
   max-width: 300px;
+  /* The in-game scoreboard's own look: dark translucent body, white
+     text — domain-owned, not the theme's (the theme token ladder must
+     not recolor a faithful game preview). */
+  color: #ffffff;
   background: rgba(0, 0, 0, 0.45);
   border-top: 2px solid rgba(139, 0, 0, 0.85);
   border-bottom: 2px solid rgba(139, 0, 0, 0.85);

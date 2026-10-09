@@ -3,9 +3,9 @@
   overflow-y: auto;
   display: flex;
   justify-content: center;
-  background:
-    radial-gradient(600px 300px at 50% 0%, rgba(92, 157, 244, 0.06), transparent),
-    var(--bg);
+  /* Flat white — Chrome's NTP ground. No glow, no wash: the page's
+     quietness IS the design. */
+  background: var(--bg);
 }
 
 .center {

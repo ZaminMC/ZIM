@@ -71,7 +71,7 @@
 .evidence {
   font-family: var(--font-mono);
   font-size: var(--text-s);
-  background: var(--term-bg);
+  background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   padding: var(--space-2) var(--space-3);
