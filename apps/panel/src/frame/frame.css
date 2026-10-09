@@ -134,10 +134,9 @@ body {
 
 .tab-muted {
   flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--group-amber);
+  display: grid;
+  place-items: center;
+  color: var(--frame-fg-dim);
 }
 
 .tab-close {
@@ -190,7 +189,9 @@ body {
   transition: none;
 }
 
-.tab-closing { opacity: 0; }
+/* A closing tab collapses to the overlap width (the model's law) — let
+   the eye see it go: fade while the slot shrinks, then it's gone. */
+.tab-closing { opacity: 0; transition: opacity 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1); }
 
 .new-tab {
   position: absolute;
@@ -304,6 +305,23 @@ body {
 }
 .omnibox::placeholder { color: var(--frame-fg-dim); }
 .omnibox::selection { background: rgba(92, 157, 244, 0.35); }
+
+/* The bookmark star: inside the field's right end, quiet until hover —
+   the omnibox owns it (upstream places the star in the location bar). */
+.omnibox-star {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 100%;
+  border: none;
+  border-radius: 0 17px 17px 0;
+  background: transparent;
+  color: var(--frame-fg-dim);
+  cursor: default;
+  transition: color 120ms ease-out, background 120ms ease-out;
+}
+.omnibox-star:hover { color: var(--frame-fg); background: var(--frame-hover); }
 
 .omnibox-note {
   flex: none;

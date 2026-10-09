@@ -100,7 +100,12 @@ export const bootFrame = (): Promise<Snapshot | null> =>
     ? invoke<Snapshot>("shell_boot")
     : demoActive()
       ? Promise.resolve(demoSnapshot())
-      : Promise.resolve(null);
+      : new Promise((resolve) => {
+          // A browser page with neither the host nor ?demo: resolve null
+          // after a beat so the frame can show its honest boot error
+          // instead of an eternal ellipsis.
+          window.setTimeout(() => resolve(null), 1200);
+        });
 
 export const reportFrameSize = (width: number, height: number): Promise<void> =>
   isTauri()
@@ -194,17 +199,58 @@ const demo = {
 };
 
 function demoSnapshot(): Snapshot {
-  // The layout law's demo echo — Chromium widths, pinned first, the
-  // active tab last-born. Faithful enough at fixture scale.
+  // The layout law's demo echo — Chromium widths, the strip's leading
+  // inset (kTabStripPadding), the caption area reserved, the shrink law
+  // (inactive to minimum, then the active, then clamped). A faithful
+  // mirror of shell/layout.rs at fixture scale.
   const overlap = 18;
-  const slots: Snapshot["slots"] = [];
-  let x = 0;
+  const LEADING = 6; // STRIP_PADDING
+  const NEW_TAB_W = 36; // NEW_TAB_BUTTON_W
+  const CONTROLS_W = 138; // WINDOW_CONTROLS_W (3 × 46)
+  const STANDARD = 256; // standard_width()
+  const PINNED_W = 40; // pinned_width()
+  const MIN_INACTIVE = 32; // min_inactive_width()
+  const MIN_ACTIVE = 32; // min_active_width()
+
   const ordered = [...demo.tabs].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  for (const tab of ordered) {
-    const width = tab.pinned ? 40 : 256;
-    slots.push({ id: tab.id, x, width, pinned: tab.pinned, closing: false });
-    x += width - overlap;
+  const budget = Math.max(demo.strip_width - LEADING - NEW_TAB_W - CONTROLS_W, 0);
+  const widths: number[] = ordered.map((t) => (t.pinned ? PINNED_W : STANDARD));
+  const preferred =
+    widths.reduce((a, b) => a + b, 0) - overlap * Math.max(ordered.length - 1, 0);
+  const widthAt = (i: number): number => widths[i] ?? STANDARD;
+  const isPinned = (i: number): boolean => ordered[i]?.pinned ?? false;
+
+  if (preferred > budget && ordered.length > 0) {
+    const activeIndex = ordered.findIndex((t) => t.id === demo.active);
+    // Inactive tabs down to their minimum first…
+    for (let i = 0; i < ordered.length; i++) {
+      if (!isPinned(i) && i !== activeIndex) widths[i] = MIN_INACTIVE;
+    }
+    let total =
+      widths.reduce((a, b) => a + b, 0) - overlap * Math.max(ordered.length - 1, 0);
+    // …then the active tab, if even that is not enough.
+    if (total > budget && activeIndex >= 0 && !isPinned(activeIndex)) {
+      widths[activeIndex] = MIN_ACTIVE;
+      total =
+        widths.reduce((a, b) => a + b, 0) - overlap * Math.max(ordered.length - 1, 0);
+    }
+    // Leftover: the active tab first, then evenly, up to standard width.
+    let free = budget - total;
+    for (let i = 0; i < ordered.length && free > 0; i++) {
+      if (isPinned(i)) continue;
+      const room = STANDARD - widthAt(i);
+      const give = i === activeIndex ? Math.min(room, free) : Math.min(room, free * 0.5);
+      widths[i] = widthAt(i) + give;
+      free -= give;
+    }
   }
+
+  const slots: Snapshot["slots"] = [];
+  let x = LEADING;
+  ordered.forEach((tab, i) => {
+    slots.push({ id: tab.id, x, width: widthAt(i), pinned: tab.pinned, closing: false });
+    x += widthAt(i) - overlap;
+  });
   const active = demo.tabs.find((t) => t.id === demo.active) ?? null;
   return {
     window: "main",

@@ -33,6 +33,7 @@ import {
   IconPlayers,
   IconPuzzle,
   IconRocket,
+  IconServer,
   IconTerminal,
 } from "../ui/icons";
 import { CrashCard } from "./CrashCard";
@@ -160,9 +161,27 @@ export function ServerView({ serverId }: { serverId: string }) {
   }, [serverId]);
 
   if (!server) {
+    // The gone-state is a quiet card, not a naked sentence in a corner:
+    // one honest line, one way forward (the fleet page lists what the
+    // daemon still sees).
     return (
       <div className={styles.view}>
-        <p className={styles.meta}>This server is gone (removed from the registry).</p>
+        <div className={styles.goneCard} role="status">
+          <span className={styles.goneIcon}>
+            <IconServer size={20} />
+          </span>
+          <p className={styles.goneTitle}>This server is gone.</p>
+          <p className={styles.goneBody}>
+            It was removed from the registry — the daemon no longer knows it.
+            The fleet page lists what the daemon still sees.
+          </p>
+          <Button
+            variant="primary"
+            onClick={() => useTabs.getState().navigate({ kind: "servers" })}
+          >
+            Back to the fleet
+          </Button>
+        </div>
       </div>
     );
   }

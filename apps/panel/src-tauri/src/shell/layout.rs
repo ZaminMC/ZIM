@@ -36,6 +36,13 @@ pub const CONTENT_INSET_X: f32 = 8.0;
 /// The new-tab button's slot width (upstream derives it from the border;
 /// this build reserves 36 DIP — porting-spec divergence note).
 pub const NEW_TAB_BUTTON_W: f32 = 36.0;
+/// The Windows caption area the strip must never slide under: three
+/// 46 DIP buttons (minimize, maximize, close), the width the frame's
+/// window controls occupy (frame.css .window-controls button). Upstream
+/// reserves the caption space through the frame layout
+/// (tab_strip.cc buys out the caption buttons' rect); this build states
+/// the reservation as a constant — porting-spec divergence note.
+pub const WINDOW_CONTROLS_W: f32 = 138.0;
 /// `kLocationBarHeight = 34` — layout_constants.cc.
 pub const LOCATION_BAR_H: f32 = 34.0;
 /// Toolbar vertical padding around the location bar.
@@ -106,7 +113,11 @@ pub fn compute_layout(
         return Vec::new();
     }
     let overlap = tab_overlap();
-    let budget = (strip_width - NEW_TAB_BUTTON_W).max(0.0);
+    // The strip's usable budget: the leading inset (kTabStripPadding
+    // doubles as the horizontal strip inset, as it does for the height),
+    // the new-tab button, and the caption area carved off the right end.
+    let budget =
+        (strip_width - STRIP_PADDING - NEW_TAB_BUTTON_W - WINDOW_CONTROLS_W).max(0.0);
     let unpinned: Vec<&(u32, bool, bool)> = tabs.iter().filter(|t| !t.1 && !t.2).collect();
     let pinned_count = tabs.iter().filter(|t| t.1 && !t.2).count();
     let pinned_total = pinned_count as f32 * pinned_width();
@@ -171,7 +182,9 @@ pub fn compute_layout(
 }
 
 fn finish(tabs: &[(u32, bool, bool)], widths: Vec<f32>, overlap: f32) -> Vec<Slot> {
-    let mut x = 0.0;
+    // The first tab never touches the window edge: the strip's leading
+    // inset (kTabStripPadding) leads, as it does upstream.
+    let mut x = STRIP_PADDING;
     tabs.iter()
         .zip(widths)
         .map(|((id, pinned, closing), w)| {
@@ -213,7 +226,27 @@ mod tests {
         let tabs = vec![(1u32, false, false), (2, false, false), (3, false, false)];
         let slots = compute_layout(1200.0, &tabs, 1);
         assert!(slots.iter().all(|s| (s.width - 256.0).abs() < 0.01));
-        assert_eq!(slots[1].x, 256.0 - 18.0);
+        assert_eq!(slots[0].x, STRIP_PADDING);
+        assert_eq!(slots[1].x, STRIP_PADDING + 256.0 - 18.0);
+    }
+
+    #[test]
+    fn the_strip_never_slides_under_the_caption_area() {
+        // Enough tabs to overflow: every slot must end before the window
+        // controls' left edge (the strip_width minus the controls). That
+        // is the whole point of the budget's caption reservation.
+        let tabs: Vec<(u32, bool, bool)> = (1..=30).map(|i| (i, false, false)).collect();
+        let slots = compute_layout(900.0, &tabs, 1);
+        let controls_left = 900.0 - WINDOW_CONTROLS_W;
+        for slot in &slots {
+            assert!(
+                slot.x + slot.width <= controls_left + 0.01,
+                "slot {} ends at {} past the controls at {}",
+                slot.id,
+                slot.x + slot.width,
+                controls_left,
+            );
+        }
     }
 
     #[test]

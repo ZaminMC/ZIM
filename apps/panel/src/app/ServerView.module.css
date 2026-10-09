@@ -49,6 +49,48 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The gone-state (server removed from the registry): a quiet card that
+   owns the page's center — same family as the fleet's empty hero — with
+   one way forward instead of a naked sentence in the corner. */
+.goneCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-l);
+  padding: var(--space-7) var(--space-5);
+  max-width: 480px;
+  width: 100%;
+  margin: auto;
+}
+
+.goneIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-l);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.goneTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.goneBody {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  max-width: 42ch;
+  line-height: 1.6;
+}
+
 .metaChip {
   background: var(--surface-2);
   border: 1px solid var(--border);

@@ -16,7 +16,7 @@ export function ErrorNote({ error }: { error: DescribedError }) {
   const hasDetails = error.code !== undefined || hasContext;
   return (
     <>
-      <div>{error.title}</div>
+      <div className={styles.title}>{error.title}</div>
       {error.remediation.length > 0 ? (
         <ul className={styles.remediation}>
           {error.remediation.map((line) => (

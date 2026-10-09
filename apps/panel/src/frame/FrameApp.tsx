@@ -39,6 +39,7 @@ import {
   IconPlus,
   IconClose,
   IconSearch,
+  IconMuted,
   IconMinimize,
   IconMaximize,
   IconWindowClose,
@@ -104,6 +105,12 @@ export function FrameApp() {
         if (first) {
           setSnap(first);
           setBootError(null);
+        } else if (!isTauri()) {
+          // No host answered and no demo fixture asked for the stage:
+          // say so — the frame must never sit as a silent ellipsis.
+          setBootError(
+            "no shell answered. Run the desktop app (the frame is its guest), or open this page with ?demo for the browser fixture.",
+          );
         }
       })
       .catch((error: unknown) => {
@@ -135,7 +142,11 @@ export function FrameApp() {
       if (disposed) off();
       else unlisten = off;
     });
-    // The model needs the frame's true width for the layout law.
+    // The model needs the frame's true width for the layout law. The
+    // first report must ride the snapshot's arrival: at mount the strip
+    // does not exist yet (snap is null), so a mount-only report raced
+    // its own element and the model kept a stale width until some
+    // unrelated resize.
     const report = () => {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
@@ -150,6 +161,19 @@ export function FrameApp() {
       window.removeEventListener("resize", report);
     };
   }, [boot]);
+
+  // The strip's re-measure whenever it (re)appears: boot, bookmarks-bar
+  // posture flips, any snapshot that changes the band's shape.
+  useEffect(() => {
+    if (!snap) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (stripRef.current) {
+        const rect = stripRef.current.getBoundingClientRect();
+        void reportFrameSize(rect.width, rect.height);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [snap?.header_height, snap?.bookmarks_bar_visible]);
 
   // FOCUS_LOCATION → focus the omnibox; its resting text rides snapshots.
   useEffect(() => {
@@ -318,6 +342,10 @@ export function FrameApp() {
   const stripUsedEnd = snap.slots.length
     ? Math.max(...snap.slots.map((s) => s.x + s.width))
     : 0;
+  // The + never slides under the caption area, even at the clamped
+  // overflow branch: it stops at the strip's right reserve
+  // (WINDOW_CONTROLS_W + NEW_TAB_BUTTON_W, shell/layout.rs).
+  const newTabLeft = Math.min(stripUsedEnd + 4, Math.max(snap.strip_width - 174, 0));
 
   const commitOmnibox = async () => {
     if (omniboxText == null) return;
@@ -409,7 +437,11 @@ export function FrameApp() {
               }}
             >
               <span className="tab-title">{slot.pinned ? tab.title.slice(0, 1) : tab.title}</span>
-              {tab.muted ? <span className="tab-muted" aria-label="muted" /> : null}
+              {tab.muted ? (
+                <span className="tab-muted" aria-label="muted">
+                  <IconMuted />
+                </span>
+              ) : null}
               {!slot.pinned ? (
                 <button
                   className="tab-close"
@@ -428,7 +460,7 @@ export function FrameApp() {
         })}
         <button
           className="new-tab"
-          style={{ left: stripUsedEnd + 4 }}
+          style={{ left: newTabLeft }}
           aria-label="New tab"
           onClick={() => void shellCommand(CMD.NEW_TAB)}
         >
@@ -498,14 +530,18 @@ export function FrameApp() {
             }}
           />
           {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
+          {/* The bookmark star lives INSIDE the field's right end — the
+              placement the omnibox owns upstream; it never sits as a
+              stray button past the field. */}
+          <button
+            className="omnibox-star"
+            aria-label="Bookmark this tab"
+            title="Bookmark this tab (Ctrl+D)"
+            onClick={() => void shellCommand(CMD.BOOKMARK_THIS_TAB)}
+          >
+            <IconStar />
+          </button>
         </div>
-        <button
-          className="tool"
-          aria-label="Bookmark this tab"
-          onClick={() => void shellCommand(CMD.BOOKMARK_THIS_TAB)}
-        >
-          <IconStar />
-        </button>
       </div>
 
       {/* Bookmarks bar (IDC_SHOW_BOOKMARK_BAR posture). */}

@@ -61,7 +61,7 @@ function FeedbackAccountSection() {
             className={styles.tokenInput}
             type="password"
             value={token}
-            placeholder="ghp_… (classic) or github_pat_… (fine-grained)"
+            placeholder="ghp_… or github_pat_…"
             aria-label="GitHub token for feedback"
             spellCheck={false}
             autoComplete="off"

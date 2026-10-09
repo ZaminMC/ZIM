@@ -3,6 +3,11 @@
  * remediation ("what to do next"), and the technical details behind a
  * disclosure — available, never forced. */
 
+.title {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 .remediation {
   margin: 6px 0 0;
   padding-left: 18px;

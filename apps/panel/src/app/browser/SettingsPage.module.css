@@ -58,6 +58,9 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
   background: var(--surface);
+  /* Narrow widths stack instead of squeezing the detail column into
+     four-word lines with a clipped field beside it. */
+  flex-wrap: wrap;
 }
 
 .rowMain {

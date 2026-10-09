@@ -77,6 +77,17 @@ export function IconSearch(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconMuted(props: SVGProps<SVGSVGElement>) {
+  // The audio-state marker a muted tab wears (tab audio indicators):
+  // a speaker with its strike, small enough to sit beside the title.
+  return (
+    <svg {...base(props)} width={12} height={12} strokeWidth={1.3}>
+      <path d="M3 6.2v3.6h2.4L9 13V3L5.4 6.2H3Z" />
+      <path d="m11 6 3 4M14 6l-3 4" />
+    </svg>
+  );
+}
+
 const win = (props: SVGProps<SVGSVGElement>) => ({
   width: 10,
   height: 10,
