@@ -228,7 +228,7 @@ export function FilesView({ serverId }: { serverId: string }) {
       const path = join(dir, entry.name);
       if (entry.symlinkOutside) {
         setError({
-          message: `${entry.name} is a symlink outside the server root — the daemon will not follow it.`,
+          message: `${entry.name} is a symlink outside the server root — ZIM will not follow it.`,
           code: "FS_PATH_ESCAPES_ROOT",
         });
         return;
@@ -747,7 +747,7 @@ export function FilesView({ serverId }: { serverId: string }) {
                           onClick={() => openDirEntry(entry)}
                           title={
                             entry.symlinkOutside
-                              ? "This link leaves the server root; the daemon will not follow it"
+                              ? "This link leaves the server root; ZIM will not follow it"
                               : entry.kind === "directory"
                                 ? "Open directory"
                                 : "Open in editor"

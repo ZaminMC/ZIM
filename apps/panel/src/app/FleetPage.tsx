@@ -53,9 +53,9 @@ export function FleetPage({
           <p className={styles.subtitle}>
             {status === "ready"
               ? daemon
-                ? `${daemon.name} v${daemon.version} is online — ${running} of ${servers.length} running`
-                : "Daemon is online"
-              : "Waiting for the daemon…"}
+                ? `ZIM v${daemon.version} is online — ${running} of ${servers.length} running`
+                : "ZIM is online"
+              : "Waiting for ZIM…"}
           </p>
         </div>
         <Button variant="primary" onClick={onNewServer}>

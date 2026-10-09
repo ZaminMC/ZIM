@@ -137,7 +137,7 @@ function DiscoveryRootsSection() {
         </div>
       ) : null}
       {roots === null && !error ? (
-        <p className={styles.rowDetail}>Asking the daemon for its scan roots…</p>
+        <p className={styles.rowDetail}>Reading the scan roots…</p>
       ) : null}
       {roots !== null ? (
         <>
@@ -322,7 +322,7 @@ export function SettingsPage() {
       <div className={styles.column}>
         <header className={styles.head}>
           <h1 className={styles.title}>Settings</h1>
-          <p className={styles.subtitle}>Panel-local settings. The daemon owns its own.</p>
+          <p className={styles.subtitle}>Settings for this panel. Server settings live with each server.</p>
         </header>
 
         <section className={styles.section} aria-label="Connections">
@@ -331,7 +331,7 @@ export function SettingsPage() {
             <li className={styles.row}>
               <div className={styles.rowMain}>
                 <span className={styles.rowName}>This machine</span>
-                <span className={styles.rowDetail}>The local daemon over its socket</span>
+                <span className={styles.rowDetail}>ZIM on this machine</span>
               </div>
               {profile.id === "local" ? (
                 <span className={styles.activeChip}>Active</span>
@@ -362,12 +362,12 @@ export function SettingsPage() {
           </Button>
         </section>
 
-        <section className={styles.section} aria-label="Daemon">
-          <h2 className={styles.sectionTitle}>Daemon</h2>
+        <section className={styles.section} aria-label="Service">
+          <h2 className={styles.sectionTitle}>Service</h2>
           <div className={styles.row}>
             <div className={styles.rowMain}>
               <span className={styles.rowName}>
-                {daemon ? `${daemon.name} v${daemon.version}` : "The daemon"}
+                {daemon ? `ZIM v${daemon.version}` : "ZIM's service"}
               </span>
               <span className={styles.rowDetail} title={lastError ?? undefined}>
                 {statusLabel}

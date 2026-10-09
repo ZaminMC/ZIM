@@ -49,7 +49,7 @@ export function buildCommands(
     // §58's typed pages, reachable by keyboard: the palette speaks the
     // same destinations the address bar does.
     commands.push(
-      { id: "page-jobs", label: "Open jobs — long-running daemon operations", hint: "zim://jobs/", run: pages.jobs },
+      { id: "page-jobs", label: "Open jobs — long-running operations", hint: "zim://jobs/", run: pages.jobs },
       { id: "page-audit", label: "Open the audit log", hint: "zim://audit/", run: pages.audit },
       { id: "page-about", label: "Open About ZIM", hint: "zim://about/", run: pages.about },
       { id: "page-feedback", label: "Send feedback — file an issue", hint: "zim://feedback/", run: pages.feedback },

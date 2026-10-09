@@ -328,7 +328,7 @@ export function StartupView({ serverId }: { serverId: string }) {
           label="Startup window (secs)"
           provenance={p.startupTimeoutSecs}
           onClear={undefined}
-          hint="How long the daemon waits for the Done line before calling it a startup failure."
+          hint="How long ZIM waits for the Done line before calling startup a failure."
         >
           <input
             aria-label="Startup window in seconds"

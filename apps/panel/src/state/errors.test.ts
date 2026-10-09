@@ -37,7 +37,7 @@ describe("describeError", () => {
 
   it("speaks the reconnect promise when the wire drops", () => {
     const described = describeError(new ConnectionLostError());
-    expect(described.title).toBe("The connection to the daemon dropped.");
+    expect(described.title).toBe("The connection to ZIM dropped.");
     expect(described.remediation.join(" ")).toContain("reconnects");
   });
 

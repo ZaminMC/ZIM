@@ -89,7 +89,7 @@ function ConnectionsModalBody() {
               onClick={() => activate(LOCAL_PROFILE.id)}
             >
               <span className={styles.rowName}>{LOCAL_PROFILE.name}</span>
-              <span className={styles.rowMeta}>the daemon on this machine</span>
+              <span className={styles.rowMeta}>ZIM on this machine</span>
             </button>
           </li>
           {remotes.map((remote) => (

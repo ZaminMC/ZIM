@@ -55,7 +55,7 @@ export function describeError(error: unknown): DescribedError {
     return {
       title: timeoutTitle(error.method),
       remediation: [
-        "The daemon may be busy — wait a moment and try again.",
+        "ZIM may be busy — wait a moment and try again.",
         `Details: no reply to ${error.method} within ${error.ms} ms.`,
       ],
       context: { method: error.method, timeoutMs: error.ms },
@@ -63,7 +63,7 @@ export function describeError(error: unknown): DescribedError {
   }
   if (error instanceof ConnectionLostError) {
     return {
-      title: "The connection to the daemon dropped.",
+      title: "The connection to ZIM dropped.",
       remediation: [
         "ZIM reconnects on its own — no restart needed. Try again in a moment.",
       ],
@@ -78,7 +78,7 @@ export function describeError(error: unknown): DescribedError {
   if (error instanceof Error) {
     return { title: error.message, remediation: [] };
   }
-  return { title: "Something went wrong talking to the daemon.", remediation: [] };
+  return { title: "Something went wrong. Try again in a moment.", remediation: [] };
 }
 
 /** Lifecycle verbs the UI may dispatch, with their protocol names. */

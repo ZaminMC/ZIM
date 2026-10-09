@@ -89,7 +89,7 @@ export function ExtensionsPage() {
         </p>
       </header>
 
-      {loading ? <p className={shared.note}>Asking the daemon for its inventory…</p> : null}
+      {loading ? <p className={shared.note}>Reading the inventory…</p> : null}
 
       {result !== null && !loading ? (
         <>

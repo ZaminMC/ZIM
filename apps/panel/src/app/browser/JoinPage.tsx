@@ -110,10 +110,11 @@ export function JoinPage({ host, port }: { host?: string; port: number }) {
     return (
       <div className={styles.page}>
         <div className={styles.card}>
-          <h1 className={styles.title}>The daemon is not answering</h1>
+          <h1 className={styles.title}>ZIM is not answering</h1>
           <p className={styles.body}>
-            The verdict on <code className={styles.url}>{address}</code> needs the daemon, and ZIM
-            is reconnecting to it right now. Nothing was checked yet.
+            The verdict on <code className={styles.url}>{address}</code> needs the
+            connection to ZIM's service, and ZIM is reconnecting right now.
+            Nothing was checked yet.
           </p>
           <div className={styles.actions}>
             <Button variant="primary" onClick={() => setEpoch((n) => n + 1)}>

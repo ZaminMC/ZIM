@@ -117,7 +117,7 @@ function MetricsChips({ serverId, live }: { serverId: string; live: boolean }) {
   if (!live || !latest) return null;
   return (
     <div className={styles.metricChips}>
-      <span className={styles.metricChip} title="CPU, from the daemon sampler">
+      <span className={styles.metricChip} title="CPU, sampled live">
         <IconBolt size={12} />
         {formatCpu(latest.cpuPercent)}
       </span>

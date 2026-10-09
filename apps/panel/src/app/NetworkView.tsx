@@ -135,7 +135,7 @@ export function NetworkView({ serverId }: { serverId: string }) {
               ? undefined
               : () => setPortDraft("")
           }
-          hint="Players join here. The daemon points server.properties at it at boot."
+          hint="Players join here. ZIM points server.properties at it at boot."
         >
           <input
             aria-label="Minecraft port"

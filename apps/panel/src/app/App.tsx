@@ -260,8 +260,8 @@ export function App() {
           <span className={styles.wireDot} aria-hidden />
           <span className={styles.wireText}>
             {wireStatus === "connecting"
-              ? "Connecting to the daemon…"
-              : "Reconnecting — the daemon is not answering"}
+              ? "Connecting…"
+              : "Reconnecting — ZIM is not answering"}
           </span>
         </div>
       ) : null}

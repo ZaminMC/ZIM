@@ -179,7 +179,7 @@ export function JobsPage() {
           ))}
         </ul>
       ) : loading ? (
-        <p className={styles.empty}>Reading the daemon's job record…</p>
+        <p className={styles.empty}>Reading the job record…</p>
       ) : error ? null : (
         // An empty page is only honest when the read actually answered —
         // a refusal claims nothing about the record (§82).
