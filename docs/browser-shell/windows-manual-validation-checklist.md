@@ -40,7 +40,7 @@ PASS / FAIL+describe. A FAIL on any row 1–24 keeps P0.2 open.
 |---|---|---|
 | 17 | Browser controls | New-tab button, per-tab close with hover state, tab context menu complete |
 | 18 | Keyboard | Ctrl+T/W/Tab/Shift+Tab/L/1–8/9, Ctrl+Shift+T reopen, F5/Ctrl+R, F6 — per ADR-0032 |
-| 19 | Dark theme | All chrome follows system + in-app toggle without contrast regressions |
+| 19 | The official white theme | White surfaces, gray strip (#DEE1E6), hairline borders, one blue (#1A73E8); no dark remnants, no neon accents; the terminal keeps its dark canvas |
 | 20 | Hover states | Tab hover card/highlight, close-button hover, omnibox decorations — subtle, 100–200 ms |
 | 21 | Focus states | Visible focus rings (tab, omnibox, bar items); F6 roving focus across chrome regions |
 | 22 | Animations | Tab open/close/move use the three-duration motion law (ADR-0030); nothing animates layout twice |
@@ -52,3 +52,14 @@ PASS / FAIL+describe. A FAIL on any row 1–24 keeps P0.2 open.
 - File every FAIL as an issue tagged `p0.2-shell` with screenshot + scaling.
 - PASS on 1–24 closes the manual gate of P0.2; Phase-1 shell restructure
   (ADR-0033) continues under feature freeze until it re-runs this list.
+
+
+## 2026-10-10 addendum — rows for this pass's fixes
+
+| # | Item | What "fixed" looks like |
+|---|---|---|
+| 25 | Window drag | The window MOVES from any bare strip area (the ACL now grants start-dragging; before this pass the undecorated window was locked) |
+| 26 | Responsiveness | Clicking tabs/verbs answers immediately; no disk stall behind every beat (session saves are debounced + atomic now) |
+| 27 | Group underline containment | An inactive group member's colored underline never reads as a line crossing into the neighbor tab (22px insets inside the visible span) |
+| 28 | Tray laws | Close parks in the tray with a tooltip; tray Open restores; tray Quit ends the process fully |
+| 29 | Updater lane | The pill never closes the app on its own; download is automatic (when enabled), apply is only the explicit restart click |
