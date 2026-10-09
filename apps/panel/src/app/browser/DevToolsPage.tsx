@@ -334,6 +334,10 @@ export function DevToolsPage() {
 
 function stringify(value: unknown): string {
   if (typeof value === "string") return value;
+  // An Error JSON-stringifies to "{}" (message/stack are non-enumerable),
+  // which told the operator nothing. The console is the one surface where
+  // the error's own words are the point: name + message, no stack rail.
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
   try {
     return JSON.stringify(value, null, 2);
   } catch {
