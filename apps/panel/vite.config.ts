@@ -12,12 +12,14 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: true,
-    // Two documents ship: the frame (the shell's view, ADR-0033) and
-    // the content app (one per tab webview).
+    // Three documents ship: the frame (the shell's view, ADR-0033), the
+    // content app (one per tab webview), and the popup overlay
+    // (application-owned menus and forms).
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
         frame: resolve(__dirname, "frame.html"),
+        popup: resolve(__dirname, "popup.html"),
       },
     },
   },

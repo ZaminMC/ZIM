@@ -18,22 +18,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bootFrame,
+  dismissPopup,
   dropIndexFromSlots,
   isTauri,
   omniboxClassify,
   omniboxCommit,
-  onAskGroupLabel,
   onSnapshot,
   onFocusAddress,
   reportFrameSize,
   revealSlot,
   shellCommand,
   shellDrag,
+  shellPopup,
   stripScroll,
-  tabContextMenu,
   type Snapshot,
 } from "./frameIpc";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
+import { CMD } from "../commandIds";
 import {
   IconBack,
   IconForward,
@@ -58,35 +59,9 @@ import {
   IconGlobe,
   IconChevLeft,
   IconChevRight,
+  IconDots,
 } from "./icons";
 import "./frame.css";
-
-const CMD = {
-  RELOAD: 33002,
-  NEW_TAB: 34014,
-  CLOSE_TAB: 34015,
-  SELECT_NEXT_TAB: 34016,
-  SELECT_PREVIOUS_TAB: 34017,
-  SELECT_TAB_0: 34018,
-  DUPLICATE_TAB: 34027,
-  RESTORE_TAB: 34028,
-  ADD_NEW_TAB_TO_GROUP: 34100,
-  CLOSE_TAB_GROUP: 34104,
-  BOOKMARK_THIS_TAB: 35000,
-  FOCUS_LOCATION: 39001,
-  SHOW_BOOKMARK_BAR: 40009,
-  TOGGLE_PINNED: 50001,
-  SELECT_LAST_TAB: 50002,
-  TOGGLE_MUTE: 50003,
-  NAVIGATE_ACTIVE: 50004,
-  TOGGLE_GROUP_COLLAPSE: 50005,
-  NAV_BACK: 50006,
-  NAV_FORWARD: 50007,
-  WINDOW_MINIMIZE: 50010,
-  WINDOW_TOGGLE_MAXIMIZE: 50011,
-  WINDOW_CLOSE: 50012,
-  TOGGLE_PALETTE: 50013,
-} as const;
 
 const GROUP_COLOR_VARS = [
   "var(--group-sky)",
@@ -152,6 +127,9 @@ export function FrameApp() {
   // When a drag session released: its pointerup also dispatches a click,
   // and the release must never select the tab it just dragged.
   const dragJustEnded = useRef(0);
+  // The demo menu's inline group naming (the popup overlay's form in the
+  // real shell; the demo has no popup host).
+  const [demoGroupFor, setDemoGroupFor] = useState<number | null>(null);
 
   // The model's tab order is snapshot.tabs' order (the host maps it
   // straight from strip.tabs) — the slot view interleaves group chips
@@ -349,23 +327,14 @@ export function FrameApp() {
     };
   }, []);
 
-  // The native menu's group verb needs a typed label — the host bounces
-  // here, the frame asks, and the group command lands with the answer.
+  // Any pointerdown in the frame is an interaction a popup must yield
+  // to (the anchor button re-opens on the click that follows — the
+  // upstream toggle rhythm). A cheap no-op when nothing is open.
   useEffect(() => {
     if (!isTauri()) return;
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void onAskGroupLabel((tabId) => {
-      const label = window.prompt("Group name", "group");
-      if (label) void shellCommand(CMD.ADD_NEW_TAB_TO_GROUP, { tab_id: tabId, label });
-    }).then((off) => {
-      if (disposed) off();
-      else unlisten = off;
-    });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
+    const onDown = () => void dismissPopup();
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
   }, []);
 
   // The omnibox rests on the model's address until the user edits it.
@@ -704,11 +673,14 @@ export function FrameApp() {
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  // The OS menu under the host (the band clips a DOM
-                  // menu); the DOM stand-in only wears the demo hat.
-                  void tabContextMenu(tab.id).then((native) => {
-                    if (!native) setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
-                  });
+                  // The application-owned popup overlay (a transparent
+                  // child webview) — the native gray menu is gone. In
+                  // the browser demo the DOM stand-in still serves.
+                  if (isTauri()) {
+                    void shellPopup("tab-menu", tab.id, e.clientX, e.clientY);
+                  } else {
+                    setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
+                  }
                 }}
                 onPointerDown={(e) => startDragSession(e, tab.id)}
               >
@@ -856,6 +828,20 @@ export function FrameApp() {
             <IconStar />
           </button>
         </div>
+        {/* The three-dot menu — the browser-level actions live here and
+            nowhere else; server management stays in the server's own
+            views. The popup overlay anchors under the button. */}
+        <button
+          className="tool"
+          aria-label="Customize and control ZIM"
+          title="Customize and control ZIM"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            void shellPopup("app-menu", null, rect.left, rect.bottom + 4);
+          }}
+        >
+          <IconDots />
+        </button>
       </div>
 
       {/* Bookmarks bar (IDC_SHOW_BOOKMARK_BAR posture). */}
@@ -890,8 +876,9 @@ export function FrameApp() {
         </div>
       ) : null}
 
-      {/* The tab context menu — the DEMO stand-in only: under the host
-          the band would clip it, so there the native menu shows. */}
+      {/* The tab context menu — the DEMO stand-in only (in the demo the
+          group item grows the inline naming input; under the host this
+          whole surface is the popup overlay). */}
       {menu ? (
         <div className="context" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
           <button onClick={() => { void shellCommand(CMD.TOGGLE_PINNED, { tab_id: menu.tab }); setMenu(null); }}>
@@ -903,15 +890,30 @@ export function FrameApp() {
           <button onClick={() => { void shellCommand(CMD.DUPLICATE_TAB, { tab_id: menu.tab }); setMenu(null); }}>
             Duplicate
           </button>
-          <button
-            onClick={() => {
-              const label = window.prompt("Group name", "group");
-              if (label) void shellCommand(CMD.ADD_NEW_TAB_TO_GROUP, { tab_id: menu.tab, label });
-              setMenu(null);
-            }}
-          >
-            Add to new group
-          </button>
+          {demoGroupFor === menu.tab ? (
+            <input
+              className="context-group-input"
+              autoFocus
+              placeholder="Group name"
+              maxLength={40}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const label = e.currentTarget.value.trim();
+                  if (label === "") return;
+                  void shellCommand(CMD.ADD_NEW_TAB_TO_GROUP, { tab_id: menu.tab, label });
+                  setDemoGroupFor(null);
+                  setMenu(null);
+                } else if (e.key === "Escape") {
+                  setDemoGroupFor(null);
+                  setMenu(null);
+                }
+              }}
+            />
+          ) : (
+            <button onClick={() => setDemoGroupFor(menu.tab)}>
+              Add to new group
+            </button>
+          )}
           <button onClick={() => { void shellCommand(CMD.NEW_TAB); setMenu(null); }}>New tab</button>
         </div>
       ) : null}

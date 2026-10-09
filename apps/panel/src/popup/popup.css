@@ -1,0 +1,201 @@
+/* The popup overlay's face — application-owned menus and forms floating
+   transparent over the content. The surface, type, and radii speak the
+   frame's own token palette: an OS-drawn gray popup can neither match
+   this shell nor carry its keyboard contract, which is exactly why the
+   native menu is gone. */
+
+:root {
+  --popup-bg: #10161f;
+  --popup-line: rgba(233, 238, 246, 0.1);
+}
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui, "Segoe UI", system-ui, sans-serif);
+  user-select: none;
+}
+
+/* The gutter: everything in the overlay that is not the menu. A click
+   here is a click "outside the menu" — dismiss, as upstream's widget
+   does — so the root covers the whole overlay and the menu re-enables
+   itself. */
+.gutter {
+  position: absolute;
+  inset: 0;
+}
+
+.menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 232px;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden auto;
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  box-sizing: border-box;
+  background: var(--popup-bg);
+  color: var(--frame-fg, #e9eef6);
+  border: 1px solid var(--popup-line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 55%), 0 2px 8px rgb(0 0 0 / 45%);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: default;
+  white-space: nowrap;
+}
+.menu-item:hover { background: var(--frame-hover, rgba(233, 238, 246, 0.07)); }
+.menu-item:focus-visible { outline: none; background: var(--frame-hover-strong, rgba(233, 238, 246, 0.11)); }
+.menu-item[aria-disabled="true"] { opacity: 0.4; }
+.menu-item[aria-disabled="true"]:hover { background: transparent; }
+
+.menu-item .glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--frame-fg-dim, #9aa7b9);
+}
+.menu-item .label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.menu-item .hint {
+  flex: none;
+  font-size: 11px;
+  color: var(--frame-fg-dim, #9aa7b9);
+}
+.menu-item .tick {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  color: var(--frame-fg);
+}
+.menu-item .tick:empty { display: none; }
+
+.menu-sep {
+  flex: none;
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--popup-line);
+}
+
+.menu-note {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--frame-fg-dim, #9aa7b9);
+}
+
+/* The zoom row: out / percent / in share one line, the percentage the
+   row's own truth. */
+.zoom-row { justify-content: space-between; gap: 2px; padding: 4px 6px; }
+.zoom-row .glyph { width: auto; }
+.zoom-row .pct {
+  flex: none;
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--frame-fg);
+}
+.zoom-row button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+.zoom-row button:hover:not(:disabled) { background: var(--frame-hover-strong, rgba(233, 238, 246, 0.11)); }
+.zoom-row button:disabled { opacity: 0.35; }
+
+/* The group form: the naming chip that replaced the OS prompt. */
+.group-form { min-width: 268px; padding: 12px; gap: 0; }
+.group-form h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--frame-fg, #e9eef6);
+}
+.group-form input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--popup-line);
+  border-radius: 7px;
+  background: var(--frame-field, #0d1219);
+  color: var(--frame-fg, #e9eef6);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.group-form input:focus {
+  border-color: var(--frame-accent, #5c9df4);
+  box-shadow: 0 0 0 3px rgba(92, 157, 244, 0.18);
+}
+.group-form input[aria-invalid="true"] {
+  border-color: var(--danger, #f28b82);
+}
+.group-error {
+  min-height: 16px;
+  margin: 6px 0 8px;
+  font-size: 11px;
+  color: var(--danger, #f28b82);
+}
+.group-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.group-actions button {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
+}
+.group-actions .ghost {
+  background: transparent;
+  color: var(--frame-fg-dim, #9aa7b9);
+}
+.group-actions .ghost:hover { background: var(--frame-hover, rgba(233, 238, 246, 0.07)); color: var(--frame-fg); }
+.group-actions .primary {
+  background: var(--frame-accent, #5c9df4);
+  color: #071120;
+}
+.group-actions .primary:hover { background: #85b7f8; }
+.group-actions .primary:disabled { opacity: 0.45; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

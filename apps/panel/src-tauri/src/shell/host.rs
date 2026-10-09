@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,
 };
@@ -135,6 +134,8 @@ struct ShellInner {
     /// each window's layout law runs on its own width — a single scalar
     /// went stale the moment a second window synced).
     strip_widths: HashMap<String, f32>,
+    /// One popup overlay per window at most (menus, the group form).
+    popups: HashMap<String, PopupState>,
 }
 
 impl ShellState {
@@ -148,6 +149,7 @@ impl ShellState {
                 drag: DragSession::default(),
                 next_window: 1,
                 strip_widths: HashMap::new(),
+                popups: HashMap::new(),
             }),
         }
     }
@@ -309,7 +311,63 @@ fn window_label_of(webview: &tauri::Webview) -> String {
     if let Some(window) = label.strip_suffix("-frame") {
         return window.to_owned();
     }
+    // The popup overlay (menus, the group form) belongs to its window:
+    // its verbs land on that window's strip.
+    if let Some(window) = label.strip_prefix("popup-") {
+        return window.to_owned();
+    }
     label.to_owned()
+}
+
+/// True when this webview IS a popup overlay.
+fn is_popup(webview: &tauri::Webview) -> bool {
+    webview.label().starts_with("popup-")
+}
+
+fn popup_label(window: &str) -> String {
+    format!("popup-{window}")
+}
+
+// ---------------------------------------------------------------------------
+// The popup overlay — application-owned menus and forms
+// ---------------------------------------------------------------------------
+
+/// One open popup overlay per window. The overlay is a transparent child
+/// webview floating above the content, the DOM stand-in for Chromium's
+/// popup widgets (menu anchoring, focus capture, Escape-to-close all live
+/// in it). The NATIVE menu is gone: an OS-drawn gray popup can neither
+/// match the shell's theme nor carry its keyboard contract.
+#[derive(Clone, Debug)]
+struct PopupState {
+    kind: String,
+    tab: Option<TabId>,
+}
+
+/// The overlay's rect for a kind anchored at (x, y): the menu's drop
+/// direction flips when it would cross the window's bottom, and the x
+/// clamps inside the window's width. The command layer supplies the
+/// window's true logical size.
+fn popup_rect(
+    window_size: (f64, f64),
+    kind: &str,
+    x: f64,
+    y: f64,
+) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+    let (w, h) = match kind {
+        "group" => (300.0, 180.0),
+        _ => (280.0, 430.0),
+    };
+    let (win_w, win_h) = window_size;
+    let px = x.max(8.0).min((win_w - w - 8.0).max(8.0));
+    let py = if y + h > win_h && y >= h {
+        y - h
+    } else {
+        y
+    };
+    (
+        LogicalPosition::new(px, py.max(0.0)),
+        LogicalSize::new(w, h),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -447,10 +505,29 @@ fn emit_tab_state(app: &AppHandle, state: &ShellState, window_label: &str) {
 
 /// Window resized — geometry is model-visible state (the layout law runs
 /// in the model, so the frame must be told). Deferred onto the async
-/// runtime by main.rs's event hook — see the re-entrancy law above.
+/// runtime by main.rs's event hook — see the re-entrancy law above. Any
+/// open popup dies with the geometry change (Chromium closes menus when
+/// the window moves under them).
 pub fn relayout_window(app: &AppHandle, state: &ShellState, window_label: &str) {
+    dismiss_popup(app, state, window_label);
     if let Err(e) = sync(app, state, window_label) {
         tracing::debug!("relayout of {window_label} failed: {e}");
+    }
+}
+
+/// Close a window's popup overlay, if one is open. Every other
+/// interaction of the window routes through here first: a click, a drag,
+/// an omnibox commit — the menu yields to whatever the operator did next
+/// (the dismiss-then-act order also makes the anchor button's own
+/// pointerdown toggle the menu, as upstream's does).
+pub fn dismiss_popup(app: &AppHandle, state: &ShellState, window_label: &str) {
+    let Some(_popup) = state.lock().popups.remove(window_label) else {
+        return;
+    };
+    if let Some(host_window) = app.get_window(window_label) {
+        if let Some(webview) = app.get_webview(&popup_label(window_label)) {
+            let _ = host_window.remove_child(&webview);
+        }
     }
 }
 
@@ -612,6 +689,12 @@ pub async fn shell_command(
     app: AppHandle,
 ) -> Result<(), String> {
     let window_name = window_label_of(&window);
+    // A command from any webview OTHER than the popup itself dismisses
+    // the popup first — the menu yields to whatever the operator did
+    // next (the popup's own verbs must not kill their own overlay).
+    if !is_popup(&window) {
+        dismiss_popup(&app, &state, &window_name);
+    }
     let arg_id = arg
         .as_ref()
         .and_then(|a| a.get("tab_id"))
@@ -655,12 +738,16 @@ pub async fn shell_command(
             }
             // Window verbs touch the OS, not the model — deferred below.
             // NEW_WINDOW tears off a fresh window from the model too.
+            // DEV_TOOLS and OPEN_LOGS are OS-facing too (devtools pane,
+            // the log folder in the platform file manager).
             cmd::WINDOW_MINIMIZE
             | cmd::WINDOW_TOGGLE_MAXIMIZE
             | cmd::WINDOW_CLOSE
             | cmd::FOCUS_LOCATION
             | cmd::TOGGLE_PALETTE
-            | cmd::NEW_WINDOW => {
+            | cmd::NEW_WINDOW
+            | cmd::DEV_TOOLS
+            | cmd::OPEN_LOGS => {
                 window_verb = Some(id);
             }
             _ => {
@@ -715,6 +802,18 @@ pub async fn shell_command(
                     cmd::CLOSE_TAB_GROUP => {
                         if let Some(group) = arg_group {
                             strip.group_close(group);
+                        }
+                    }
+                    cmd::CLOSE_OTHER_TABS => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            strip.close_others(target);
+                        }
+                    }
+                    cmd::CLOSE_TABS_TO_THE_RIGHT => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            strip.close_to_right(target);
                         }
                     }
                     cmd::TOGGLE_GROUP_COLLAPSE => {
@@ -844,6 +943,29 @@ pub async fn shell_command(
             spawn_tearoff(&app, &state, Destination::New, sx, sy)?;
             return Ok(());
         }
+        Some(cmd::DEV_TOOLS) => {
+            // The active tab's developer tools — the shell's own page,
+            // the same pane Chromium opens for the inspected contents.
+            let active = state.lock().strip(&window_name).active;
+            if let Some(tab) = active {
+                if let Some(webview) = app.get_webview(&tab_label(&window_name, tab)) {
+                    webview.open_devtools();
+                }
+            }
+            return Ok(());
+        }
+        Some(cmd::OPEN_LOGS) => {
+            // The application's log folder: the daemon's audit.log and
+            // runtime state. The opener plugin performs the OS call; the
+            // folder is the shared platform data dir both sides agree on.
+            use tauri_plugin_opener::OpenerExt;
+            let dir = zamin_core::platform::paths::data_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            app.opener()
+                .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+                .map_err(|e| format!("could not open the log folder: {e}"))?;
+            return Ok(());
+        }
         _ => {}
     }
     emit_tab_state(&app, &state, &window_name);
@@ -867,6 +989,8 @@ pub async fn shell_omnibox_commit(
 ) -> Result<serde_json::Value, String> {
     use crate::shell::omnibox::AddressRequest;
     let window_name = window_label_of(&window);
+    // An omnibox commit is an interaction: any open popup yields.
+    dismiss_popup(&app, &state, &window_name);
     let request = crate::shell::omnibox::classify(&text);
     let outcome = {
         let mut inner = state.lock();
@@ -940,148 +1064,132 @@ pub async fn shell_bookmark_remove(
     sync(&app, &state, &window_name)
 }
 
-/// The tab context menu — a NATIVE popup. The frame webview is an
-/// 83px band; a DOM menu drawn inside it is clipped at the band's
-/// bottom edge (shipped 0.4.3 hid this — the menu simply lost its tail),
-/// so Chromium's Windows answer applies here too: the OS renders the
-/// menu and it floats over the whole window. Items dispatch through
-/// [`handle_tab_menu_verb`]; menu events arrive on the main thread, so
-/// the verb itself runs on the async runtime (the re-entrancy law).
+/// Open a popup overlay for a window: the application-owned menu or
+/// form that replaced the NATIVE gray popup. The overlay is a
+/// transparent child webview (the newest child, so it floats above the
+/// content), focused on arrival, carrying its kind and tab context in
+/// the URL for [`shell_popup_boot`] to read. Any previously open popup
+/// of the window dies first — one popup at a time, as upstream's widget
+/// stack allows exactly one.
 #[tauri::command]
-pub async fn shell_tab_menu(
+pub async fn shell_popup(
     window: tauri::Webview,
-    app: AppHandle,
+    kind: String,
+    tab_id: Option<u32>,
+    x: f64,
+    y: f64,
     state: State<'_, ShellState>,
-    tab_id: u32,
+    app: AppHandle,
 ) -> Result<(), String> {
     let window_name = window_label_of(&window);
-    let (pinned, muted) = {
-        let mut inner = state.lock();
-        let strip = inner.strip(&window_name);
-        match strip.tabs.iter().find(|t| t.id == tab_id) {
-            Some(tab) => (tab.pinned, tab.muted),
-            None => return Ok(()), // gone before the menu could show
-        }
-    };
-    let base = format!("zamin-tab-menu|{window_name}|{tab_id}");
-    let pin = MenuItem::with_id(
-        &app,
-        format!("{base}|pin"),
-        if pinned { "Unpin tab" } else { "Pin tab" },
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let mute = MenuItem::with_id(
-        &app,
-        format!("{base}|mute"),
-        if muted { "Unmute tab" } else { "Mute tab" },
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let duplicate = MenuItem::with_id(
-        &app,
-        format!("{base}|duplicate"),
-        "Duplicate",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let group = MenuItem::with_id(
-        &app,
-        format!("{base}|group"),
-        "Add to new group…",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let new_tab = MenuItem::with_id(&app, format!("{base}|new"), "New tab", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let close = MenuItem::with_id(
-        &app,
-        format!("{base}|close"),
-        "Close tab",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let before_new = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
-    let before_close = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
-    let menu = Menu::with_items(
-        &app,
-        &[
-            &pin,
-            &mute,
-            &duplicate,
-            &group,
-            &before_new,
-            &new_tab,
-            &before_close,
-            &close,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    let host = window_for(&app, &window_name)?;
-    menu.popup(host).map_err(|e| e.to_string())
+    let host_window = window_for(&app, &window_name)?;
+    let size: LogicalSize<f64> = host_window
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical(host_window.scale_factor().unwrap_or(1.0));
+    let (position, popup_size) = popup_rect((size.width, size.height), &kind, x, y);
+    dismiss_popup(&app, &state, &window_name);
+    let label = popup_label(&window_name);
+    host_window
+        .add_child(
+            tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
+                .transparent(true),
+            position,
+            popup_size,
+        )
+        .map_err(|e| format!("could not open the popup: {e}"))?;
+    let _ = app.emit_to(
+        &label,
+        "shell://popup-boot",
+        serde_json::json!({ "kind": kind, "tab_id": tab_id }),
+    );
+    state.lock().popups.insert(
+        window_name,
+        PopupState {
+            kind,
+            tab: tab_id,
+        },
+    );
+    // Focus follows the popup: Escape and the arrow keys work from the
+    // first keystroke, exactly like a freshly opened OS menu.
+    if let Some(popup) = app.get_webview(&label) {
+        let _ = popup.set_focus();
+    }
+    Ok(())
 }
 
-/// The native tab menu's verbs — the model mutations behind the popup
-/// items. Called from main.rs's menu-event hook, which spawns this onto
-/// the async runtime: the event fires on the main thread, and a verb
-/// like "new tab" births a webview inside sync (the re-entrancy law).
-pub fn handle_tab_menu_verb(
-    app: &AppHandle,
-    state: &ShellState,
-    window_label: &str,
-    tab_id: u32,
-    verb: &str,
-) {
-    {
-        let mut inner = state.lock();
-        let strip = inner.strip(window_label);
-        match verb {
-            "pin" => {
-                let pinned = strip
-                    .tabs
-                    .iter()
-                    .find(|t| t.id == tab_id)
-                    .map(|t| t.pinned)
-                    .unwrap_or(false);
-                strip.set_pinned(tab_id, !pinned);
+/// The popup's own window size lookup — the popup_rect call above needs
+/// the HOST window's size, which the command resolved before opening.
+/// (Kept next to shell_popup for the reading order.)
+
+/// The overlay asks for its context: kind, the addressed tab, and the
+/// menu-relevant posture of that tab (pinned/muted/zoom) plus the
+/// window's bookmarks-bar state for the app menu's checkmark.
+#[tauri::command]
+pub fn shell_popup_boot(
+    window: tauri::Webview,
+    state: State<'_, ShellState>,
+) -> Result<serde_json::Value, String> {
+    let window_name = window_label_of(&window);
+    let (kind, tab_id) = {
+        let inner = state.lock();
+        match inner.popups.get(&window_name) {
+            Some(popup) => (popup.kind.clone(), popup.tab),
+            None => ("unknown".into(), None),
+        }
+    };
+    let mut context = serde_json::json!({ "kind": kind, "tab_id": tab_id });
+    if let Some(tab_id) = tab_id {
+        let inner = state.lock();
+        if let Some(strip) = inner.strips.get(&window_name) {
+            if let Some(tab) = strip.tabs.iter().find(|t| t.id == tab_id) {
+                context["pinned"] = serde_json::json!(tab.pinned);
+                context["muted"] = serde_json::json!(tab.muted);
+                context["zoom"] = serde_json::json!(tab.zoom);
             }
-            "mute" => {
-                if let Some(tab) = strip.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    tab.muted = !tab.muted;
-                }
+        }
+        context["bar_visible"] = serde_json::json!(state.lock().bookmarks.bar_visible);
+    } else {
+        let inner = state.lock();
+        context["bar_visible"] = serde_json::json!(inner.bookmarks.bar_visible);
+        // The app menu's zoom row reads the ACTIVE tab's factor.
+        if let Some(strip) = inner.strips.get(&window_name) {
+            if let Some(active) = strip.active.and_then(|id| {
+                strip.tabs.iter().find(|t| t.id == id)
+            }) {
+                context["zoom"] = serde_json::json!(active.zoom);
             }
-            "duplicate" => {
-                // The verb's arm must stay unit; duplicate's new-tab id is
-                // the model's own business (the snapshot carries it).
-                let _ = strip.duplicate(tab_id);
-            }
-            "close" => {
-                let _ = strip.close(tab_id);
-            }
-            "new" => {
-                let _ = strip.append(Destination::New, true);
-            }
-            // The group needs a label only the operator can type — the
-            // frame asks, then lands ADD_NEW_TAB_TO_GROUP itself.
-            "group" => {
-                let _ = app.emit_to(
-                    frame_label(window_label),
-                    "shell://ask-group-label",
-                    serde_json::json!({ "tab_id": tab_id }),
-                );
-            }
-            _ => {}
         }
     }
-    emit_tab_state(app, state, window_label);
-    if let Err(e) = sync(app, state, window_label) {
-        tracing::debug!("tab-menu verb {verb} sync failed: {e}");
-    }
+    Ok(context)
+}
+
+/// The overlay closes itself (verb dispatched, Escape, click in its own
+/// transparent gutter) — or any other webview of the window asks for
+/// dismissal through [`shell_popup_dismiss`].
+#[tauri::command]
+pub fn shell_popup_close(
+    window: tauri::Webview,
+    state: State<'_, ShellState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let window_name = window_label_of(&window);
+    dismiss_popup(&app, &state, &window_name);
+    Ok(())
+}
+
+/// Dismissal from the FRAME or a CONTENT webview ("I was clicked — the
+/// menu must yield"). A no-op when nothing is open, so it rides every
+/// pointerdown cheaply.
+#[tauri::command]
+pub fn shell_popup_dismiss(
+    window: tauri::Webview,
+    state: State<'_, ShellState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let window_name = window_label_of(&window);
+    dismiss_popup(&app, &state, &window_name);
+    Ok(())
 }
 
 /// The drag session — frame pointer events in, model decisions out.
@@ -1101,6 +1209,8 @@ pub async fn shell_drag(
     app: AppHandle,
 ) -> Result<(), String> {
     let window_name = window_label_of(&window);
+    // A drag session is an interaction: any open popup yields.
+    dismiss_popup(&app, &state, &window_name);
     match phase.as_str() {
         "start" => {
             let mut inner = state.lock();

@@ -83,3 +83,16 @@ pub const ZOOM_RESET: u32 = 50017;
 /// "New window"; upstream owns IDC_NEW_WINDOW 34000 — kept clear of the
 /// ported block).
 pub const NEW_WINDOW: u32 = 50018;
+
+/// ⓩ Local: the tab menu's scoped closes (Chromium's close-context
+/// pair; no single IDC in the ported block).
+pub const CLOSE_OTHER_TABS: u32 = 50019;
+pub const CLOSE_TABS_TO_THE_RIGHT: u32 = 50020;
+
+/// ⓩ Local: open the ACTIVE tab's developer tools (Chromium routes
+/// through IDC_DEV_TOOLS; the devtools feature gates the release build).
+pub const DEV_TOOLS: u32 = 50021;
+
+/// ⓩ Local: open the application's log folder (the daemon's audit log
+/// and the panel's own state). Upstream owns no IDC for this.
+pub const OPEN_LOGS: u32 = 50022;

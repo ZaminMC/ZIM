@@ -596,6 +596,36 @@ impl Strip {
         true
     }
 
+    /// CloseWebContentsAt's scoped siblings from the tab menu: close
+    /// every OTHER tab (IDC close context: "Close other tabs"), or every
+    /// tab to the right of this one. Each close rides [`Strip::close`],
+    /// so the closed set and selection repair come for free.
+    pub fn close_others(&mut self, id: TabId) -> bool {
+        if self.index_of(id).is_none() {
+            return false;
+        }
+        let victims: Vec<TabId> = self.tabs.iter().map(|t| t.id).filter(|t| *t != id).collect();
+        for victim in victims {
+            self.close(victim);
+        }
+        self.select(id);
+        true
+    }
+
+    pub fn close_to_right(&mut self, id: TabId) -> bool {
+        let Some(index) = self.index_of(id) else {
+            return false;
+        };
+        let victims: Vec<TabId> = self.tabs[index + 1..].iter().map(|t| t.id).collect();
+        if victims.is_empty() {
+            return false;
+        }
+        for victim in victims {
+            self.close(victim);
+        }
+        true
+    }
+
     fn ungroup_all(&mut self, groups: &[GroupId]) {
         for t in self.tabs.iter_mut() {
             if t.group.is_some_and(|g| groups.contains(&g)) {

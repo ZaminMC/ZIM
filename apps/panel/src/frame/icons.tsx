@@ -327,3 +327,12 @@ export function IconCheck(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconDuplicate(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="5.6" y="5.6" width="7.8" height="7.8" rx="1.6" />
+      <path d="M10.4 2.6H4.2A1.6 1.6 0 0 0 2.6 4.2v6.2" />
+    </svg>
+  );
+}

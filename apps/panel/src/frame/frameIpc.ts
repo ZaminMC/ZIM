@@ -90,14 +90,23 @@ export const omniboxCommit = (text: string): Promise<CommitOutcome> =>
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
   isTauri() ? invoke("shell_omnibox_classify", { text }) : Promise.resolve(null);
 
-/** The tab context menu. Under the desktop host this shows the NATIVE
- *  popup (the frame band clips any DOM menu) and resolves true; the
- *  browser demo has no OS menu, resolves false so the view can draw a
- *  DOM stand-in. */
-export const tabContextMenu = (tabId: number): Promise<boolean> =>
+/** Open the application-owned popup overlay (tab-menu | app-menu),
+ *  anchored at frame coordinates. The browser demo has no popup host;
+ *  its DOM stand-in serves there instead. */
+export const shellPopup = (
+  kind: "tab-menu" | "app-menu",
+  tabId: number | null,
+  x: number,
+  y: number,
+): Promise<void> =>
   isTauri()
-    ? invoke("shell_tab_menu", { tabId }).then(() => true)
-    : Promise.resolve(false);
+    ? invoke("shell_popup", { kind, tabId, x, y })
+    : Promise.resolve();
+
+/** Dismiss a window's popup overlay — a no-op when none is open, so it
+ *  can ride every pointerdown cheaply. */
+export const dismissPopup = (): Promise<void> =>
+  isTauri() ? invoke("shell_popup_dismiss").then(() => {}) : Promise.resolve();
 
 export const bootFrame = (): Promise<Snapshot | null> =>
   isTauri()
@@ -146,17 +155,6 @@ export function onFocusAddress(handler: () => void): Promise<UnlistenFn> {
   // subscribing through @tauri-apps/api outside Tauri would throw.
   if (!isTauri()) return Promise.resolve(() => {});
   return listen("shell://focus-address", () => handler());
-}
-
-/** The native menu's "Add to new group…": the label is the operator's
- *  to type, so the host bounces here and the frame asks, then lands the
- *  group command itself. */
-export function onAskGroupLabel(
-  handler: (tabId: number) => void,
-): Promise<UnlistenFn> {
-  return listen<{ tab_id: number }>("shell://ask-group-label", (event) =>
-    handler(event.payload.tab_id),
-  );
 }
 
 // -- View-side geometry mirrors (tested against the model's law) -------------

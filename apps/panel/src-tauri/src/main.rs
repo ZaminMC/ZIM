@@ -218,34 +218,6 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             app.state::<ShellState>().restore(&handle);
-            // The native tab context menu (shell_tab_menu) answers here.
-            // Menu events fire on the main thread; the verb mutates the
-            // model and may birth a webview in sync — the re-entrancy
-            // law sends it to the async runtime, exactly like Resized.
-            handle.on_menu_event(|app, event| {
-                let id = event.id().0.clone();
-                let Some(rest) = id.strip_prefix("zamin-tab-menu|") else {
-                    return;
-                };
-                let mut parts = rest.splitn(3, '|');
-                let (Some(window_label), Some(tab), Some(verb)) =
-                    (parts.next(), parts.next(), parts.next())
-                else {
-                    return;
-                };
-                let Ok(tab_id) = tab.parse::<u32>() else {
-                    return;
-                };
-                let window_label = window_label.to_owned();
-                let verb = verb.to_owned();
-                // The closure's `app` is a borrowed reference — the spawned
-                // future is 'static, so it carries its own handle clone.
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app.state::<ShellState>();
-                    shell::host::handle_tab_menu_verb(&app, &state, &window_label, tab_id, &verb);
-                });
-            });
             Ok(())
         })
         // Geometry is model-visible: every window resize re-runs the
@@ -295,8 +267,11 @@ fn main() {
             shell::host::shell_bookmarks,
             shell::host::shell_bookmark_remove,
             shell::host::shell_drag,
-            shell::host::shell_tab_menu,
-            shell::host::shell_window_resized
+            shell::host::shell_window_resized,
+            shell::host::shell_popup,
+            shell::host::shell_popup_boot,
+            shell::host::shell_popup_close,
+            shell::host::shell_popup_dismiss
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ZIM host");

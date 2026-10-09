@@ -524,6 +524,24 @@ body {
   cursor: default;
 }
 .context button:hover { background: var(--frame-hover-strong); }
+.context .context-group-input {
+  margin: 2px 4px;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--frame-line);
+  border-radius: 6px;
+  background: var(--frame-field);
+  color: var(--frame-fg);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.context .context-group-input:focus {
+  border-color: var(--frame-accent);
+  box-shadow: 0 0 0 3px rgba(92, 157, 244, 0.18);
+}
 
 /* The update notice lives INSIDE the band — the frame webview is only
    the header (83px, 111 with bookmarks), so a bottom-fixed toast would

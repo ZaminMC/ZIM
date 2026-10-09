@@ -25,6 +25,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 zamin-bridge = { path = "../../../crates/zamin-bridge" }
 zamin-agent = { path = "../../../crates/zamin-agent" }
 zamin-ipc = { path = "../../../crates/zamin-ipc" }
+# The log folder's platform path (the daemon's data dir) — the shared
+# seam, not new business logic.
+zamin-core = { path = "../../../crates/zamin-core" }
 tracing = "0.1"
 
 # Desktop notifications (freedesktop / Windows toast): the webview decides
