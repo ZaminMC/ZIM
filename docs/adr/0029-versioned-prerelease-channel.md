@@ -6,8 +6,8 @@
 
 The development channel shipped its first four builds (0.1.4 – 0.1.7)
 under one rolling release: the fixed `dev` tag on the channel repo
-(`ZaminPanel-Releases`, itself retired on 2026-10-08 when the code repo
-went public — the channel now lives on `ZaminMC/ZaminPanel`), whose
+(`ZIM-Releases`, itself retired on 2026-10-08 when the code repo
+went public — the channel now lives on `ZaminMC/ZIM`), whose
 assets were deleted and replaced on
 every run, and whose version was `0.1.<run number>` — a number chosen to
 guarantee monotonicity for the updater, not to say anything about what

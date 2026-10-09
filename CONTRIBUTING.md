@@ -1,6 +1,6 @@
-# Contributing to ZaminPanel
+# Contributing to ZIM
 
-ZaminPanel is the project home of three products: **ZaminPanel** (desktop GUI), **ZaminCLI** (`zamin`), and **ZaminCore** (the engine, running inside `zamind`). One repository, one engineering voice.
+ZIM is the project home of three products: **ZIM** (desktop GUI), **ZaminCLI** (`zamin`), and **ZaminCore** (the engine, running inside `zamind`). One repository, one engineering voice.
 
 Start with: [ADR index](docs/adr/) · [Protocol v0](docs/architecture/protocol-v0.md) · [Style guide](docs/development/STYLE-GUIDE.md) · [Glossary](docs/development/GLOSSARY.md) · [Testing](docs/development/TESTING.md) · [Performance budgets](docs/development/PERFORMANCE-BUDGETS.md)
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ZaminPanel desktop UI (Tauri 2 webview; runs in a plain browser against the dev bridge for development).",
+  "description": "ZIM desktop UI (Tauri 2 webview; runs in a plain browser against the dev bridge for development).",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

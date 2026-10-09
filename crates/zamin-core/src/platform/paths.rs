@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 /// Daemon-owned state: registry, per-server state, logs of the daemon
-/// itself (ADR-0004). Windows: `%LOCALAPPDATA%\ZaminPanel`. Linux:
-/// `$XDG_DATA_HOME/zaminpanel`, default `~/.local/share/zaminpanel`.
+/// itself (ADR-0004). Windows: `%LOCALAPPDATA%\ZIM`. Linux:
+/// `$XDG_DATA_HOME/zim`, default `~/.local/share/zim`.
 pub fn data_dir() -> PathBuf {
     #[cfg(windows)]
     {
@@ -23,7 +23,7 @@ pub fn data_dir() -> PathBuf {
 }
 
 /// Human-edited configuration (ADR-0007). Windows: same tree as data.
-/// Linux: `$XDG_CONFIG_HOME/zaminpanel`, default `~/.config/zaminpanel`.
+/// Linux: `$XDG_CONFIG_HOME/zim`, default `~/.config/zim`.
 pub fn config_dir() -> PathBuf {
     #[cfg(windows)]
     {
@@ -71,17 +71,17 @@ fn data_dir_windows(local_app_data: &str) -> PathBuf {
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."))
     } else {
-        PathBuf::from(local_app_data).join("ZaminPanel")
+        PathBuf::from(local_app_data).join("ZIM")
     }
 }
 
 #[cfg(unix)]
 fn data_dir_unix(xdg_data_home: Option<&str>, home: Option<PathBuf>) -> PathBuf {
     match xdg_data_home {
-        Some(dir) => PathBuf::from(dir).join("zaminpanel"),
+        Some(dir) => PathBuf::from(dir).join("zim"),
         None => match home {
-            Some(home) => home.join(".local/share/zaminpanel"),
-            None => PathBuf::from(".local/share/zaminpanel"),
+            Some(home) => home.join(".local/share/zim"),
+            None => PathBuf::from(".local/share/zim"),
         },
     }
 }
@@ -89,10 +89,10 @@ fn data_dir_unix(xdg_data_home: Option<&str>, home: Option<PathBuf>) -> PathBuf 
 #[cfg(unix)]
 fn config_dir_unix(xdg_config_home: Option<&str>, home: Option<PathBuf>) -> PathBuf {
     match xdg_config_home {
-        Some(dir) => PathBuf::from(dir).join("zaminpanel"),
+        Some(dir) => PathBuf::from(dir).join("zim"),
         None => match home {
-            Some(home) => home.join(".config/zaminpanel"),
-            None => PathBuf::from(".config/zaminpanel"),
+            Some(home) => home.join(".config/zim"),
+            None => PathBuf::from(".config/zim"),
         },
     }
 }
@@ -105,26 +105,26 @@ mod tests {
     #[cfg(unix)]
     fn unix_dirs_follow_xdg() {
         let data = data_dir_unix(Some("/xdg/data"), Some("/home/u".into()));
-        assert_eq!(data, PathBuf::from("/xdg/data/zaminpanel"));
+        assert_eq!(data, PathBuf::from("/xdg/data/zim"));
 
         let config = config_dir_unix(Some("/xdg/conf"), Some("/home/u".into()));
-        assert_eq!(config, PathBuf::from("/xdg/conf/zaminpanel"));
+        assert_eq!(config, PathBuf::from("/xdg/conf/zim"));
 
         let data_default = data_dir_unix(None, Some("/home/u".into()));
         assert_eq!(
             data_default,
-            PathBuf::from("/home/u/.local/share/zaminpanel")
+            PathBuf::from("/home/u/.local/share/zim")
         );
 
         let config_default = config_dir_unix(None, None);
-        assert_eq!(config_default, PathBuf::from(".config/zaminpanel"));
+        assert_eq!(config_default, PathBuf::from(".config/zim"));
     }
 
     #[test]
     #[cfg(windows)]
     fn windows_dir_uses_local_app_data() {
         let dir = data_dir_windows(r"C:\Users\u\AppData\Local");
-        assert_eq!(dir, PathBuf::from(r"C:\Users\u\AppData\Local\ZaminPanel"));
+        assert_eq!(dir, PathBuf::from(r"C:\Users\u\AppData\Local\ZIM"));
         let fallback = data_dir_windows("");
         assert!(!fallback.as_os_str().is_empty());
     }

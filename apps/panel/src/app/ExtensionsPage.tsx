@@ -1,4 +1,4 @@
-// zaminpanel://extensions/ — the extensions room (§56/§57, ADR-0031).
+// zim://extensions/ — the extensions room (§56/§57, ADR-0031).
 // The daemon's inventory: who is installed, which permissions each
 // extension claims from the closed, deny-by-default vocabulary, and
 // which folders could not be answered for (named, never skipped). The

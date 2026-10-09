@@ -1,4 +1,4 @@
-# ZaminPanel host (Tauri 2)
+# ZIM host (Tauri 2)
 
 The desktop shell per ADR-0003: **a bridge, nothing more**. The webview's
 protocol client owns handshake, correlation, subscriptions, reconnect, and

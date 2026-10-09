@@ -9,7 +9,7 @@ use crate::shell::tabs::Destination;
 
 /// One parsed address request — the closed classification of everything
 /// an operator can type (the founder's dialect order preserved):
-/// internal `zaminpanel://` URLs, join addresses (host:port, port-only,
+/// internal `zim://` URLs, join addresses (host:port, port-only,
 /// bare host — including the `0` bind-all shorthand), free text queries.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AddressRequest {
@@ -47,7 +47,7 @@ fn is_host_charset(text: &str) -> bool {
 /// parseAddressInput — ported rule for rule.
 pub fn classify(text: &str) -> AddressRequest {
     let trimmed = text.trim();
-    if let Some(rest) = trimmed.strip_prefix("zaminpanel://") {
+    if let Some(rest) = trimmed.strip_prefix("zim://") {
         let (page, arg) = match rest.split_once('/') {
             Some((page, arg)) => (page, arg.trim_end_matches('/')),
             None => (rest, ""),
@@ -96,16 +96,16 @@ mod tests {
     #[test]
     fn internal_urls_are_typed() {
         assert_eq!(
-            classify("zaminpanel://servers/"),
+            classify("zim://servers/"),
             AddressRequest::Internal(Destination::Servers)
         );
         assert_eq!(
-            classify("zaminpanel://server/abc"),
+            classify("zim://server/abc"),
             AddressRequest::Internal(Destination::Server { server_id: "abc".into() })
         );
         assert_eq!(
-            classify("zaminpanel://nonsense/"),
-            AddressRequest::Internal(Destination::Missing { url: "zaminpanel://nonsense/".into() })
+            classify("zim://nonsense/"),
+            AddressRequest::Internal(Destination::Missing { url: "zim://nonsense/".into() })
         );
     }
 

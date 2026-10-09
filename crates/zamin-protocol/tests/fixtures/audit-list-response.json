@@ -22,7 +22,7 @@
         "method": "server.stop",
         "serverId": "ghost",
         "outcome": "SERVER_NOT_FOUND",
-        "client": { "name": "zamin-panel", "version": "0.1.0" }
+        "client": { "name": "zim", "version": "0.1.0" }
       },
       {
         "tsMs": 1729999980000,

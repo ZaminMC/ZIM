@@ -1,5 +1,5 @@
 //! Ensure the daemon is running (ARCH-REVIEW §1.2: "double-clicking
-//! ZaminPanel must never show a daemon error"). The webview calls
+//! ZIM must never show a daemon error"). The webview calls
 //! `daemon_ensure` whenever a transport start fails with a connection
 //! refusal; this module probes the per-user endpoint, spawns the sibling
 //! `zamind` if it is down, and waits for it to bind.
@@ -144,7 +144,7 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let dir = std::env::temp_dir().join(format!(
-            "zamin-host-{tag}-{}-{nanos}",
+            "zim-host-{tag}-{}-{nanos}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).expect("temp dir builds");
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn sibling_of_the_panel_wins() {
         let dir = temp_dir("sibling");
-        let exe = dir.join("zamin-panel");
+        let exe = dir.join("zim");
         let daemon = dir.join("zamind");
         fs::write(&daemon, b"fake").expect("daemon stub");
         let resolved = resolve_daemon_binary_in(Some(&exe), None, "zamind");
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn nothing_found_is_none() {
         let dir = temp_dir("none");
-        let exe = dir.join("zamin-panel");
+        let exe = dir.join("zim");
         let resolved = resolve_daemon_binary_in(Some(&exe), None, "zamind");
         assert_eq!(resolved, None);
         fs::remove_dir_all(dir).ok();

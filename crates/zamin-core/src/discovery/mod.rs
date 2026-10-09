@@ -1,6 +1,6 @@
 //! Server discovery (founder §64): what servers does this machine already
 //! have? The daemon answers from two honest sources — the registry (what
-//! ZaminPanel manages) and a bounded scan of operator-configured roots for
+//! ZIM manages) and a bounded scan of operator-configured roots for
 //! **server directories** (a `server.properties` on disk) and **supported
 //! server JARs** (filename classification, stated as evidence, never
 //! guessed as support). Everything rides ADR-0009's rules: symlinks are

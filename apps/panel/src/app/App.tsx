@@ -94,7 +94,7 @@ function DestinationView({ destination, reloadToken }: { destination: Destinatio
 function destinationFromQuery(): Destination | null {
   const url = new URLSearchParams(window.location.search).get("d");
   if (!url) return null;
-  const page = url.replace(/^zaminpanel:\/\//, "").split("/")[0];
+  const page = url.replace(/^zim:\/\//, "").split("/")[0];
   switch (page) {
     case "servers": return { kind: "servers" };
     case "new": return { kind: "new" };

@@ -1,5 +1,5 @@
 // Settings (§39, ADR-0019): the server's own identity and behavior —
-// distinct from the global ZaminPanel settings page. Edits patch the
+// distinct from the global ZIM settings page. Edits patch the
 // layered model; the reserved rooms (icon, restart policy, crash policy,
 // log retention) are stated, not faked, because §82 forbids buttons that
 // only visually work.

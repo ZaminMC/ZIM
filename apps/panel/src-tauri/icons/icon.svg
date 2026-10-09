@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- ZaminPanel mark: a Z drawn as two server slats + a diagonal,
+  <!-- ZIM mark: a Z drawn as two server slats + a diagonal,
        one running-state LED. Colors are the panel's own tokens. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">

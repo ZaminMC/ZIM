@@ -10,11 +10,11 @@ export function MissingPage({ url }: { url: string }) {
       <div className={styles.card}>
         <h1 className={styles.title}>No such page</h1>
         <p className={styles.body}>
-          <code className={styles.url}>{url}</code> is not a ZaminPanel page.
+          <code className={styles.url}>{url}</code> is not a ZIM page.
         </p>
         <p className={styles.body}>
-          Internal pages live under <code className={styles.url}>zaminpanel://</code> — try{" "}
-          <code className={styles.url}>zaminpanel://servers/</code> for the fleet.
+          Internal pages live under <code className={styles.url}>zim://</code> — try{" "}
+          <code className={styles.url}>zim://servers/</code> for the fleet.
         </p>
       </div>
     </div>

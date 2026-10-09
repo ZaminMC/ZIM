@@ -54,7 +54,7 @@ describe("jobNotification", () => {
   it("reports failures with a remediation pointer", () => {
     const spec = jobNotification({ kind: "backup.restore", outcome: "failed", serverName: "demo" });
     expect(spec.title).toBe("Restore — demo failed");
-    expect(spec.body).toContain("Open ZaminPanel");
+    expect(spec.body).toContain("Open ZIM");
   });
 
   it("reports successes plainly", () => {

@@ -1,6 +1,6 @@
 [package]
 name = "zamin-cli"
-description = "The zamin command line: manage ZaminPanel servers over the Zamin Protocol"
+description = "The zamin command line: manage ZIM servers over the Zamin Protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

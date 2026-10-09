@@ -23,7 +23,7 @@
 pub mod linux {
     use std::path::{Path, PathBuf};
 
-    const APP_DESKTOP: &str = "mc.zamin.panel.desktop";
+    const APP_DESKTOP: &str = "mc.zamin.zim.desktop";
 
     /// The autostart entry path for a config home (`$XDG_CONFIG_HOME`).
     pub fn autostart_file(config_home: &Path) -> PathBuf {
@@ -37,10 +37,10 @@ pub mod linux {
         format!(
             "[Desktop Entry]\n\
              Type=Application\n\
-             Name=ZaminPanel\n\
-             Comment=ZaminPanel starts with your session so the daemon is ready\n\
+             Name=ZIM\n\
+             Comment=ZIM starts with your session so the daemon is ready\n\
              Exec={exec}\n\
-             Icon=mc.zamin.panel\n\
+             Icon=mc.zamin.zim\n\
              Terminal=false\n\
              X-GNOME-Autostart-enabled=true\n"
         )
@@ -89,7 +89,7 @@ pub mod windows {
     use winreg::RegKey;
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    const RUN_VALUE_NAME: &str = "ZaminPanel";
+    const RUN_VALUE_NAME: &str = "ZIM";
 
     fn open_run_key() -> Result<RegKey, String> {
         RegKey::predef(HKEY_CURRENT_USER)

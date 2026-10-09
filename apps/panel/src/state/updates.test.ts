@@ -220,7 +220,7 @@ describe("the update lane store", () => {
     // A previous session that died mid-install must not boot claiming an
     // install happened — only the prefs ride storage.
     localStorage.setItem(
-      "zamin-panel.updates",
+      "zim.updates",
       JSON.stringify({
         state: {
           phase: { kind: "ready", offer },
@@ -234,7 +234,7 @@ describe("the update lane store", () => {
     const state = useUpdates.getState();
     expect(state.prefs).toEqual({ autoCheck: false, autoInstall: false });
     expect(state.phase).toEqual({ kind: "idle" });
-    localStorage.removeItem("zamin-panel.updates");
+    localStorage.removeItem("zim.updates");
   });
 
   it("every phase renders as a human sentence (§81)", () => {

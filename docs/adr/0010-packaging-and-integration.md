@@ -10,11 +10,11 @@ Phase 7 (§23) delivers "installer + portable (Win), AppImage + tar.gz (Linux), 
 
 ### Everything ships together; the panel brings the daemon
 
-One artifact set carries all three binaries: the panel host, `zamind`, and `zamin`. Tauri's `externalBin` (sidecars) installs them next to `zamin-panel` in every layout — NSIS install dir, AppImage `usr/bin`, portable tree. The host resolves the daemon by sibling lookup, then `PATH` (development).
+One artifact set carries all three binaries: the panel host, `zamind`, and `zamin`. Tauri's `externalBin` (sidecars) installs them next to `zim` in every layout — NSIS install dir, AppImage `usr/bin`, portable tree. The host resolves the daemon by sibling lookup, then `PATH` (development).
 
 `daemon_ensure` (host command) makes ARCH-REVIEW §1.2 concrete: on connection refusal the webview asks the host to probe the per-user endpoint, spawn the sibling daemon, and wait for bind before the client's retry schedule continues. Single-instance races remain the daemon's job — `IpcServer::bind` answers `AlreadyRunning` and the loser exits(1), so a simultaneous spawn from two panels is a race we are allowed to lose. The daemon is spawned detached (no kill-on-close on either platform); a watcher thread reaps it if it exits early.
 
-The installed binary is named `zamin-panel` (`mainBinaryName`), matching sibling resolution and the install script — not the product name's spelling.
+The installed binary is named `zim` (`mainBinaryName`), matching sibling resolution and the install script — not the product name's spelling.
 
 ### Windows: NSIS, per-user
 

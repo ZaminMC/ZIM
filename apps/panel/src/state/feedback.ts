@@ -22,9 +22,9 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const ISSUES_API_URL = "https://api.github.com/repos/ZaminMC/ZaminPanel/issues";
+export const ISSUES_API_URL = "https://api.github.com/repos/ZaminMC/ZIM/issues";
 export const USER_API_URL = "https://api.github.com/user";
-export const NEW_ISSUE_URL = "https://github.com/ZaminMC/ZaminPanel/issues/new";
+export const NEW_ISSUE_URL = "https://github.com/ZaminMC/ZIM/issues/new";
 
 /** The static facts every report carries — the page gathers them from the
  *  same sources the About page reads, so the issue's evidence is the
@@ -74,7 +74,7 @@ export function diagnosticsBlock(identity: FeedbackIdentity, hasScreenshot: bool
     "",
     "---",
     "",
-    `- ZaminPanel: ${identity.installedVersion ?? "(the host has not answered yet)"}`,
+    `- ZIM: ${identity.installedVersion ?? "(the host has not answered yet)"}`,
     `- Platform: ${identity.platform}`,
     `- Route: sent from the panel's feedback page`,
     hasScreenshot
@@ -230,7 +230,7 @@ export const useFeedback = create<FeedbackState>()(
       },
     }),
     {
-      name: "zaminpanel.feedback",
+      name: "zim.feedback",
       storage: createJSONStorage(() => localStorage),
       // Only the token rides across boots; sign-in state and send outcomes
       // are runtime facts, recomputed honestly each session.

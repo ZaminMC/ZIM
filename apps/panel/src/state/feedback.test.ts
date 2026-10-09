@@ -30,7 +30,7 @@ describe("feedback diagnostics", () => {
   it("appends version, platform and the screenshot truth to the body", () => {
     const body = useFeedback.getState().composeBody("The tab froze.", identity, true);
     expect(body.startsWith("The tab froze.")).toBe(true);
-    expect(body).toContain("- ZaminPanel: 0.1.6");
+    expect(body).toContain("- ZIM: 0.1.6");
     expect(body).toContain("- Platform: Windows");
     expect(body).toContain("paste-attach");
   });
@@ -82,8 +82,8 @@ describe("the token route", () => {
       expect(url).toBe(ISSUES_API_URL);
       const payload = JSON.parse((init?.body ?? "") as string) as { title: string; body: string };
       expect(payload.title).toBe("Crash on start");
-      expect(payload.body).toContain("- ZaminPanel:");
-      return jsonResponse(201, { html_url: "https://github.com/ZaminMC/ZaminPanel/issues/7", number: 7 });
+      expect(payload.body).toContain("- ZIM:");
+      return jsonResponse(201, { html_url: "https://github.com/ZaminMC/ZIM/issues/7", number: 7 });
     });
     vi.stubGlobal("fetch", fetchMock);
     useFeedback.setState({ token: "ghs_token_1" });
@@ -95,7 +95,7 @@ describe("the token route", () => {
     });
     expect(outcome).toEqual({
       kind: "created",
-      url: "https://github.com/ZaminMC/ZaminPanel/issues/7",
+      url: "https://github.com/ZaminMC/ZIM/issues/7",
       issueNumber: 7,
     });
     // The label ride: a feedback report tags itself.
@@ -110,7 +110,7 @@ describe("the token route", () => {
       if (payload.labels && payload.labels.length > 0) {
         return jsonResponse(422, { message: "label invalid" });
       }
-      return jsonResponse(201, { html_url: "https://github.com/ZaminMC/ZaminPanel/issues/8", number: 8 });
+      return jsonResponse(201, { html_url: "https://github.com/ZaminMC/ZIM/issues/8", number: 8 });
     });
     vi.stubGlobal("fetch", fetchMock);
     useFeedback.setState({ token: "ghs_token_1" });

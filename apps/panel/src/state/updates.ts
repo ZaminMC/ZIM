@@ -122,13 +122,13 @@ export function updatesSentence(phase: UpdatePhase): string {
     case "checking":
       return "Asking the update channel…";
     case "upToDate":
-      return `ZaminPanel ${phase.version} is the newest development build.`;
+      return `ZIM ${phase.version} is the newest development build.`;
     case "available":
-      return `ZaminPanel ${phase.offer.version} is available.`;
+      return `ZIM ${phase.offer.version} is available.`;
     case "downloading":
-      return `ZaminPanel ${phase.offer.version} is downloading — the install follows on its own.`;
+      return `ZIM ${phase.offer.version} is downloading — the install follows on its own.`;
     case "ready":
-      return `ZaminPanel ${phase.offer.version} is installed — restart to switch to it.`;
+      return `ZIM ${phase.offer.version} is installed — restart to switch to it.`;
     case "error":
       return phase.message;
   }
@@ -237,7 +237,7 @@ export const useUpdates = create<UpdatesState>()(
       };
     },
     {
-      name: "zamin-panel.updates",
+      name: "zim.updates",
       storage: createJSONStorage(() => localStorage),
       version: 1,
       // Only the prefs ride storage; the merge below drops whatever the

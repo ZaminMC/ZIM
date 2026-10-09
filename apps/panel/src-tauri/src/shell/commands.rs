@@ -1,7 +1,7 @@
 // The browser command registry — Chromium's ID space (chrome/app/
 // chrome_command_ids.h), mirrored so the keyboard contract (ADR-0032),
 // the frame layer, and the tests cite ONE table. IDs marked ⓩ are
-// ZaminPanel-local because modern Chromium has no single IDC for the
+// ZIM-local because modern Chromium has no single IDC for the
 // verb; the local numbering keeps clear of upstream's blocks.
 
 /// IDC_RELOAD 33002 (33007 = bypassing cache, reserved).
@@ -60,7 +60,7 @@ pub const NAV_BACK: u32 = 50006;
 pub const NAV_FORWARD: u32 = 50007;
 
 /// Window-control verbs for the frame's caption buttons — no upstream
-/// command IDs (Views owns them natively); ZaminPanel-local numbering.
+/// command IDs (Views owns them natively); ZIM-local numbering.
 pub const WINDOW_MINIMIZE: u32 = 50010;
 pub const WINDOW_TOGGLE_MAXIMIZE: u32 = 50011;
 pub const WINDOW_CLOSE: u32 = 50012;

@@ -1,6 +1,6 @@
 # Browser-Shell Architecture Investigation
 
-Status: **delivered 2026-10-09** · Scope: P0.2 · Decides: how ZaminPanel becomes a
+Status: **delivered 2026-10-09** · Scope: P0.2 · Decides: how ZIM becomes a
 real browser instead of a React dashboard wearing browser furniture.
 Decision record: ADR-0033. Executable port list: `chromium-porting-spec.md`.
 Reference sources (fetched, committed): `chromium-ref/` — 46 files from
@@ -229,7 +229,7 @@ layer we inspected, and R1 is only available via D.** Everything in §2 above
 is R2-portable: TabWidthConstraints is 38 lines; the drag state machine's
 detach thresholds are three constants; TabStripModel semantics are policy,
 not platform. The parts that do NOT port (Views/aura rendering) are exactly
-the parts we replace with ZaminPanel concepts anyway.
+the parts we replace with ZIM concepts anyway.
 
 ## 4. The options
 
@@ -261,7 +261,7 @@ spawn). Keyboard contract (ADR-0032) rides `windowBoot`.
 
 Keep Tauri as window/content host, but restructure to Chromium's shape:
 
-- **Model layer in Rust** (zamin-panel-shell): port TabStripModel semantics
+- **Model layer in Rust** (zim-shell): port TabStripModel semantics
   (R2): insertion policy with pinned invariant, opener chain, groups,
   DetachedTab for cross-window moves, selection model, TabRestoreService
   stack. Zustand tabs die; the React document is demoted to the **chrome

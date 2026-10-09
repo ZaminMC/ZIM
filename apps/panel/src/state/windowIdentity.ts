@@ -1,6 +1,6 @@
-// Window identity (ADR-0018). ZaminPanel is one SPA that can live in
+// Window identity (ADR-0018). ZIM is one SPA that can live in
 // several browsing contexts at once — §50's "Move tab to new window"
-// opens a second ZaminPanel window, and two windows must never fight
+// opens a second ZIM window, and two windows must never fight
 // over one localStorage slot. Each context therefore owns its strip
 // under its own storage key, keyed by an identity minted once per boot.
 //
@@ -17,7 +17,7 @@
 //     test DOMs), an existing id is REUSED — losing a strip on reload
 //     is the one unrecoverable mistake this module refuses to make.
 
-const WINDOW_KEY = "zamin-panel.window";
+const WINDOW_KEY = "zim.window";
 
 let currentId: string | null = null;
 

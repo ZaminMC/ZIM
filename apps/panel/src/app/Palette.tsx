@@ -49,12 +49,12 @@ export function buildCommands(
     // §58's typed pages, reachable by keyboard: the palette speaks the
     // same destinations the address bar does.
     commands.push(
-      { id: "page-jobs", label: "Open jobs — long-running daemon operations", hint: "zaminpanel://jobs/", run: pages.jobs },
-      { id: "page-audit", label: "Open the audit log", hint: "zaminpanel://audit/", run: pages.audit },
-      { id: "page-about", label: "Open About ZaminPanel", hint: "zaminpanel://about/", run: pages.about },
-      { id: "page-feedback", label: "Send feedback — file an issue", hint: "zaminpanel://feedback/", run: pages.feedback },
-      { id: "page-extensions", label: "Open Extensions — installed addons and their permissions", hint: "zaminpanel://extensions/", run: pages.extensions },
-      { id: "page-downloads", label: "Open Downloads — the release channel's versions", hint: "zaminpanel://downloads/", run: pages.downloads },
+      { id: "page-jobs", label: "Open jobs — long-running daemon operations", hint: "zim://jobs/", run: pages.jobs },
+      { id: "page-audit", label: "Open the audit log", hint: "zim://audit/", run: pages.audit },
+      { id: "page-about", label: "Open About ZIM", hint: "zim://about/", run: pages.about },
+      { id: "page-feedback", label: "Send feedback — file an issue", hint: "zim://feedback/", run: pages.feedback },
+      { id: "page-extensions", label: "Open Extensions — installed addons and their permissions", hint: "zim://extensions/", run: pages.extensions },
+      { id: "page-downloads", label: "Open Downloads — the release channel's versions", hint: "zim://downloads/", run: pages.downloads },
     );
   }
   if (integration?.autostart.available) {

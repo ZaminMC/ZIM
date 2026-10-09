@@ -1,4 +1,4 @@
-# ZaminPanel Performance Budgets
+# ZIM Performance Budgets
 
 *Budgets exist to catch architectural mistakes early, not for benchmark theater. Measured on reference hardware (mid-range 2023 laptop: 8 cores, NVMe, 16 GB) and in CI where the platform allows. Nightly perf job is a soft gate until Phase 3, hard gate after.*
 

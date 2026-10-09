@@ -46,7 +46,7 @@ export function crashNotification(server: {
     server.exitCode === undefined ? "" : ` (exit code ${server.exitCode})`;
   return {
     title: `${server.displayName} crashed`,
-    body: `The server went down ${why}${exit}. Open ZaminPanel for the evidence and recovery options.`,
+    body: `The server went down ${why}${exit}. Open ZIM for the evidence and recovery options.`,
   };
 }
 
@@ -85,7 +85,7 @@ export function jobNotification(job: {
     case "failed":
       return {
         title: `${what} failed`,
-        body: `${what} failed. Open ZaminPanel for the typed error and what to do next.`,
+        body: `${what} failed. Open ZIM for the typed error and what to do next.`,
       };
   }
 }

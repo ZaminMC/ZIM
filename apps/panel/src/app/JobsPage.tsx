@@ -1,4 +1,4 @@
-// zaminpanel://jobs/ — the jobs page (§73, ADR-0026). Every long-running
+// zim://jobs/ — the jobs page (§73, ADR-0026). Every long-running
 // daemon operation — backups, restores, publishes, plugin and Java
 // installs — is a Job with an id, a state, a progress, and a cancel verb,
 // and the daemon is the authoritative record: it keeps the newest 50

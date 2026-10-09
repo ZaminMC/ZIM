@@ -1,11 +1,11 @@
 # Release (development channel): build the installers, sign them with the
 # updater key, and publish them on THIS repo's releases page
-# (ZaminMC/ZaminPanel) as VERSIONED PRE-RELEASES — vMAJOR.MINOR.PATCH
+# (ZaminMC/ZIM) as VERSIONED PRE-RELEASES — vMAJOR.MINOR.PATCH
 # (ADR-0029) — while the fixed `dev` tag keeps its role as the update
 # manifest anchor: the one URL the installed fleet polls
 # (…/releases/download/dev/latest.json), rewritten in place every release.
 # (Revision: the repo is public now, so the channel lives here — the
-# separate ZaminPanel-Releases repo is retired, its history 2026-10-08.)
+# separate ZIM-Releases repo is retired, its history 2026-10-08.)
 #
 # Version discipline (ADR-0029):
 #   v0.1.0  first usable engine          v1.0.0  production release
@@ -51,7 +51,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASES_REPO: ZaminMC/ZaminPanel
+  RELEASES_REPO: ZaminMC/ZIM
   ANCHOR_TAG: dev
 
 jobs:
@@ -78,7 +78,7 @@ jobs:
       - id: resolve
         env:
           VERSION_INPUT: ${{ inputs.version }}
-          RELEASES_REPO: ZaminMC/ZaminPanel
+          RELEASES_REPO: ZaminMC/ZIM
           ANCHOR_TAG: dev
         run: |
           set -euo pipefail
@@ -117,7 +117,7 @@ jobs:
       # recent history; a changelog that lies is worse than none.
       - id: changelog
         env:
-          RELEASES_REPO: ZaminMC/ZaminPanel
+          RELEASES_REPO: ZaminMC/ZIM
         run: |
           set -euo pipefail
           PREV=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
@@ -208,7 +208,7 @@ jobs:
         run: |
           # The Tauri host builds into its own target dir (ADR-0008); the
           # portable payload wants all four binaries in one place.
-          cp apps/panel/src-tauri/target/release/zamin-panel target/release/zamin-panel
+          cp apps/panel/src-tauri/target/release/zim target/release/zim
 
       - name: Portable archive
         run: ./scripts/packaging/make-portable.sh target/release "$VERSION" bundle-out
@@ -222,7 +222,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zaminpanel-linux-${{ env.VERSION }}
+          name: zim-linux-${{ env.VERSION }}
           path: |
             bundle-out/*.AppImage
             bundle-out/*.AppImage.sig
@@ -285,7 +285,7 @@ jobs:
         run: |
           # The Tauri host builds into its own target dir (ADR-0008); the
           # portable payload wants all four binaries in one place.
-          cp apps/panel/src-tauri/target/release/zamin-panel.exe target/release/zamin-panel.exe
+          cp apps/panel/src-tauri/target/release/zim.exe target/release/zim.exe
 
       - name: Portable archive
         run: ./scripts/packaging/make-portable.ps1 -BinsDir target/release -Version $env:VERSION -OutDir bundle-out
@@ -302,7 +302,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zaminpanel-windows-${{ env.VERSION }}
+          name: zim-windows-${{ env.VERSION }}
           path: |
             bundle-out/*.exe
             bundle-out/*.sig
@@ -365,7 +365,7 @@ jobs:
           # (the first feat/fix line), not the whole list — the release
           # page is where the full changelog lives.
           HEADLINE=$(echo "$CHANGELOG" | grep -m1 -E '^(feat|fix)' || true)
-          NOTES="ZaminPanel v$VERSION (development pre-release) from commit $GITHUB_SHA (develop)."
+          NOTES="ZIM v$VERSION (development pre-release) from commit $GITHUB_SHA (develop)."
           if [ -n "$HEADLINE" ]; then NOTES="$NOTES — $HEADLINE"; fi
           node scripts/packaging/make-updater-json.mjs \
             --version "$VERSION" \
@@ -389,7 +389,7 @@ jobs:
           export GH_REPO="$RELEASES_REPO"
           gh release create "$RELEASE_TAG" \
             --target "$GITHUB_SHA" \
-            --title "ZaminPanel v$VERSION — development pre-release" \
+            --title "ZIM v$VERSION — development pre-release" \
             --notes-file changelog.md \
             --prerelease \
             assets/* latest.json

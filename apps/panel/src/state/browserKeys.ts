@@ -2,7 +2,7 @@
 // (chrome/app/chrome_command_ids.h) ported as behavior, not code. Each
 // entry names the IDC it implements so the conformance test can be read
 // against the upstream table; the destination model beneath it stays
-// ZaminPanel's (§58) — Ctrl+T opens a new-tab page, not a web page.
+// ZIM's (§58) — Ctrl+T opens a new-tab page, not a web page.
 //
 // This module is pure: it decides what a key event MEANS and returns a
 // verb; the caller (App's window listener) executes it against the
@@ -51,7 +51,7 @@ export function handleBrowserKey(
   const lower = key.toLowerCase();
 
   if (mod && !event.shiftKey && !event.altKey && lower === "k") {
-    // IDC_FOCUS_PAGE_ACTIONS… the command palette is ZaminPanel's own
+    // IDC_FOCUS_PAGE_ACTIONS… the command palette is ZIM's own
     // mapping of "the browser's command surface" (§50); the founder's
     // Ctrl+K keeps it.
     api.togglePalette();
@@ -64,7 +64,7 @@ export function handleBrowserKey(
     return { handled: true };
   }
   if (mod && !event.shiftKey && !event.altKey && lower === "t") {
-    // IDC_NEW_TAB (Ctrl+T) — a ZaminPanel new-tab page (§6).
+    // IDC_NEW_TAB (Ctrl+T) — a ZIM new-tab page (§6).
     api.newTab();
     return { handled: true };
   }

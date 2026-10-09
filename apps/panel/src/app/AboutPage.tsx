@@ -1,4 +1,4 @@
-// zaminpanel://about/ — the about page (§58, ADR-0026). The version the
+// zim://about/ — the about page (§58, ADR-0026). The version the
 // host actually answered for, the update channel the install rides, the
 // daemon on the other end of the wire, and the rooms the panel has not
 // built yet — stated as reserved, not faked (§82). No telemetry, no
@@ -16,7 +16,7 @@ export function AboutPage() {
   return (
     <div className={styles.page}>
       <header className={styles.head}>
-        <h1 className={styles.title}>ZaminPanel</h1>
+        <h1 className={styles.title}>ZIM</h1>
         <p className={styles.tagline}>A browser for Minecraft servers.</p>
       </header>
 
@@ -75,7 +75,7 @@ export function AboutPage() {
           and the audit trail (§65 — one authoritative backend).
         </p>
         <p className={styles.body}>
-          Found something broken or missing? <strong>Feedback</strong> (zaminpanel://feedback/)
+          Found something broken or missing? <strong>Feedback</strong> (zim://feedback/)
           files a real issue with the builders.
         </p>
       </section>

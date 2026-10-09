@@ -1,11 +1,11 @@
 #!/bin/sh
-# install-linux.sh — per-user, no-root XDG install for ZaminPanel (ADR review
+# install-linux.sh — per-user, no-root XDG install for ZIM (ADR review
 # §12.2: no root for normal operation, XDG everywhere, .desktop integration).
 #
 # Payload layout (exactly what the portable archive contains):
-#   bin/zamin-panel  bin/zamind  bin/zamin
-#   share/applications/mc.zamin.panel.desktop
-#   share/icons/hicolor/...        (mc.zamin.panel.png / .svg)
+#   bin/zim  bin/zamind  bin/zamin
+#   share/applications/mc.zamin.zim.desktop
+#   share/icons/hicolor/...        (mc.zamin.zim.png / .svg)
 #
 # Usage:
 #   install-linux.sh <payload-dir>         install (idempotent, upgrades too)
@@ -20,20 +20,20 @@
 #   install-linux.sh --prefix DIR          install root (default: $HOME/.local)
 #
 # Installed pieces (prefix $P, data $D = XDG_DATA_HOME, config $C = XDG_CONFIG_HOME):
-#   $P/bin/zamin-panel  $P/bin/zamind  $P/bin/zamin  $P/bin/zaminagent
-#   $D/applications/mc.zamin.panel.desktop        (Exec rewritten to $P/bin/zamin-panel)
-#   $D/icons/hicolor/**/mc.zamin.panel.*
-#   $C/autostart/mc.zamin.panel.desktop           (only via --autostart on)
+#   $P/bin/zim  $P/bin/zamind  $P/bin/zamin  $P/bin/zaminagent
+#   $D/applications/mc.zamin.zim.desktop        (Exec rewritten to $P/bin/zim)
+#   $D/icons/hicolor/**/mc.zamin.zim.*
+#   $C/autostart/mc.zamin.zim.desktop           (only via --autostart on)
 #   $C/systemd/user/mc.zamin.daemon.service       (only via --service on)
 #   $C/systemd/user/mc.zamin.agent.service        (only via --agent-service on)
 #
-# Never touched: daemon-owned state (XDG data zaminpanel/ tree, server roots).
+# Never touched: daemon-owned state (XDG data zim/ tree, server roots).
 
 set -eu
 
-APP=mc.zamin.panel
-PANEL_BIN=zamin-panel
-BINS="zamin-panel zamind zamin zaminagent"
+APP=mc.zamin.zim
+PANEL_BIN=zim
+BINS="zim zamind zamin zaminagent"
 
 prefix="${HOME}/.local"
 payload=""
@@ -112,8 +112,8 @@ if [ "$action" = "autostart" ]; then
         {
             echo "[Desktop Entry]"
             echo "Type=Application"
-            echo "Name=ZaminPanel"
-            echo "Comment=ZaminPanel starts with your session so the daemon is ready"
+            echo "Name=ZIM"
+            echo "Comment=ZIM starts with your session so the daemon is ready"
             echo "Exec=${prefix}/bin/${PANEL_BIN}"
             echo "Icon=${APP}"
             echo "Terminal=false"
@@ -142,7 +142,7 @@ write_unit() {
     {
         echo "[Unit]"
         echo "Description=$2"
-        echo "Documentation=https://github.com/ZaminMC/ZaminPanel"
+        echo "Documentation=https://github.com/ZaminMC/ZIM"
         echo "StartLimitIntervalSec=60"
         echo "StartLimitBurst=4"
         echo ""
@@ -183,12 +183,12 @@ toggle_service() {
 }
 
 if [ "$action" = "service" ]; then
-    toggle_service "$service" "$SERVICE_UNIT" zamind "zamind — the ZaminPanel daemon"
+    toggle_service "$service" "$SERVICE_UNIT" zamind "zamind — the ZIM daemon"
     exit 0
 fi
 
 if [ "$action" = "agent-service" ]; then
-    toggle_service "$service" "$AGENT_UNIT" zaminagent "zaminagent — the ZaminPanel remote agent"
+    toggle_service "$service" "$AGENT_UNIT" zaminagent "zaminagent — the ZIM remote agent"
     exit 0
 fi
 
@@ -247,7 +247,7 @@ command -v update-desktop-database >/dev/null 2>&1 &&
 command -v gtk-update-icon-cache >/dev/null 2>&1 &&
     gtk-update-icon-cache -q -t -f "${DATA}/icons/hicolor" 2>/dev/null || true
 
-info "installed: ${prefix}/bin/{zamin-panel,zamind,zamin,zaminagent}"
+info "installed: ${prefix}/bin/{zim,zamind,zamin,zaminagent}"
 info "desktop:   ${DATA}/applications/${APP}.desktop"
 info "icons:     ${DATA}/icons/hicolor (theme ${APP})"
 info "autostart stays off until: install-linux.sh --autostart on"

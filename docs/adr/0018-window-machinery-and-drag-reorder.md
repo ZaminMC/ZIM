@@ -24,7 +24,7 @@ scoping preamble still holds: the AI part stays ignored, its rooms kept.
 ### Every browsing context owns its strip; the identity is minted once per boot
 
 The panel is one SPA that can live in several windows at once, so the tab
-store's persistence is keyed **per window**: `zamin-panel.tabs@<windowId>`.
+store's persistence is keyed **per window**: `zim.tabs@<windowId>`.
 The identity is minted once per boot into `sessionStorage` — it survives a
 reload (the strip must survive it too) and dies with the context. The hard
 part is telling a *reload* from a *birth that was handed a copy of the
@@ -37,7 +37,7 @@ id is **reused** — losing a strip on reload is the one unrecoverable mistake
 this module refuses to risk. A denied sessionStorage mints in-memory: the
 window works; its strip just does not outlive it.
 
-A registry (`zamin-panel.windows`) records each window's last-active time.
+A registry (`zim.windows`) records each window's last-active time.
 Boot prunes windows idle past two weeks and deletes their strips; a torn
 registry is rebuilt and prunes nothing. Boot also forces one persist write so
 a window that boots and reloads without touching anything still finds its own
@@ -48,7 +48,7 @@ rather than stealing the same tabs.
 ### The §50 move is a handoff, not a close
 
 `moveToNewWindow` writes a handoff slot keyed by a fresh handoff id
-(`zamin-panel.tab-handoff:<id>` — keyed, because two moves can be in flight
+(`zim.tab-handoff:<id>` — keyed, because two moves can be in flight
 and a slot must never be claimed by the wrong child), then removes the tab
 from the origin strip. **A move is not a close**: the tab enters no
 recently-closed memory, because it still exists — in the window that is about

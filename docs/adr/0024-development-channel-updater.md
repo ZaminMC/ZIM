@@ -10,7 +10,7 @@ and automatic updates built in. Three facts shape the decision:
 
 - **A private repo cannot carry a public channel.** Release assets and
   their URLs need anonymous reads; everything inside
-  `ZaminMC/ZaminPanel` needs auth. The updater's endpoint is fetched by
+  `ZaminMC/ZIM` needs auth. The updater's endpoint is fetched by
   users who do not exist yet.
 - **The updater must not trust its channel.** A build that replaces
   itself arrives over the network; without signatures, a compromised
@@ -25,11 +25,11 @@ and automatic updates built in. Three facts shape the decision:
 ### The channel lives on the code repo itself
 
 > **Revision (2026-10-08):** the repo went public, and the separate channel
-> repo is retired — the channel lives on `ZaminMC/ZaminPanel`'s own releases
+> repo is retired — the channel lives on `ZaminMC/ZIM`'s own releases
 > page, authenticated by the workflow's `GITHUB_TOKEN`. The original
 > separate-repo decision is kept below for the record.
 
-`ZaminMC/ZaminPanel` holds exactly what the channel needs: the
+`ZaminMC/ZIM` holds exactly what the channel needs: the
 NSIS installer, the AppImage, the portable archives, and the updater's
 `latest.json` — published under one fixed `dev` tag that every release
 run rewrites (the manifest, notes, and versioned installers replaced).
@@ -38,7 +38,7 @@ The workflow that publishes rides the
 authenticates with the run's own `GITHUB_TOKEN`.
 
 The fixed tag is deliberate: the updater endpoint is a constant —
-`https://github.com/ZaminMC/ZaminPanel/releases/download/dev/latest.json`
+`https://github.com/ZaminMC/ZIM/releases/download/dev/latest.json`
 — baked into `tauri.conf.json`, so installs never reconfigure and the
 check is one stable URL. "Latest" release aliases would not work here
 (GitHub excludes pre-releases from them, and a dev channel is nothing
@@ -95,7 +95,7 @@ verbs).
 ## Consequences
 
 - Users install from
-  `https://github.com/ZaminMC/ZaminPanel/releases` (dev tag,
+  `https://github.com/ZaminMC/ZIM/releases` (dev tag,
   pre-release flagged) and updates arrive without touching GitHub.
 - The release lane reuses the bundle lane's build steps but skips its
   host-crate gates: `bundle.yml` still runs clippy + host tests on the

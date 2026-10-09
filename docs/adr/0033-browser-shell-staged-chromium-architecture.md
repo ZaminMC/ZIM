@@ -33,7 +33,7 @@ Key facts from the source inspection:
   attribution and without Chrome branding.
 - CEF ships content, not chrome. Electron ships content, not chrome. Only
   the fork ships chrome — at the cost of owning Chromium security cadence,
-  a build farm, and a 100–200 MB binary before any ZaminPanel feature.
+  a build farm, and a 100–200 MB binary before any ZIM feature.
 
 ## Decision
 

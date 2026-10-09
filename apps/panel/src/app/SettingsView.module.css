@@ -1,5 +1,5 @@
 /* Settings (§39): server-specific identity and behavior, separate from
- * the global ZaminPanel settings. What the model has today (name,
+ * the global ZIM settings. What the model has today (name,
  * backup retention) is editable; what it does not have yet (icon,
  * restart/crash policy, log retention) is stated as reserved — §82's
  * honesty rule, the same pattern as the tab strip's reserved rooms. */

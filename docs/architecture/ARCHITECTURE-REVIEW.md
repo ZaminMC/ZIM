@@ -1,6 +1,6 @@
-# ZaminPanel — Architecture Review
+# ZIM — Architecture Review
 
-*Date: 2026-10-05 · Scope: pre-implementation review of the ZaminPanel / ZaminCLI / ZaminCore product plan (Windows + Linux first-class, macOS later, remote agent later).*
+*Date: 2026-10-05 · Scope: pre-implementation review of the ZIM / ZaminCLI / ZaminCore product plan (Windows + Linux first-class, macOS later, remote agent later).*
 
 ---
 
@@ -62,7 +62,7 @@ Core ships as a resident headless process: **`zamind`**. Panel and CLI are both 
 
 ```
 ┌──────────────┐   ┌───────────┐
-│ ZaminPanel   │   │ ZaminCLI  │        thin clients
+│ ZIM   │   │ ZaminCLI  │        thin clients
 └──────┬───────┘   └─────┬─────┘
        │   JSON-RPC over IPC (named pipe / UDS)
        └────────┬────────┘
@@ -85,7 +85,7 @@ What this buys, concretely:
 
 Client UX implications to design now:
 
-- Panel/CLI **ensure** the daemon is running (spawn it if not, with a version handshake). This must be invisible — double-clicking ZaminPanel must never show a daemon error.
+- Panel/CLI **ensure** the daemon is running (spawn it if not, with a version handshake). This must be invisible — double-clicking ZIM must never show a daemon error.
 - Daemon idles down per policy (stay alive while any server runs; optional "keep alive" setting; default exit when idle and nothing is supervised — or keep resident, configurable, and decide by feel in Phase 1).
 - Single-instance enforcement: named mutex (Windows) / lockfile with liveness check in `XDG_RUNTIME_DIR` (Linux).
 
@@ -103,7 +103,7 @@ The honest cost of the daemon: its own lifecycle becomes a correctness surface (
 The plan's `packages/{protocol,ui,shared}` is vague, and `shared` is a junk drawer waiting to happen. Trim to:
 
 ```
-ZaminPanel/
+ZIM/
 ├── Cargo.toml                     # workspace
 ├── crates/
 │   ├── zamin-protocol/            # message types, envelope, versioning. No OS deps, no I/O.

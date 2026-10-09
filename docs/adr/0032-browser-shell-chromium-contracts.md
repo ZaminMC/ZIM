@@ -7,7 +7,7 @@
 The founder's P0 directive: the shell must be **browser-grade, not a
 React app pretending to be a browser**. Chromium's source is the
 explicit reference; the order is inspect → identify reusable pieces →
-determine what adapts → what stays ZaminPanel-specific → integrate the
+determine what adapts → what stays ZIM-specific → integrate the
 highest-value infrastructure first.
 
 ## What was inspected (Chromium)
@@ -41,7 +41,7 @@ lives in:
 ## The constraint, stated honestly
 
 Chromium's UI layer (`views/`) is compiled C++ bound to aura/mus. It
-cannot be embedded in ZaminPanel's renderer, which is the Tauri webview
+cannot be embedded in ZIM's renderer, which is the Tauri webview
 (WebView2 — itself Chromium — on Windows, WebKitGTK on Linux). Embedding
 real Chromium UI would mean replacing Tauri with CEF/Electron and
 rewriting every room (ZaminCore wiring, the protocol client, the
@@ -60,9 +60,9 @@ never fake what the host provides.** Concretely, three lanes:
    function; `browserKeys.test.ts` asserts each chord against the
    upstream behavior, including the field rules (Ctrl+L/F6/Alt+D work
    inside an input; Ctrl+D inside an input stays the editor's). The
-   verbs execute against ZaminPanel's destination model — Ctrl+T opens
+   verbs execute against ZIM's destination model — Ctrl+T opens
    a new-tab page (§6), Ctrl+9 selects the last tab — browser chords,
-   ZaminPanel nouns.
+   ZIM nouns.
 
 2. **The omnibox rules are law, progressively.** The address bar's
    dialect classification already runs before resolution
@@ -81,8 +81,8 @@ never fake what the host provides.** Concretely, three lanes:
    window) and the context menu's verb set — each lands as
    model-state + conformance test, never as strip-local state.
 
-What stays ZaminPanel-specific, permanently: destinations and
-`zaminpanel://` URLs (§58), server tabs and their identity (§61),
+What stays ZIM-specific, permanently: destinations and
+`zim://` URLs (§58), server tabs and their identity (§61),
 Dutchmen, the feedback lane, extensions, publishing, Zamin Protocol.
 The product is a browser redesigned around Minecraft infrastructure —
 the browser's *discipline*, with the panel's own nouns.

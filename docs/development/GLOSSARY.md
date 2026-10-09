@@ -1,4 +1,4 @@
-# ZaminPanel Glossary
+# ZIM Glossary
 
 *One name per concept. When a new concept appears, add it here in the same PR. Review rejects synonyms on sight.*
 
@@ -51,7 +51,7 @@
 - Protocol fields referencing the identity are always `serverId` (JSON) / `server_id` (Rust). Never bare `id` in a message that contains other entities.
 - Timestamps end in `Ms`. Booleans read as predicates (`eulaAccepted`).
 - Error codes: `SCREAMING_SNAKE_CASE` with domain prefixes (see protocol spec §4).
-- Crate and binary names: `zamin-protocol`, `zamin-ipc`, `zamin-core`, `zamind`, `zamin`, plus `apps/panel`. The word "ZaminPanel" names the product and the GUI app, not the whole repository — the repo is the project home of all three.
+- Crate and binary names: `zamin-protocol`, `zamin-ipc`, `zamin-core`, `zamind`, `zamin`, plus `apps/panel`. The word "ZIM" names the product and the GUI app, not the whole repository — the repo is the project home of all three.
 
 ## Process for changes
 

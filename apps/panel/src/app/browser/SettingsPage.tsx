@@ -1,4 +1,4 @@
-// zaminpanel://settings/ (ADR-0015): an honest internal page. What exists
+// zim://settings/ (ADR-0015): an honest internal page. What exists
 // is rendered with its real machinery (connections, the daemon identity,
 // the update lane); what is planned is named as planned (§82: unavailable,
 // never pretend).
@@ -20,7 +20,7 @@ import styles from "./SettingsPage.module.css";
 const RESERVED: Array<{ name: string; note: string }> = [
   { name: "Dutchmen", note: "The agent side of the panel — its rooms (new tab, chats) are reserved." },
   { name: "Tab groups", note: "Collapsible groups in the strip." },
-  { name: "Extensions", note: "Typed addons with declared permissions — the inventory is live at zaminpanel://extensions/; contributions are reserved." },
+  { name: "Extensions", note: "Typed addons with declared permissions — the inventory is live at zim://extensions/; contributions are reserved." },
   { name: "Publishing", note: "Package and publish a server through provider APIs." },
 ];
 
@@ -208,8 +208,8 @@ function UpdatesSection() {
   const busy = phase.kind === "downloading";
   const checkDisabled = busy || phase.kind === "ready";
   const versionLabel = installedVersion
-    ? `ZaminPanel v${installedVersion}`
-    : "ZaminPanel — development (browser)";
+    ? `ZIM v${installedVersion}`
+    : "ZIM — development (browser)";
 
   return (
     <section className={styles.section} aria-label="Updates">
@@ -291,11 +291,11 @@ function UpdatesSection() {
             public{" "}
             <a
               className={styles.channelLink}
-              href="https://github.com/ZaminMC/ZaminPanel/releases"
+              href="https://github.com/ZaminMC/ZIM/releases"
               target="_blank"
               rel="noreferrer"
             >
-              ZaminPanel releases
+              ZIM releases
             </a>{" "}
             page, signed before they are offered.
           </span>

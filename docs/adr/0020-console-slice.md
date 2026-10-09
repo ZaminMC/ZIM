@@ -66,13 +66,13 @@ obligations:
 ### §27: the dedicated console tab is a typed destination
 
 `{ kind: "console", serverId }` joins the closed destination set — URL
-`zaminpanel://console/<id>`, tab key `console:<id>` (§61: navigating
+`zim://console/<id>`, tab key `console:<id>` (§61: navigating
 again focuses, never duplicates). It rests at its internal URL, not the
-server's join address — it is a ZaminPanel page. The tab strip titles it
+server's join address — it is a ZIM page. The tab strip titles it
 "<name> console" and wears the terminal icon. Every tab operator works on
 it unchanged (duplicate, pin, group, drag, §50 move-to-window, reload)
 because it *is* a tab, per §27's "it should still behave as a normal
-ZaminPanel tab". The workspace console's bar carries the §27 icon; the
+ZIM tab". The workspace console's bar carries the §27 icon; the
 dedicated tab does not carry it again.
 
 ### Budgets move deliberately, or they do not move

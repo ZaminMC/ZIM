@@ -20,7 +20,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.77"
 license = "Apache-2.0"
-repository = "https://github.com/ZaminMC/ZaminPanel"
+repository = "https://github.com/ZaminMC/ZIM"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

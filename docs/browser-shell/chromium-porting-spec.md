@@ -145,11 +145,11 @@ Level B (already half-built in ADR-0032 work; re-base onto these IDs).
 ## 8. Attribution ledger (license compliance)
 
 - Every ported file header: `// Ported from chromium/chromium <path>@<rev>
-  under BSD-3-Clause. Ported 2026-10 by ZaminPanel contributors.`
+  under BSD-3-Clause. Ported 2026-10 by ZIM contributors.`
 - `CHROMIUM-PORTS.md` at repo root: table of ports ↔ upstream paths ↔
   revision. Generated CREDITS ships in the NSIS/AppImage payloads.
 - No Chrome artwork, icons, or trademarks are ported. All chrome visuals
-  are ZaminPanel-authored to the §1 metrics.
+  are ZIM-authored to the §1 metrics.
 
 ## 9. Non-goals for Phase 1
 

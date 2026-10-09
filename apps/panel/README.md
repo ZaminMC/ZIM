@@ -1,4 +1,4 @@
-# ZaminPanel — desktop UI
+# ZIM — desktop UI
 
 The Panel is a Tauri 2 app (ADR-0003): a thin Rust host that bridges the
 webview ⇄ daemon transport, and a TypeScript UI that owns the protocol

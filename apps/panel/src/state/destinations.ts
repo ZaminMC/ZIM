@@ -4,7 +4,7 @@
 // not interchangeable — so destinations are a closed type, never strings.
 //
 // The address bar understands three dialects, in the founder's own order:
-//   • internal ZaminPanel URLs (zaminpanel://servers/)
+//   • internal ZIM URLs (zim://servers/)
 //   • server join addresses (localhost:25565, 0:25565, box.example.com:25565)
 //   • free text, which is a discovery query, not a URL
 // The Dutchmen conversation address (dutchmen:(id)) has its room reserved
@@ -139,27 +139,27 @@ export function tabKey(destination: Destination): TabKey {
 export function destinationUrl(destination: Destination): string {
   switch (destination.kind) {
     case "servers":
-      return "zaminpanel://servers/";
+      return "zim://servers/";
     case "new":
-      return "zaminpanel://new";
+      return "zim://new";
     case "settings":
-      return "zaminpanel://settings/";
+      return "zim://settings/";
     case "jobs":
-      return "zaminpanel://jobs/";
+      return "zim://jobs/";
     case "audit":
-      return "zaminpanel://audit/";
+      return "zim://audit/";
     case "about":
-      return "zaminpanel://about/";
+      return "zim://about/";
     case "feedback":
-      return "zaminpanel://feedback/";
+      return "zim://feedback/";
     case "extensions":
-      return "zaminpanel://extensions/";
+      return "zim://extensions/";
     case "downloads":
-      return "zaminpanel://downloads/";
+      return "zim://downloads/";
     case "server":
-      return `zaminpanel://server/${destination.serverId}`;
+      return `zim://server/${destination.serverId}`;
     case "console":
-      return `zaminpanel://console/${destination.serverId}`;
+      return `zim://console/${destination.serverId}`;
     case "missing":
       return destination.url;
   }
@@ -187,12 +187,12 @@ export function restingAddress(
     destination.kind === "extensions" ||
     destination.kind === "downloads"
   ) {
-    // The evidence pages rest at their internal URLs — they are ZaminPanel
+    // The evidence pages rest at their internal URLs — they are ZIM
     // pages, not a server's join address.
     return destinationUrl(destination);
   }
   if (destination.kind === "console") {
-    // The console tab rests at its internal URL: it is a ZaminPanel page,
+    // The console tab rests at its internal URL: it is a ZIM page,
     // not the server's join address (that stays the server tab's rest).
     return destinationUrl(destination);
   }
@@ -228,7 +228,7 @@ export type AddressRequest =
   | { kind: "join"; host?: string; port: number }
   | { kind: "query"; text: string };
 
-const INTERNAL_URL = /^zaminpanel:\/\/([^/?#]+)\/?(?:([^/?#]+))?$/;
+const INTERNAL_URL = /^zim:\/\/([^/?#]+)\/?(?:([^/?#]+))?$/;
 /** `host:port`, `:port`, or a bare port — the join dialect. A host may be
  *  an IPv4, a hostname, or a bracketed IPv6; the port is 1-65535. */
 const JOIN = /^(?:\[?([a-zA-Z0-9._-]+|\[[0-9a-fA-F:]+\])\]?)?:(\d{1,5})$|^\[?([a-zA-Z0-9._-]+)\]?$/;
@@ -361,7 +361,7 @@ export function destinationLabel(destination: Destination, entries: ServerEntry[
     case "audit":
       return "Audit log";
     case "about":
-      return "About ZaminPanel";
+      return "About ZIM";
     case "feedback":
       return "Feedback";
     case "extensions":

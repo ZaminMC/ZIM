@@ -1,4 +1,4 @@
-# ZaminPanel
+# ZIM
 
 A polished desktop and CLI workspace for running, managing, and developing Minecraft servers.
 
@@ -170,7 +170,7 @@ view, right-click changes the mode in a contextual menu, and the tint
 answers the mode (red / yellow / default); an empty mode says so instead of
 pretending. The §26 composer sends over the ordinary stdin path, disabled
 honestly while the server is not running. And §27's icon hands the console
-a dedicated tab — `zaminpanel://console/<id>`, one per server, full height,
+a dedicated tab — `zim://console/<id>`, one per server, full height,
 every tab operator (duplicate, pin, group, drag, move to window) working on
 it unchanged. The terminal emulator is gone: the heaviest dependency in the
 panel was the wrong shape for a filterable, copyable console, and the file
@@ -231,7 +231,7 @@ never claim an outcome they cannot know.
 
 ## The browser shell
 
-ZaminPanel is a browser for Minecraft servers
+ZIM is a browser for Minecraft servers
 ([ADR-0015](docs/adr/0015-browser-shell.md), the
 [founder vision](docs/founder-vision.md) made real). The sidebar is gone:
 a tab strip wears every open destination — a server tab's favicon is its
@@ -242,14 +242,14 @@ chips that ARE typed destinations — a click inherits singleton focus, a
 Ctrl+click opens a new tab, and the address bar's star adds or removes
 the current destination, one bookmark per destination, shared across
 windows, hidden when empty. Destinations are a closed type,
-never strings: `zaminpanel://servers/` (the fleet), `zaminpanel://new`
-(discovery), `zaminpanel://settings/`, `zaminpanel://jobs/`,
-`zaminpanel://audit/`, `zaminpanel://about/`
+never strings: `zim://servers/` (the fleet), `zim://new`
+(discovery), `zim://settings/`, `zim://jobs/`,
+`zim://audit/`, `zim://about/`
 ([ADR-0026](docs/adr/0026-evidence-pages-strip-verbs.md)), and one tab
 per server. Identity discipline holds everywhere: navigating to an open
 destination focuses its tab, never duplicates it.
 
-The address bar speaks three dialects: internal `zaminpanel://` URLs (an
+The address bar speaks three dialects: internal `zim://` URLs (an
 unknown page renders an honest "No such page"), join addresses resolved
 by port with host agreement — `localhost:25565`, `0:25565`,
 `box.example.com:25565`; a miss says so and navigates nowhere — and free
@@ -285,7 +285,7 @@ menu carries.
 
 And the panel is a multi-window browser
 ([ADR-0018](docs/adr/0018-window-machinery-and-drag-reorder.md)):
-**Move tab to new window** (§50) hands the tab to a second ZaminPanel
+**Move tab to new window** (§50) hands the tab to a second ZIM
 window through a claimed-once handoff slot — a move, not a close; the
 server behind it stays daemon-owned and untouched, because a UI window
 is only a client. Every window owns its strip under its own storage
@@ -312,7 +312,7 @@ never a fake badge (§82). The palette carries all three as keyboard
 commands.
 
 **Feedback** ([ADR-0028](docs/adr/0028-feedback-lane.md)) is a typed
-destination too — `zaminpanel://feedback/`, reachable from the ⋮ menu,
+destination too — `zim://feedback/`, reachable from the ⋮ menu,
 the palette, and the about page. The operator types what happened and
 pastes a screenshot; the page says which route it will take before
 anything leaves. With a GitHub token configured in Settings (masked,
@@ -349,7 +349,7 @@ folder under the daemon's `extensions/` data dir carrying one
 claims from a closed, deny-by-default vocabulary (`contribution:*` for
 what it may add once the contribution model lands, `data:*` for the
 machine state it may touch). Nothing in the folder is executed.
-`zaminpanel://extensions/` (and `zamin extensions`) renders the
+`zim://extensions/` (and `zamin extensions`) renders the
 inventory: valid manifests with their claims, and every folder that
 could not be read named with its reason — a broken manifest is
 evidence, never a silent skip. The execution and contribution model is
@@ -384,7 +384,7 @@ integration harnesses find their binaries.
 
 Windows ships as a per-user NSIS installer or a portable zip; Linux as an
 AppImage or a portable tar.gz that doubles as the installer payload. Every
-layout carries all four binaries — `zamin-panel`, `zamind`, `zamin`,
+layout carries all four binaries — `zim`, `zamind`, `zamin`,
 `zaminagent` — and the panel brings the daemon up on first contact
 (ADR-0010).
 
@@ -392,13 +392,13 @@ Linux, no root, XDG everywhere:
 
 ```sh
 # AppImage: run directly, or integrate it:
-./ZaminPanel_0.1.0_x86_64.AppImage
+./ZIM_0.1.0_x86_64.AppImage
 
 # Portable tree: run in place…
-tar xf ZaminPanel-0.1.0-linux-x86_64.tar.gz && ./zaminpanel-0.1.0/bin/zamin-panel
+tar xf ZIM-0.1.0-linux-x86_64.tar.gz && ./zim-0.1.0/bin/zim
 # …or install it (bins + launcher entry + icons; --uninstall reverses;
 # --autostart on starts the panel at login):
-./zaminpanel-0.1.0/install-linux.sh ./zaminpanel-0.1.0
+./zim-0.1.0/install-linux.sh ./zim-0.1.0
 ```
 
 Notifications follow one rule — crash and job completion, only while the
@@ -410,7 +410,7 @@ lanes; the remaining §23 proof (clean VM installs) is manual by design.
 ### The development channel (updates)
 
 Installers for the **development** line publish to the project's own
-[releases page](https://github.com/ZaminMC/ZaminPanel/releases) as
+[releases page](https://github.com/ZaminMC/ZIM/releases) as
 **versioned pre-releases** — `vMAJOR.MINOR.PATCH`, one entry per
 release, marked Pre-Release until v1.0.0 (ADR-0029). The versioning
 scheme is the founder's:
@@ -427,7 +427,7 @@ scheme is the founder's:
 The fixed `dev` tag remains the **manifest anchor**: the one URL the
 installed fleet polls, rewritten in place each release — same address,
 fresh contents (ADR-0029). The repo with the sources stays private; the
-channel is what users touch. Inside the panel, `zaminpanel://downloads/`
+channel is what users touch. Inside the panel, `zim://downloads/`
 (§58's reserved URL, live now the channel is versioned) lists the
 published pre-releases with their signed assets and marks the installed
 build; the CLI stays terminal-shaped and the channel page stays one
@@ -438,7 +438,7 @@ channel on boot and every six hours, verifies the minisign signature
 against the committed public key before anything is applied, and — with
 "Install updates automatically" on, the default — downloads and installs
 by itself. Only the restart asks. Turn either automatic off under
-`zaminpanel://settings/` → Updates; [Check for updates now] is there
+`zim://settings/` → Updates; [Check for updates now] is there
 for the impatient. A version is published once: the release workflow
 refuses a downgrade or a re-publish, because the updater compares
 versions and would (correctly) ignore one.
@@ -458,10 +458,10 @@ and expose the agent:
 ```sh
 # read what the agent printed at startup (also in journalctl --user):
 #   certificate fingerprint (pin this on remote clients): ab:cd:…
-#   token file "/home/you/.local/share/zaminpanel/agent/token"
+#   token file "/home/you/.local/share/zim/agent/token"
 
-P=./zaminpanel-0.1.0/install-linux.sh
-$P ./zaminpanel-0.1.0         # bins + launcher + icons (no root)
+P=./zim-0.1.0/install-linux.sh
+$P ./zim-0.1.0         # bins + launcher + icons (no root)
 $P --service on               # zamind as a systemd user unit
 $P --agent-service on         # zaminagent as a systemd user unit
 ```

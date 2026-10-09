@@ -23,7 +23,7 @@ describe("window identity", () => {
     resolveWindowIdentity(null);
     const first = currentWindowId();
     expect(first).toMatch(/^w/);
-    expect(sessionStorage.getItem("zamin-panel.window")).toBe(first);
+    expect(sessionStorage.getItem("zim.window")).toBe(first);
     // Same conditions again (no Navigation Timing in this DOM): the id
     // must not churn — a reload that lost its strip would be fatal.
     resolveWindowIdentity(null);
@@ -37,18 +37,18 @@ describe("window identity", () => {
     resolveWindowIdentity("#handoff=h-1");
     const child = currentWindowId();
     expect(child).not.toBe(origin);
-    expect(sessionStorage.getItem("zamin-panel.window")).toBe(child);
+    expect(sessionStorage.getItem("zim.window")).toBe(child);
   });
 
   it("a declared navigation birth mints fresh over a copied id", () => {
-    sessionStorage.setItem("zamin-panel.window", "w-copied");
+    sessionStorage.setItem("zim.window", "w-copied");
     vi.stubGlobal("performance", { getEntriesByType: () => [{ type: "navigate" }] });
     resolveWindowIdentity(null);
     expect(currentWindowId()).not.toBe("w-copied");
   });
 
   it("a declared reload reuses the stored id", () => {
-    sessionStorage.setItem("zamin-panel.window", "w-mine");
+    sessionStorage.setItem("zim.window", "w-mine");
     vi.stubGlobal("performance", { getEntriesByType: () => [{ type: "reload" }] });
     resolveWindowIdentity(null);
     expect(currentWindowId()).toBe("w-mine");

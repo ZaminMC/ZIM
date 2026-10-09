@@ -25,7 +25,7 @@ pub use templates::{stamp_template, template, templates, Template, DEFAULT_TEMPL
 
 /// Honest request identification: the Fill API asks clients to say who
 /// they are, and it is the right thing to do anyway.
-pub const USER_AGENT: &str = concat!("zaminpanel/", env!("CARGO_PKG_VERSION"));
+pub const USER_AGENT: &str = concat!("zim/", env!("CARGO_PKG_VERSION"));
 
 /// Which upstream a catalog row speaks. An enum of two, exactly as wide
 /// as the families that exist — a third family edits this type and adds

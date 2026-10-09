@@ -38,7 +38,7 @@ describe("AuditPage", () => {
       entries: [
         entryOf("server.start", {
           serverId: "demo",
-          client: { name: "zamin-panel", version: "0.1.0" },
+          client: { name: "zim", version: "0.1.0" },
         }),
         entryOf("backup.restore", {
           outcome: "BACKUP_NOT_FOUND",

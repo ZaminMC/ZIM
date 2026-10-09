@@ -31,7 +31,7 @@ eula=false
 ";
 
 const SERVER_PROPERTIES: &str = "\
-#Minecraft server properties (written by ZaminPanel's creation template)
+#Minecraft server properties (written by ZIM's creation template)
 #The daemon reconciles the port with the server's configured setting; edit either side honestly.
 server-port=25565
 motd=A Zamin-managed server

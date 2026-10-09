@@ -7,10 +7,10 @@
 //   node make-updater-json.mjs \
 //     --version 0.1.42 \
 //     --notes "Development build 0.1.42 from commit abc1234 (develop)." \
-//     --base-url "https://github.com/ZaminMC/ZaminPanel/releases/download/dev" \
+//     --base-url "https://github.com/ZaminMC/ZIM/releases/download/dev" \
 //     --out latest.json \
-//     --entry windows-x86_64=/path/to/ZaminPanel_0.1.42_x64-setup.exe \
-//     --entry linux-x86_64=/path/to/ZaminPanel_0.1.42_amd64.AppImage
+//     --entry windows-x86_64=/path/to/ZIM_0.1.42_x64-setup.exe \
+//     --entry linux-x86_64=/path/to/ZIM_0.1.42_amd64.AppImage
 //
 // Every entry's installer must sit next to a `<name>.sig` produced by the
 // Tauri bundler; the manifest inlines the signature. A missing signature

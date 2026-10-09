@@ -127,7 +127,7 @@ describe("ProtocolClient", () => {
     const client = await connectReady();
     const hello = transports[0]!.sentRequest("daemon.hello");
     expect(hello.params.protocol).toBe(1);
-    expect(hello.params.client.name).toBe("zamin-panel");
+    expect(hello.params.client.name).toBe("zim");
     expect(client.daemonInfo?.daemon.name).toBe("zamind");
 
     const statuses: string[] = [];

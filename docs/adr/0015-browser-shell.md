@@ -4,7 +4,7 @@
 
 ## Context
 
-The founder vision (`docs/founder-vision.md`) names the product identity precisely: **ZaminPanel is a browser for Minecraft servers**, and §84 makes the browser shell the first implementation target — tabs, address bar, new tab, discovery, server tab, status, console, end to end. The current shell is a sidebar-first control center, which the vision explicitly forbids ("do not build a sidebar-first admin panel"). The vision's own preamble also gives a scoping rule this ADR follows: **the AI part (Dutchmen) is explicitly ignored, but a room is kept for it.** Every Dutchmen-shaped surface — the new-tab transition (§8), chat tabs, "Ask Dutchmen" actions, the tool registry — stays out; the rooms it would occupy are documented here and in code, not faked (§82: no fake functionality).
+The founder vision (`docs/founder-vision.md`) names the product identity precisely: **ZIM is a browser for Minecraft servers**, and §84 makes the browser shell the first implementation target — tabs, address bar, new tab, discovery, server tab, status, console, end to end. The current shell is a sidebar-first control center, which the vision explicitly forbids ("do not build a sidebar-first admin panel"). The vision's own preamble also gives a scoping rule this ADR follows: **the AI part (Dutchmen) is explicitly ignored, but a room is kept for it.** Every Dutchmen-shaped surface — the new-tab transition (§8), chat tabs, "Ask Dutchmen" actions, the tool registry — stays out; the rooms it would occupy are documented here and in code, not faked (§82: no fake functionality).
 
 The panel already owns the hard parts the shell sits on: the wire (events, subscriptions, jobs), the servers store, the per-server workspace (console, logs, files, players, plugins, schedules, backups), the crash card, and the modals. What is missing is the frame: tabs as first-class objects, an address bar that speaks the product's dialects, and navigation history. The vision's identity discipline (§61) is the load-bearing rule: a tab, a server, a process, a directory, and an address are not interchangeable.
 
@@ -12,20 +12,20 @@ The panel already owns the hard parts the shell sits on: the wire (events, subsc
 
 ### Destinations are a closed type; tab identity derives from them
 
-`state/destinations.ts` (committed before this ADR's shell) is the typed core: a `Destination` is `servers | new | server(serverId)` — never a string, never a web page (§58). A tab's stable key derives from its destination on purpose: **one tab per server, one fleet page, one new-tab page.** Opening an already-open destination focuses its tab; navigation never duplicates identity. Every destination names itself with a canonical internal URL (`zaminpanel://servers/`, `zaminpanel://new`, `zaminpanel://server/<id>`).
+`state/destinations.ts` (committed before this ADR's shell) is the typed core: a `Destination` is `servers | new | server(serverId)` — never a string, never a web page (§58). A tab's stable key derives from its destination on purpose: **one tab per server, one fleet page, one new-tab page.** Opening an already-open destination focuses its tab; navigation never duplicates identity. Every destination names itself with a canonical internal URL (`zim://servers/`, `zim://new`, `zim://server/<id>`).
 
 ### The shell is the browser chrome; the content is a destination router
 
 The sidebar retires. The frame becomes: a **tab strip** (tabs, close buttons, new-tab button), a **tool bar** (back, forward, reload, the address bar, the system cluster), and the content area rendering exactly one destination:
 
-- `zaminpanel://servers/` — the fleet page: the registry as cards, honest counts, discovery. The former Dashboard, renamed and re-scoped.
-- `zaminpanel://new` — the new-tab page: a centered discovery input and the active servers with opening actions (§22's deterministic form). Free text here is a **discovery query over the registry** — substring over display name and id, case-insensitive. It is not a web search box and, for now, not a chat box either: the Dutchmen transition is a reserved room.
-- `zaminpanel://server/<id>` — the server workspace, unchanged underneath the new frame.
-- `zaminpanel://settings/` — an honest internal page: connections, daemon identity, and the reserved-rooms list. Unavailable things say so.
+- `zim://servers/` — the fleet page: the registry as cards, honest counts, discovery. The former Dashboard, renamed and re-scoped.
+- `zim://new` — the new-tab page: a centered discovery input and the active servers with opening actions (§22's deterministic form). Free text here is a **discovery query over the registry** — substring over display name and id, case-insensitive. It is not a web search box and, for now, not a chat box either: the Dutchmen transition is a reserved room.
+- `zim://server/<id>` — the server workspace, unchanged underneath the new frame.
+- `zim://settings/` — an honest internal page: connections, daemon identity, and the reserved-rooms list. Unavailable things say so.
 
 ### The address bar speaks three dialects, parsed before any store is consulted
 
-1. **Internal URLs** (`zaminpanel://…`) navigate to the named internal page; an unknown internal page is answered honestly ("no such page"), never silently as a search.
+1. **Internal URLs** (`zim://…`) navigate to the named internal page; an unknown internal page is answered honestly ("no such page"), never silently as a search.
 2. **Join addresses** (`localhost:25565`, `0:25565`, `box.example.com:25565`) resolve against the registry — **the port is the match; a typed host only agrees or disagrees** with this window's own reach (localhost for the local daemon, the box's host for a remote profile). Bind-all and loopback spellings (`0`, `0.0.0.0`, `127.0.0.1`, `::`) normalize to the same local server. An unresolvable join address is refused honestly at the bar — it does not navigate, and it does not pretend.
 3. **Free text** is a discovery query, executed on the new-tab page.
 

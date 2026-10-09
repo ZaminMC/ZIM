@@ -25,7 +25,7 @@ are the founder's, applied to our own lane:
 1. **Token route.** The operator configures a GitHub token in Settings
    (masked field, machine-local storage, verified against `GET /user`
    which names the account). Send POSTs to
-   `repos/ZaminMC/ZaminPanel/issues` with the `feedback` label; a 422
+   `repos/ZaminMC/ZIM/issues` with the `feedback` label; a 422
    about the label retries without it (the report still ships); 401 marks
    the sign-in invalid and keeps the text; 403 and other failures answer
    as typed notes with the report preserved. Success offers the issue
@@ -58,7 +58,7 @@ persisted settings), rendered masked in Settings, sent ONLY as the
 the suite. It never enters `composeBody`, the browser URL, an error
 note, or a log line.
 
-**Surface.** `zaminpanel://feedback/` is a typed destination: the ⋮ menu,
+**Surface.** `zim://feedback/` is a typed destination: the ⋮ menu,
 the palette, and the about page all reach it. The page is a lazy chunk;
 the Settings page moved onto the internal pages' lazy lane in the same
 slice, so the entry chunk ended lighter than it started.

@@ -1,13 +1,13 @@
 [package]
-name = "zamin-panel-host"
+name = "zim-host"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/ZaminMC/ZaminPanel"
-description = "ZaminPanel desktop shell: a thin Tauri 2 host bridging the webview to the daemon's local transport (ADR-0003)."
+repository = "https://github.com/ZaminMC/ZIM"
+description = "ZIM desktop shell: a thin Tauri 2 host bridging the webview to the daemon's local transport (ADR-0003)."
 
 [[bin]]
-name = "zamin-panel"
+name = "zim"
 path = "src/main.rs"
 
 [build-dependencies]

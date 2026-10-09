@@ -1,5 +1,5 @@
 // The bookmarks model — a structural port of components/bookmarks/
-// browser/bookmark_model.h, scoped to what ZaminPanel bookmarks today:
+// browser/bookmark_model.h, scoped to what ZIM bookmarks today:
 // permanent nodes are the BAR and OTHER; nodes are id-keyed; persistence
 // is a JSON codec file; edits are observable through the snapshot lane.
 // No folders yet (documented in the porting spec §6).
@@ -57,7 +57,7 @@ impl Bookmarks {
         format!("bm-{stamp:x}-{seq:x}")
     }
 
-    /// The star verb (IDC_BOOKMARK_THIS_TAB semantics in ZaminPanel:
+    /// The star verb (IDC_BOOKMARK_THIS_TAB semantics in ZIM:
     /// toggle — a second press removes, matching the star's contract).
     pub fn toggle(&mut self, destination: Destination, title: String) {
         if let Some(at) = self.items.iter().position(|b| b.destination == destination) {

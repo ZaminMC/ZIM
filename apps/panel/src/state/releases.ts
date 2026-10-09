@@ -17,7 +17,7 @@ export interface PublishedRelease {
 }
 
 const RELEASES_API =
-  "https://api.github.com/repos/ZaminMC/ZaminPanel/releases?per_page=10";
+  "https://api.github.com/repos/ZaminMC/ZIM/releases?per_page=10";
 
 function parseRelease(raw: unknown): PublishedRelease | null {
   if (typeof raw !== "object" || raw === null) return null;

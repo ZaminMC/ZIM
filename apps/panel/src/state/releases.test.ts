@@ -26,19 +26,19 @@ describe("listPublishedReleases", () => {
           tag_name: "dev",
           name: "Update manifest — development channel",
           prerelease: true,
-          html_url: "https://github.com/ZaminMC/ZaminPanel/releases/tag/dev",
+          html_url: "https://github.com/ZaminMC/ZIM/releases/tag/dev",
           published_at: "2026-10-08T17:00:00Z",
           assets: [],
         },
         {
           tag_name: "v0.2.0",
-          name: "ZaminPanel v0.2.0 — development pre-release",
+          name: "ZIM v0.2.0 — development pre-release",
           prerelease: true,
-          html_url: "https://github.com/ZaminMC/ZaminPanel/releases/tag/v0.2.0",
+          html_url: "https://github.com/ZaminMC/ZIM/releases/tag/v0.2.0",
           published_at: "2026-10-08T16:00:00Z",
           assets: [
             {
-              name: "ZaminPanel_0.2.0_x64-setup.exe",
+              name: "ZIM_0.2.0_x64-setup.exe",
               browser_download_url: "https://example.com/setup.exe",
               size: 21_234_567,
             },

@@ -4,7 +4,7 @@
 
 ## Context
 
-Configuration has three owners that must not be confused: ZaminPanel's own settings, per-server settings the daemon owns, and files Minecraft owns (`server.properties`, `eula.txt`). Retrofitted migration and silent file fights are the classic failure modes here.
+Configuration has three owners that must not be confused: ZIM's own settings, per-server settings the daemon owns, and files Minecraft owns (`server.properties`, `eula.txt`). Retrofitted migration and silent file fights are the classic failure modes here.
 
 ## Decision
 

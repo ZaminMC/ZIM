@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ZaminPanel",
-  "mainBinaryName": "zamin-panel",
+  "productName": "ZIM",
+  "mainBinaryName": "zim",
   "version": "0.1.0",
-  "identifier": "mc.zamin.panel",
+  "identifier": "mc.zamin.zim",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ZaminPanel",
+        "title": "ZIM",
         "url": "frame.html",
         "decorations": false,
         "width": 1280,
@@ -43,7 +43,7 @@
     ],
     "category": "Game",
     "shortDescription": "A polished workspace for running and managing Minecraft servers.",
-    "longDescription": "ZaminPanel is a desktop panel and CLI workspace for running, managing, and developing Minecraft servers. The resident daemon keeps servers alive independent of the panel; the New Server flow downloads and creates servers from the software catalog; backups, restore, crash recovery, logs, files, and players ride the same protocol.",
+    "longDescription": "ZIM is a desktop panel and CLI workspace for running, managing, and developing Minecraft servers. The resident daemon keeps servers alive independent of the panel; the New Server flow downloads and creates servers from the software catalog; backups, restore, crash recovery, logs, files, and players ride the same protocol.",
     "externalBin": [
       "binaries/zamind",
       "binaries/zamin"
@@ -58,7 +58,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwRThCMDFCNDVBOEQ1NjUKUldSbDFhaEZHN0Rva0JBNGsvUEh6ckttVkh0cTJtT2t3b25xN0hpSU5OUDdDTVQ2NUlvaWQvZDQK",
       "endpoints": [
-        "https://github.com/ZaminMC/ZaminPanel/releases/download/dev/latest.json"
+        "https://github.com/ZaminMC/ZIM/releases/download/dev/latest.json"
       ]
     }
   }

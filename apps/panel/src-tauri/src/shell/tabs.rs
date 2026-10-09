@@ -1,6 +1,6 @@
 // The authoritative tab model — a source port of Chromium's TabStripModel
 // semantics (chrome/browser/ui/tabs/tab_strip_model.{h,cc}), stripped of
-// WebContents: a ZaminPanel tab's "content" is a typed Destination.
+// WebContents: a ZIM tab's "content" is a typed Destination.
 //
 // Ported policies, each with its upstream citation:
 // - insertion funnels through ONE entry point that enforces the pinned
@@ -29,7 +29,7 @@ pub type TabId = u32;
 pub type GroupId = u32;
 
 /// The closed set of places a tab can show (§58) — the Rust twin of
-/// state/destinations.ts. `zaminpanel://` URLs canonicalize through
+/// state/destinations.ts. `zim://` URLs canonicalize through
 /// [`Destination::url`] / [`Destination::parse`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -52,17 +52,17 @@ impl Destination {
     /// destinationUrl() — state/destinations.ts.
     pub fn url(&self) -> String {
         match self {
-            Destination::New => "zaminpanel://new".into(),
-            Destination::Servers => "zaminpanel://servers/".into(),
-            Destination::Settings => "zaminpanel://settings/".into(),
-            Destination::Jobs => "zaminpanel://jobs/".into(),
-            Destination::Audit => "zaminpanel://audit/".into(),
-            Destination::About => "zaminpanel://about/".into(),
-            Destination::Feedback => "zaminpanel://feedback/".into(),
-            Destination::Extensions => "zaminpanel://extensions/".into(),
-            Destination::Downloads => "zaminpanel://downloads/".into(),
-            Destination::Server { server_id } => format!("zaminpanel://server/{server_id}"),
-            Destination::Console { server_id } => format!("zaminpanel://console/{server_id}"),
+            Destination::New => "zim://new".into(),
+            Destination::Servers => "zim://servers/".into(),
+            Destination::Settings => "zim://settings/".into(),
+            Destination::Jobs => "zim://jobs/".into(),
+            Destination::Audit => "zim://audit/".into(),
+            Destination::About => "zim://about/".into(),
+            Destination::Feedback => "zim://feedback/".into(),
+            Destination::Extensions => "zim://extensions/".into(),
+            Destination::Downloads => "zim://downloads/".into(),
+            Destination::Server { server_id } => format!("zim://server/{server_id}"),
+            Destination::Console { server_id } => format!("zim://console/{server_id}"),
             Destination::Missing { url } => url.clone(),
         }
     }
@@ -71,7 +71,7 @@ impl Destination {
     /// round-trip through this. Unknown internal pages are honest
     /// Missing destinations (§58), never silent searches.
     pub fn parse(text: &str) -> Destination {
-        let Some(rest) = text.strip_prefix("zaminpanel://") else {
+        let Some(rest) = text.strip_prefix("zim://") else {
             return Destination::Missing { url: text.to_owned() };
         };
         let (page, arg) = match rest.split_once('/') {
@@ -675,11 +675,11 @@ mod tests {
         let d = Destination::Server { server_id: "abc".into() };
         assert_eq!(Destination::parse(&d.url()), d);
         assert_eq!(
-            Destination::parse("zaminpanel://nonsense/x"),
-            Destination::Missing { url: "zaminpanel://nonsense/x".into() }
+            Destination::parse("zim://nonsense/x"),
+            Destination::Missing { url: "zim://nonsense/x".into() }
         );
         assert_eq!(
-            Destination::parse("zaminpanel://console/s1"),
+            Destination::parse("zim://console/s1"),
             Destination::Console { server_id: "s1".into() }
         );
     }

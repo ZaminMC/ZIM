@@ -1,4 +1,4 @@
-// zaminpanel://downloads/ — the founder's reserved future internal URL
+// zim://downloads/ — the founder's reserved future internal URL
 // (§58), live now that a versioned channel exists to show (ADR-0029).
 // The versioned pre-releases with their signed installers and portable
 // archives, the installed build marked, the anchor's honest role stated.

@@ -1,7 +1,7 @@
 # Founder Vision — the UI and UX
 
 > Provenance: supplied by the founder as the product's source of truth
-> (uploaded into the repository as docs/ZaminPanel-Development.zip, file
+> (uploaded into the repository as docs/ZIM-Development.zip, file
 > `Founder Vision the ui and ux.txt`, and committed here verbatim).
 > Scoping note that travels with it, in the founder's own words:
 > "From this, explicitly ignore the AI part, but keep a room for it."
@@ -10,13 +10,13 @@
 
 From this, explicitly ignore the AI part, but keep a room for it.
 
-ZaminPanel — Founder Vision & Complete Implementation Prompt
+ZIM — Founder Vision & Complete Implementation Prompt
 
 0. READ THIS FIRST
 
-You are implementing ZaminPanel, a desktop application for managing Minecraft servers.
+You are implementing ZIM, a desktop application for managing Minecraft servers.
 
-Do not reinterpret ZaminPanel as a conventional Minecraft server control panel.
+Do not reinterpret ZIM as a conventional Minecraft server control panel.
 
 Do not build:
 
@@ -30,9 +30,9 @@ Do not build:
 
 The central product idea is:
 
-«ZaminPanel is a browser for Minecraft servers.»
+«ZIM is a browser for Minecraft servers.»
 
-The user should be able to install ZaminPanel, double-click a supported Minecraft server JAR, and have that server open inside ZaminPanel.
+The user should be able to install ZIM, double-click a supported Minecraft server JAR, and have that server open inside ZIM.
 
 The mental model must be:
 
@@ -48,17 +48,17 @@ Chrome
  ├── Extensions
  └── Pages
 
-ZaminPanel
+ZIM
  ├── Tabs             → Minecraft servers / internal pages / Dutchmen chats
- ├── Address bar      → server join addresses / ZaminPanel internal URLs
+ ├── Address bar      → server join addresses / ZIM internal URLs
  ├── Back / Forward   → navigation inside supported tab content
  ├── Reload           → reload current server/page state
  ├── New tab          → Dutchmen-centric new tab
  ├── Tab groups       → server organization
- ├── Windows          → independent ZaminPanel windows
+ ├── Windows          → independent ZIM windows
  ├── Bookmarks        → servers, Dutchmen chats, internal pages
- ├── Extensions       → ZaminPanel addons/community integrations
- └── Pages             → servers and internal ZaminPanel pages
+ ├── Extensions       → ZIM addons/community integrations
+ └── Pages             → servers and internal ZIM pages
 
 The browser metaphor is not decorative.
 
@@ -70,7 +70,7 @@ It is the actual product architecture and UX model.
 
 The repository already has an architecture and documentation defining:
 
-ZaminPanel
+ZIM
      │
      │ Zamin Protocol
      ▼
@@ -88,7 +88,7 @@ Dutchmen must NOT become a second backend.
 The intended architecture is:
 
                     ┌──────────────────────┐
-                    │      ZaminPanel      │
+                    │      ZIM      │
                     │   React + Tauri      │
                     └──────────┬───────────┘
                                │
@@ -105,7 +105,7 @@ Dutchmen should integrate with this architecture rather than bypass it.
 
 Preferred conceptual architecture:
 
-ZaminPanel / Minecraft Bridge
+ZIM / Minecraft Bridge
             │
             ▼
      Dutchmen Agent Runtime
@@ -135,7 +135,7 @@ AI failure must never be able to crash or corrupt the server-management daemon.
 
 ---
 
-2. FIRST PRINCIPLE: ZAMINPANEL IS A BROWSER
+2. FIRST PRINCIPLE: ZIM IS A BROWSER
 
 The application should visually and behaviorally feel like a polished modern browser.
 
@@ -152,7 +152,7 @@ Think:
 
 But do not simply copy Chrome's visual design.
 
-ZaminPanel should have its own visual identity.
+ZIM should have its own visual identity.
 
 The user should be able to understand the interface immediately because the browser metaphor is familiar.
 
@@ -160,21 +160,21 @@ The user should be able to understand the interface immediately because the brow
 
 3. INSTALLATION EXPERIENCE
 
-The installer should install ZaminPanel normally.
+The installer should install ZIM normally.
 
 After installation:
 
 Desktop
-└── ZaminPanel shortcut
+└── ZIM shortcut
 
 The user does NOT need to manually configure:
 
 start.bat
 java -jar ...
 
-for normal ZaminPanel operation.
+for normal ZIM operation.
 
-A supported Minecraft server JAR should be associated with ZaminPanel.
+A supported Minecraft server JAR should be associated with ZIM.
 
 Supported server software includes:
 
@@ -198,7 +198,7 @@ A real compatibility/detection layer must determine whether the JAR is supported
 
 4. DOUBLE-CLICKING A SERVER JAR
 
-This is one of the defining ZaminPanel experiences.
+This is one of the defining ZIM experiences.
 
 Example:
 
@@ -206,13 +206,13 @@ paper-26.2-129.jar
 
 User double-clicks it.
 
-Instead of Windows launching a generic Java console window, ZaminPanel should open.
+Instead of Windows launching a generic Java console window, ZIM should open.
 
 Conceptually:
 
 User double-clicks Paper JAR
              ↓
-       ZaminPanel opens
+       ZIM opens
              ↓
       server is recognized
              ↓
@@ -226,8 +226,8 @@ The implementation must account for:
 
 - file association
 - multiple server JARs
-- existing ZaminPanel instance
-- multiple ZaminPanel windows
+- existing ZIM instance
+- multiple ZIM windows
 - already-running servers
 - duplicate opening
 - unsupported JARs
@@ -272,20 +272,20 @@ Tabs are first-class application objects.
 A tab can represent:
 
 1. a Minecraft server
-2. a ZaminPanel internal page
+2. a ZIM internal page
 3. a Dutchmen conversation
 
 There are three primary tab types.
 
 ---
 
-6.1 ZaminPanel settings tab
+6.1 ZIM settings tab
 
 Internal URL:
 
-zaminpanel://settings/
+zim://settings/
 
-This is an actual internal ZaminPanel page.
+This is an actual internal ZIM page.
 
 ---
 
@@ -361,9 +361,9 @@ localhost:25565
 192.168.1.50:25565
 example.com:25565
 
-Internal ZaminPanel URLs
+Internal ZIM URLs
 
-zaminpanel://settings/
+zim://settings/
 
 Dutchmen conversations
 
@@ -432,7 +432,7 @@ The animation system must remain performant and interruptible.
 
 9. DUTCHMEN CHAT
 
-Dutchmen is a first-class ZaminPanel feature.
+Dutchmen is a first-class ZIM feature.
 
 It should support multi-turn conversations.
 
@@ -462,7 +462,7 @@ It should maintain conversation state.
 
 10. DUTCHMEN IS AN AGENT, NOT A CHATBOT
 
-Dutchmen must be capable of executing real ZaminPanel operations.
+Dutchmen must be capable of executing real ZIM operations.
 
 The model should never directly receive unrestricted operating-system access.
 
@@ -762,7 +762,7 @@ Open server files
 
 Open Dutchmen conversation
 
-The result should use ZaminPanel navigation rather than merely printing text.
+The result should use ZIM navigation rather than merely printing text.
 
 Example:
 
@@ -795,7 +795,7 @@ register server with ZaminCore
         ↓
 start if requested
         ↓
-open server in a new ZaminPanel tab
+open server in a new ZIM tab
 
 All operations must be deterministic underneath.
 
@@ -846,7 +846,7 @@ Installing TAB...
 
 19. MINECRAFT BRIDGE
 
-ZaminPanel should have a Minecraft-side bridge plugin.
+ZIM should have a Minecraft-side bridge plugin.
 
 The bridge allows:
 
@@ -1099,7 +1099,7 @@ This creates a dedicated console-only tab.
 
 The dedicated console view should be optimized for large console output.
 
-It should still behave as a normal ZaminPanel tab.
+It should still behave as a normal ZIM tab.
 
 ---
 
@@ -1396,7 +1396,7 @@ Advanced users must still be able to see the actual startup configuration.
 
 39. SERVER SETTINGS
 
-Server-specific settings should be separate from global ZaminPanel settings.
+Server-specific settings should be separate from global ZIM settings.
 
 Examples:
 
@@ -1467,7 +1467,7 @@ Never blindly package the entire server directory.
 
 42. PUBLISH DIFF
 
-ZaminPanel should remember the previous publication state.
+ZIM should remember the previous publication state.
 
 The Publish button should show when files have changed since the last publication.
 
@@ -1561,7 +1561,7 @@ If:
 
 plugins/DiscordSRV/config.yml
 
-contains a bot token, ZaminPanel should identify it.
+contains a bot token, ZIM should identify it.
 
 If DiscordSRV is loaded and functioning, treat the configuration as especially suspicious because it is likely to contain active credentials.
 
@@ -1708,7 +1708,7 @@ Selecting:
 
 Move tab to new window
 
-creates another ZaminPanel window containing that tab.
+creates another ZIM window containing that tab.
 
 The underlying server must remain owned by ZaminCore.
 
@@ -1730,13 +1730,13 @@ Each tab must be isolated.
 A broken server page/plugin/editor must not crash:
 
 - another tab
-- the entire ZaminPanel process
+- the entire ZIM process
 - zamind
 - another server
 
 Conceptually:
 
-ZaminPanel
+ZIM
  ├── Tab A
  │    └── isolated UI state
  │
@@ -1805,7 +1805,7 @@ It can contain:
 - server addresses
 - server tabs
 - Dutchmen conversations
-- internal ZaminPanel pages
+- internal ZIM pages
 
 Examples:
 
@@ -1820,7 +1820,7 @@ Bookmarks should preserve destination identity.
 
 56. EXTENSIONS / ADDONS
 
-ZaminPanel should have an extension/addon system.
+ZIM should have an extension/addon system.
 
 Extensions may:
 
@@ -1866,16 +1866,16 @@ Create an internal URL/router system.
 
 Examples:
 
-zaminpanel://settings/
-zaminpanel://extensions/
-zaminpanel://servers/
+zim://settings/
+zim://extensions/
+zim://servers/
 dutchmen:(chat-ID)
 
 Potential future internal URLs:
 
-zaminpanel://about/
-zaminpanel://downloads/
-zaminpanel://jobs/
+zim://about/
+zim://downloads/
+zim://jobs/
 
 Do not implement this as arbitrary web navigation.
 
@@ -1885,7 +1885,7 @@ It is a typed internal navigation system.
 
 59. BACK / FORWARD
 
-Back and forward should operate on navigable ZaminPanel destinations.
+Back and forward should operate on navigable ZIM destinations.
 
 They should feel browser-like.
 
@@ -2001,7 +2001,7 @@ The tab must not disappear merely because the process stopped.
 
 64. SERVER DISCOVERY
 
-ZaminPanel should maintain a registry of known servers.
+ZIM should maintain a registry of known servers.
 
 The registry can detect:
 
@@ -2511,7 +2511,7 @@ Build the browser shell first.
 
 The first usable vertical slice should be:
 
-ZaminPanel opens
+ZIM opens
         ↓
 browser-style window
         ↓
@@ -2691,7 +2691,7 @@ Publishing
 
 At every architectural decision, ask:
 
-«Does this make ZaminPanel feel more like a browser for Minecraft infrastructure, or more like another server control panel?»
+«Does this make ZIM feel more like a browser for Minecraft infrastructure, or more like another server control panel?»
 
 If the answer is the latter, reconsider the design.
 
@@ -2701,13 +2701,13 @@ If the answer is the latter, reconsider the design.
 
 The intended user experience should eventually feel like this:
 
-The user installs ZaminPanel.
+The user installs ZIM.
 
 They double-click:
 
 paper-26.2-129.jar
 
-ZaminPanel opens.
+ZIM opens.
 
 A new tab appears:
 
@@ -2829,7 +2829,7 @@ PowerShell
 
 unless they explicitly wanted to.
 
-That is the point of ZaminPanel.
+That is the point of ZIM.
 
 ---
 
@@ -2837,12 +2837,12 @@ That is the point of ZaminPanel.
 
 Do not lose these principles while implementing:
 
-ZaminPanel is a browser.
+ZIM is a browser.
 Servers are tabs.
 Server addresses are destinations.
 New Tab is Dutchmen.
 Dutchmen is an agent, not a chatbot.
-Internal pages have ZaminPanel URLs.
+Internal pages have ZIM URLs.
 Chats have Dutchmen URLs.
 Extensions behave like browser extensions.
 Bookmarks can point to servers and conversations.

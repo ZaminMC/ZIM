@@ -46,10 +46,10 @@ describe("tab keys and URLs", () => {
       { kind: "server", serverId: "alpha" },
     ];
     expect(destinations.map(destinationUrl)).toEqual([
-      "zaminpanel://servers/",
-      "zaminpanel://new",
-      "zaminpanel://settings/",
-      "zaminpanel://server/alpha",
+      "zim://servers/",
+      "zim://new",
+      "zim://settings/",
+      "zim://server/alpha",
     ]);
   });
 });
@@ -66,13 +66,13 @@ describe("restingAddress", () => {
   it("falls back to the internal URL when the server never booted", () => {
     const unbooted = [entry("beta", { displayName: "Beta" })];
     expect(restingAddress({ kind: "server", serverId: "beta" }, unbooted, "localhost")).toBe(
-      "zaminpanel://server/beta",
+      "zim://server/beta",
     );
   });
 
   it("shows the internal URL for the fleet page and rests empty on new (§6.2)", () => {
     expect(restingAddress({ kind: "servers" }, entries, "localhost")).toBe(
-      "zaminpanel://servers/",
+      "zim://servers/",
     );
     expect(restingAddress({ kind: "new" }, entries, "localhost")).toBe("");
   });
@@ -86,29 +86,29 @@ describe("hostHint", () => {
 });
 
 describe("parseAddressInput", () => {
-  it("parses internal zaminpanel:// URLs into destinations", () => {
-    expect(parseAddressInput("zaminpanel://servers/")).toEqual({
+  it("parses internal zim:// URLs into destinations", () => {
+    expect(parseAddressInput("zim://servers/")).toEqual({
       kind: "internal",
       destination: { kind: "servers" },
     });
-    expect(parseAddressInput("zaminpanel://new")).toEqual({
+    expect(parseAddressInput("zim://new")).toEqual({
       kind: "internal",
       destination: { kind: "new" },
     });
-    expect(parseAddressInput("zaminpanel://server/alpha")).toEqual({
+    expect(parseAddressInput("zim://server/alpha")).toEqual({
       kind: "internal",
       destination: { kind: "server", serverId: "alpha" },
     });
-    expect(parseAddressInput("zaminpanel://settings/")).toEqual({
+    expect(parseAddressInput("zim://settings/")).toEqual({
       kind: "internal",
       destination: { kind: "settings" },
     });
   });
 
   it("answers an unknown internal page as a typed missing destination, not a search", () => {
-    expect(parseAddressInput("zaminpanel://nope/")).toEqual({
+    expect(parseAddressInput("zim://nope/")).toEqual({
       kind: "internal",
-      destination: { kind: "missing", url: "zaminpanel://nope/" },
+      destination: { kind: "missing", url: "zim://nope/" },
     });
   });
 
@@ -250,25 +250,25 @@ describe("console destinations (§27, ADR-0020)", () => {
 
   it("names the console tab with its internal URL", () => {
     expect(destinationUrl({ kind: "console", serverId: "alpha" })).toBe(
-      "zaminpanel://console/alpha",
+      "zim://console/alpha",
     );
     expect(restingAddress({ kind: "console", serverId: "alpha" }, [], "localhost")).toBe(
-      "zaminpanel://console/alpha",
+      "zim://console/alpha",
     );
   });
 
   it("parses the console URL from the address bar", () => {
-    expect(parseAddressInput("zaminpanel://console/alpha")).toEqual({
+    expect(parseAddressInput("zim://console/alpha")).toEqual({
       kind: "internal",
       destination: { kind: "console", serverId: "alpha" },
     });
   });
 
   it("answers an id-less console URL with the honest missing page", () => {
-    const request = parseAddressInput("zaminpanel://console");
+    const request = parseAddressInput("zim://console");
     expect(request).toEqual({
       kind: "internal",
-      destination: { kind: "missing", url: "zaminpanel://console" },
+      destination: { kind: "missing", url: "zim://console" },
     });
   });
 });
@@ -281,49 +281,49 @@ describe("the evidence pages (§58/§72/§73, ADR-0026)", () => {
   });
 
   it("names them with their internal URLs", () => {
-    expect(destinationUrl({ kind: "jobs" })).toBe("zaminpanel://jobs/");
-    expect(destinationUrl({ kind: "audit" })).toBe("zaminpanel://audit/");
-    expect(destinationUrl({ kind: "about" })).toBe("zaminpanel://about/");
+    expect(destinationUrl({ kind: "jobs" })).toBe("zim://jobs/");
+    expect(destinationUrl({ kind: "audit" })).toBe("zim://audit/");
+    expect(destinationUrl({ kind: "about" })).toBe("zim://about/");
   });
 
   it("rests them at their internal URLs — they are panel pages", () => {
-    expect(restingAddress({ kind: "jobs" }, [], "localhost")).toBe("zaminpanel://jobs/");
-    expect(restingAddress({ kind: "audit" }, [], "localhost")).toBe("zaminpanel://audit/");
-    expect(restingAddress({ kind: "about" }, [], "localhost")).toBe("zaminpanel://about/");
+    expect(restingAddress({ kind: "jobs" }, [], "localhost")).toBe("zim://jobs/");
+    expect(restingAddress({ kind: "audit" }, [], "localhost")).toBe("zim://audit/");
+    expect(restingAddress({ kind: "about" }, [], "localhost")).toBe("zim://about/");
   });
 
   it("labels them in human words", () => {
     expect(destinationLabel({ kind: "jobs" }, [])).toBe("Jobs");
     expect(destinationLabel({ kind: "audit" }, [])).toBe("Audit log");
-    expect(destinationLabel({ kind: "about" }, [])).toBe("About ZaminPanel");
+    expect(destinationLabel({ kind: "about" }, [])).toBe("About ZIM");
   });
 
   it("parses their URLs from the address bar", () => {
-    expect(parseAddressInput("zaminpanel://jobs/")).toEqual({
+    expect(parseAddressInput("zim://jobs/")).toEqual({
       kind: "internal",
       destination: { kind: "jobs" },
     });
-    expect(parseAddressInput("zaminpanel://audit")).toEqual({
+    expect(parseAddressInput("zim://audit")).toEqual({
       kind: "internal",
       destination: { kind: "audit" },
     });
-    expect(parseAddressInput("zaminpanel://about/")).toEqual({
+    expect(parseAddressInput("zim://about/")).toEqual({
       kind: "internal",
       destination: { kind: "about" },
     });
   });
 
   it("a reserved URL that becomes real stops being missing (§58, ADR-0029: downloads)", () => {
-    expect(parseAddressInput("zaminpanel://downloads/")).toEqual({
+    expect(parseAddressInput("zim://downloads/")).toEqual({
       kind: "internal",
       destination: { kind: "downloads" },
     });
   });
 
   it("keeps unknown internal pages honest — a new page name is still missing", () => {
-    expect(parseAddressInput("zaminpanel://marketplace/")).toEqual({
+    expect(parseAddressInput("zim://marketplace/")).toEqual({
       kind: "internal",
-      destination: { kind: "missing", url: "zaminpanel://marketplace/" },
+      destination: { kind: "missing", url: "zim://marketplace/" },
     });
   });
 });

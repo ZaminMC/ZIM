@@ -62,10 +62,10 @@ describe("buildCommands", () => {
     extensions?.run();
     downloads?.run();
     expect(ran).toEqual(["jobs", "audit", "about", "feedback", "extensions", "downloads"]);
-    expect(jobs?.hint).toBe("zaminpanel://jobs/");
-    expect(feedback?.hint).toBe("zaminpanel://feedback/");
-    expect(extensions?.hint).toBe("zaminpanel://extensions/");
-    expect(downloads?.hint).toBe("zaminpanel://downloads/");
+    expect(jobs?.hint).toBe("zim://jobs/");
+    expect(feedback?.hint).toBe("zim://feedback/");
+    expect(extensions?.hint).toBe("zim://extensions/");
+    expect(downloads?.hint).toBe("zim://downloads/");
   });
 
   it("hides the autostart command where the host cannot deliver it", () => {

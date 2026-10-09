@@ -32,43 +32,43 @@ mkdir -p "$PAYLOAD/bin" "$PAYLOAD/share/applications" \
     "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
 
 # Stub binaries: exit 0 when executed.
-for bin in zamin-panel zamind zamin zaminagent; do
+for bin in zim zamind zamin zaminagent; do
     printf '#!/bin/sh\nexit 0\n' > "$PAYLOAD/bin/$bin"
     chmod 755 "$PAYLOAD/bin/$bin"
 done
 
-cp "$REPO_ROOT/scripts/packaging/mc.zamin.panel.desktop" \
-    "$PAYLOAD/share/applications/mc.zamin.panel.desktop"
+cp "$REPO_ROOT/scripts/packaging/mc.zamin.zim.desktop" \
+    "$PAYLOAD/share/applications/mc.zamin.zim.desktop"
 for size in 32x32 128x128 256x256; do
     mkdir -p "$PAYLOAD/share/icons/hicolor/$size/apps"
     cp "$REPO_ROOT/apps/panel/src-tauri/icons/$size.png" \
-        "$PAYLOAD/share/icons/hicolor/$size/apps/mc.zamin.panel.png"
+        "$PAYLOAD/share/icons/hicolor/$size/apps/mc.zamin.zim.png"
 done
 mkdir -p "$PAYLOAD/share/icons/hicolor/scalable/apps"
 cp "$REPO_ROOT/apps/panel/src-tauri/icons/icon.svg" \
-    "$PAYLOAD/share/icons/hicolor/scalable/apps/mc.zamin.panel.svg"
+    "$PAYLOAD/share/icons/hicolor/scalable/apps/mc.zamin.zim.svg"
 
 fail() { echo "test-install-linux: FAIL: $1" >&2; exit 1; }
 ok() { echo "test-install-linux: ok — $1"; }
 
 # 1. install
 "$INSTALL" "$PAYLOAD" > "$WORK/install.log" 2>&1 || fail "install exited nonzero"
-for bin in zamin-panel zamind zamin zaminagent; do
+for bin in zim zamind zamin zaminagent; do
     [ -x "$PREFIX/bin/$bin" ] || fail "$bin not installed/executable"
 done
 ok "binaries installed to \$prefix/bin"
 
-DESKTOP="$XDG_DATA_HOME/applications/mc.zamin.panel.desktop"
+DESKTOP="$XDG_DATA_HOME/applications/mc.zamin.zim.desktop"
 [ -f "$DESKTOP" ] || fail "desktop entry missing"
-grep -q "^Exec=$PREFIX/bin/zamin-panel$" "$DESKTOP" ||
+grep -q "^Exec=$PREFIX/bin/zim$" "$DESKTOP" ||
     fail "desktop Exec was not rewritten to the installed path"
 ok "desktop entry installed with Exec rewritten"
 
 for icon in \
-    "icons/hicolor/32x32/apps/mc.zamin.panel.png" \
-    "icons/hicolor/128x128/apps/mc.zamin.panel.png" \
-    "icons/hicolor/256x256/apps/mc.zamin.panel.png" \
-    "icons/hicolor/scalable/apps/mc.zamin.panel.svg"; do
+    "icons/hicolor/32x32/apps/mc.zamin.zim.png" \
+    "icons/hicolor/128x128/apps/mc.zamin.zim.png" \
+    "icons/hicolor/256x256/apps/mc.zamin.zim.png" \
+    "icons/hicolor/scalable/apps/mc.zamin.zim.svg"; do
     [ -f "$XDG_DATA_HOME/$icon" ] || fail "icon missing: $icon"
 done
 ok "hicolor icons installed"
@@ -79,9 +79,9 @@ ok "re-install (upgrade) is idempotent"
 
 # 3. autostart on/off
 "$INSTALL" --autostart on > "$WORK/autostart.log" 2>&1 || fail "autostart on failed"
-AUTO="$XDG_CONFIG_HOME/autostart/mc.zamin.panel.desktop"
+AUTO="$XDG_CONFIG_HOME/autostart/mc.zamin.zim.desktop"
 [ -f "$AUTO" ] || fail "autostart entry missing"
-grep -q "^Exec=$PREFIX/bin/zamin-panel$" "$AUTO" || fail "autostart Exec wrong"
+grep -q "^Exec=$PREFIX/bin/zim$" "$AUTO" || fail "autostart Exec wrong"
 "$INSTALL" --autostart off > "$WORK/autostart-off.log" 2>&1 || fail "autostart off failed"
 [ ! -f "$AUTO" ] || fail "autostart entry not removed"
 ok "autostart on/off writes and removes the XDG entry"
@@ -121,7 +121,7 @@ mkdir -p "$WORK/broken/bin"
 if "$INSTALL" "$WORK/broken" > "$WORK/broken.log" 2>&1; then
     fail "missing-bin payload was accepted"
 fi
-grep -q "missing bin/zamin-panel" "$WORK/broken.log" ||
+grep -q "missing bin/zim" "$WORK/broken.log" ||
     fail "missing-bin error is not the honest one"
 ok "a broken payload is rejected with a typed message"
 
@@ -130,11 +130,11 @@ ok "a broken payload is rejected with a typed message"
 "$INSTALL" --service on > "$WORK/service-again.log" 2>&1
 "$INSTALL" --agent-service on > "$WORK/agent-service-again.log" 2>&1
 "$INSTALL" --uninstall > "$WORK/uninstall.log" 2>&1 || fail "uninstall failed"
-for bin in zamin-panel zamind zamin zaminagent; do
+for bin in zim zamind zamin zaminagent; do
     [ ! -f "$PREFIX/bin/$bin" ] || fail "$bin survived uninstall"
 done
 [ ! -f "$DESKTOP" ] || fail "desktop entry survived uninstall"
-[ ! -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/mc.zamin.panel.svg" ] ||
+[ ! -f "$XDG_DATA_HOME/icons/hicolor/scalable/apps/mc.zamin.zim.svg" ] ||
     fail "icons survived uninstall"
 [ ! -f "$XDG_CONFIG_HOME/systemd/user/mc.zamin.daemon.service" ] ||
     fail "systemd user unit survived uninstall"

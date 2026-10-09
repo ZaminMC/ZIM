@@ -1,4 +1,4 @@
-// zaminpanel://feedback/ — the feedback page (ADR-0028). An operator-typed
+// zim://feedback/ — the feedback page (ADR-0028). An operator-typed
 // report — title, details, an optional pasted screenshot — sent to the
 // development repo as a real GitHub issue, through one of two stated
 // routes: the panel's own POST when a token is configured, or the
@@ -181,7 +181,7 @@ export function FeedbackPage() {
         <h1 className={styles.title}>Feedback</h1>
         <p className={styles.sub}>
           Tell the builders what broke, what confused you, or what should exist. Reports land as
-          public issues in the ZaminPanel repository.
+          public issues in the ZIM repository.
         </p>
       </header>
 

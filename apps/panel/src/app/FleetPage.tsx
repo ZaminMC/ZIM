@@ -1,4 +1,4 @@
-// zaminpanel://servers/ — the fleet page (ADR-0015). The registry as
+// zim://servers/ — the fleet page (ADR-0015). The registry as
 // cards, honest counts, the daemon identity. The empty state keeps the
 // original nudge sentence (it is the documented §53 journey copy) and
 // gives it the space it deserves.

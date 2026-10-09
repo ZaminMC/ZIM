@@ -1,4 +1,4 @@
-# ZaminPanel Style Guide
+# ZIM Style Guide
 
 *One engineering voice across Rust, TypeScript, docs, and messages. Enforced mechanically where possible (see CONTRIBUTING); everywhere else by review.*
 

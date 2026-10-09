@@ -18,7 +18,7 @@ import type {
 import { PROTOCOL_VERSION } from "./types";
 import type { IncomingBatch, Transport } from "./transport";
 
-export const CLIENT_NAME = "zamin-panel";
+export const CLIENT_NAME = "zim";
 export const CLIENT_VERSION = "0.1.0";
 
 export type ClientStatus = "offline" | "connecting" | "ready";

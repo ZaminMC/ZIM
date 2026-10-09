@@ -18,9 +18,9 @@ $Install = Join-Path $Here "install-windows.ps1"
 
 if (-not (Test-Path $Install)) { throw "test-install-windows: install-windows.ps1 missing" }
 
-$Bins = @("zamin-panel.exe", "zamind.exe", "zamin.exe", "zaminagent.exe")
-$TaskDaemon = "ZaminPanel Daemon"
-$TaskAgent = "ZaminPanel Agent"
+$Bins = @("zim.exe", "zamind.exe", "zamin.exe", "zaminagent.exe")
+$TaskDaemon = "ZIM Daemon"
+$TaskAgent = "ZIM Agent"
 
 function Fail($message) {
     Write-Error "test-install-windows: FAIL: $message"
@@ -47,7 +47,7 @@ foreach ($bin in $Bins) {
 }
 Ok "binaries installed to the prefix"
 
-if (-not (Test-Path (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ZaminPanel.lnk"))) {
+if (-not (Test-Path (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ZIM.lnk"))) {
     Fail "Start Menu launcher missing"
 }
 Ok "Start Menu launcher written"
@@ -96,7 +96,7 @@ catch {
     $_ | Out-File -FilePath $brokenLog
 }
 $brokenText = Get-Content $brokenLog -Raw
-if ($brokenText -notmatch "payload is missing zamin-panel\.exe") {
+if ($brokenText -notmatch "payload is missing zim\.exe") {
     Fail "missing-bin error is not the honest one"
 }
 Ok "a broken payload is rejected with a typed message"
@@ -106,7 +106,7 @@ Ok "a broken payload is rejected with a typed message"
 foreach ($bin in $Bins) {
     if (Test-Path (Join-Path $Prefix $bin)) { Fail "$bin survived uninstall" }
 }
-if (Test-Path (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ZaminPanel.lnk")) {
+if (Test-Path (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ZIM.lnk")) {
     Fail "Start Menu launcher survived uninstall"
 }
 if (TaskExists $TaskDaemon) { Fail "daemon task survived uninstall" }

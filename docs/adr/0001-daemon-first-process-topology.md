@@ -8,7 +8,7 @@ Requirements: servers keep running when Panel closes; rediscovery after Panel or
 
 ## Decision
 
-ZaminCore runs as a resident daemon, **`zamind`** — one per operating-system user per machine. ZaminPanel, ZaminCLI, and the future ZaminAgent are protocol clients. Nothing embeds `zamin-core` except `zamind`.
+ZaminCore runs as a resident daemon, **`zamind`** — one per operating-system user per machine. ZIM, ZaminCLI, and the future ZaminAgent are protocol clients. Nothing embeds `zamin-core` except `zamind`.
 
 - **Endpoint naming is per-user.** Windows named pipes share a machine-global namespace, so the pipe and single-instance mutex names are derived from the user SID: `\\.\pipe\zamind-<sid-hash>`. Linux: `$XDG_RUNTIME_DIR/zamind/zamind.sock` (mode 0700), single-instance via a lockfile with a liveness check in the same directory.
 - **Clients spawn the daemon transparently** if it is not running, then perform the protocol handshake (ADR-0002). Spawning must never be visible as an error path.

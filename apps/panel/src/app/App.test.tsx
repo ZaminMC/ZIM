@@ -15,7 +15,7 @@ describe("<App /> (content layer)", () => {
   });
 
   it("renders the dev bridge's ?d= destination", () => {
-    window.history.replaceState(null, "", "/?d=zaminpanel://settings/");
+    window.history.replaceState(null, "", "/?d=zim://settings/");
     render(<App />);
     expect(document.querySelector("[class*=content]")).toBeTruthy();
   });
@@ -32,7 +32,7 @@ describe("<App /> (content layer)", () => {
   });
 
   it("keeps ?d= missing pages honest (§58)", () => {
-    window.history.replaceState(null, "", "/?d=zaminpanel://nope/");
+    window.history.replaceState(null, "", "/?d=zim://nope/");
     render(<App />);
     // The shell answers an unknown internal page with a real page, not a
     // silent search — the content shows the missing-page room.

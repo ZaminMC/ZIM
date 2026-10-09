@@ -1,14 +1,14 @@
 [Desktop Entry]
 Type=Application
 Version=1.5
-Name=ZaminPanel
+Name=ZIM
 GenericName=Minecraft server manager
 Comment=Run, manage, and supervise Minecraft servers
-Exec=zamin-panel
-Icon=mc.zamin.panel
+Exec=zim
+Icon=mc.zamin.zim
 Terminal=false
 Categories=Game;Utility;
 Keywords=minecraft;server;panel;zamin;
-StartupWMClass=ZaminPanel
+StartupWMClass=ZIM
 StartupNotify=true
 X-GNOME-UsesNotifications=true

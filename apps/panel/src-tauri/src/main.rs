@@ -1,4 +1,4 @@
-//! ZaminPanel desktop host (ADR-0003): a bridge, nothing more.
+//! ZIM desktop host (ADR-0003): a bridge, nothing more.
 //!
 //! The webview owns the protocol client — handshake, correlation,
 //! subscriptions, reconnect, cursors. This host owns exactly three things:
@@ -8,7 +8,7 @@
 //! here, so none is here.
 //!
 //! The Phase 7 additions stay inside that boundary: `daemon_ensure` makes
-//! "double-clicking ZaminPanel must never show a daemon error"
+//! "double-clicking ZIM must never show a daemon error"
 //! (ARCH-REVIEW §1.2) a host responsibility, and the autostart commands
 //! are the OS-integration seam the webview cannot reach (§12.1).
 //!
@@ -273,5 +273,5 @@ fn main() {
             shell::host::shell_window_resized
         ])
         .run(tauri::generate_context!())
-        .expect("error while running the ZaminPanel host");
+        .expect("error while running the ZIM host");
 }

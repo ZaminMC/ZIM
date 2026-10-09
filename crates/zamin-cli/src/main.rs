@@ -33,7 +33,7 @@ use zamin_protocol::streams::{StreamKind, StreamNotification, StreamPayload};
 #[command(
     name = "zamin",
     version,
-    about = "Manage ZaminPanel servers from the command line",
+    about = "Manage ZIM servers from the command line",
     after_help = "The daemon (zamind) must be running; zamin connects to it over the local transport."
 )]
 struct Cli {

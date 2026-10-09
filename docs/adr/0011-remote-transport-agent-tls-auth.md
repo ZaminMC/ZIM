@@ -4,7 +4,7 @@
 
 ## Context
 
-Phase 8 (Services & remote) calls for a headless box managed from a desktop Panel. ADR-0001 reserved the shape years ahead of the code: the daemon stays local, and "ZaminPanel, ZaminCLI, and the future ZaminAgent are protocol clients." The protocol shipped with the hook already in place — `daemon.hello` carries an `auth` field that local transports ignore, and framing is transport-agnostic. What had to be decided now is where the network boundary lives, what TLS looks like without a CA infrastructure, and what the credential is.
+Phase 8 (Services & remote) calls for a headless box managed from a desktop Panel. ADR-0001 reserved the shape years ahead of the code: the daemon stays local, and "ZIM, ZaminCLI, and the future ZaminAgent are protocol clients." The protocol shipped with the hook already in place — `daemon.hello` carries an `auth` field that local transports ignore, and framing is transport-agnostic. What had to be decided now is where the network boundary lives, what TLS looks like without a CA infrastructure, and what the credential is.
 
 The constraints that matter:
 

@@ -1,10 +1,10 @@
-# install-windows.ps1 — per-user install for ZaminPanel: the Windows mirror
+# install-windows.ps1 — per-user install for ZIM: the Windows mirror
 # of install-linux.sh. No admin: everything lands in the user's profile,
 # and the "service" is a per-user Task Scheduler logon task (the Windows
 # shape of the systemd user unit — ADR-0008's service row, ADR-0011).
 #
 # Payload layout (exactly what the portable archive contains):
-#   zamin-panel.exe  zamind.exe  zamin.exe  zaminagent.exe
+#   zim.exe  zamind.exe  zamin.exe  zaminagent.exe
 #
 # Usage:
 #   install-windows.ps1 <payload-dir>            install (idempotent)
@@ -14,19 +14,19 @@
 #                                                ADR-0011)
 #   install-windows.ps1 -Uninstall               remove everything installed
 #   install-windows.ps1 -Prefix DIR              install root (default:
-#                                                %LOCALAPPDATA%\Programs\ZaminPanel)
+#                                                %LOCALAPPDATA%\Programs\ZIM)
 #
 # Installed pieces:
-#   $Prefix\{zamin-panel,zamind,zamin,zaminagent}.exe
-#   Start Menu\Programs\ZaminPanel.lnk
-#   Task Scheduler: "ZaminPanel Daemon" (only via -Service on)
-#   Task Scheduler: "ZaminPanel Agent" (only via -AgentService on)
+#   $Prefix\{zim,zamind,zamin,zaminagent}.exe
+#   Start Menu\Programs\ZIM.lnk
+#   Task Scheduler: "ZIM Daemon" (only via -Service on)
+#   Task Scheduler: "ZIM Agent" (only via -AgentService on)
 #
-# Never touched: daemon-owned state (%LOCALAPPDATA%\ZaminPanel, server roots).
+# Never touched: daemon-owned state (%LOCALAPPDATA%\ZIM, server roots).
 
 param(
     [Parameter(Position = 0)] [string]$Payload,
-    [string]$Prefix = (Join-Path $env:LOCALAPPDATA "Programs\ZaminPanel"),
+    [string]$Prefix = (Join-Path $env:LOCALAPPDATA "Programs\ZIM"),
     [string]$Service,
     [string]$AgentService,
     [switch]$Uninstall
@@ -34,10 +34,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Bins = @("zamin-panel.exe", "zamind.exe", "zamin.exe", "zaminagent.exe")
-$TaskDaemon = "ZaminPanel Daemon"
-$TaskAgent = "ZaminPanel Agent"
-$Shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ZaminPanel.lnk"
+$Bins = @("zim.exe", "zamind.exe", "zamin.exe", "zaminagent.exe")
+$TaskDaemon = "ZIM Daemon"
+$TaskAgent = "ZIM Agent"
+$Shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ZIM.lnk"
 
 function Info($message) { Write-Output "install-windows: $message" }
 function Die($message) { throw "install-windows: $message" }
@@ -112,15 +112,15 @@ foreach ($bin in $Bins) {
 }
 
 # Start Menu launcher for the desktop panel.
-if (Test-Path (Join-Path $Payload "zamin-panel.exe")) {
+if (Test-Path (Join-Path $Payload "zim.exe")) {
     $shell = New-Object -ComObject WScript.Shell
     $lnk = $shell.CreateShortcut($Shortcut)
-    $lnk.TargetPath = Join-Path $Prefix "zamin-panel.exe"
+    $lnk.TargetPath = Join-Path $Prefix "zim.exe"
     $lnk.WorkingDirectory = $Prefix
     $lnk.Save()
 }
 
-Info "installed: $Prefix\{zamin-panel,zamind,zamin,zaminagent}.exe"
+Info "installed: $Prefix\{zim,zamind,zamin,zaminagent}.exe"
 Info "launcher:  $Shortcut"
 Info "daemon service stays off until: install-windows.ps1 -Service on"
 Info "remote agent service stays off until: install-windows.ps1 -AgentService on"

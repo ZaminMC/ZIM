@@ -149,7 +149,7 @@ describe("FeedbackPage", () => {
       "fetch",
       vi.fn(async () =>
         jsonResponse(201, {
-          html_url: "https://github.com/ZaminMC/ZaminPanel/issues/12",
+          html_url: "https://github.com/ZaminMC/ZIM/issues/12",
           number: 12,
         }),
       ),
@@ -160,7 +160,7 @@ describe("FeedbackPage", () => {
     fireEvent.change(screen.getByLabelText("Details"), { target: { value: "It died." } });
     fireEvent.click(screen.getByText("Send report"));
     await waitFor(() => expect(screen.getByText(/Filed as issue #12/)).toBeTruthy());
-    expect(bridge.openedUrls[0]).toBe("https://github.com/ZaminMC/ZaminPanel/issues/12");
+    expect(bridge.openedUrls[0]).toBe("https://github.com/ZaminMC/ZIM/issues/12");
     vi.unstubAllGlobals();
   });
 });

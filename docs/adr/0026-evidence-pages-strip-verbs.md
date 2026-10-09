@@ -12,8 +12,8 @@ Five founder surfaces were still rooms:
 - **§54 Vertical tabs** — the same tab objects rendered as a rail, the
   Discord/browser vertical navigation shape rather than a generic
   sidebar. Also a reserved room.
-- **§58's page list** — `zaminpanel://jobs/`, `zaminpanel://audit/`, and
-  `zaminpanel://about/` were named as future internal URLs while the
+- **§58's page list** — `zim://jobs/`, `zim://audit/`, and
+  `zim://about/` were named as future internal URLs while the
   typed destination model already existed to carry them.
 - **§72 Audit** — the daemon has appended every mutating command and
   handshake to a JSONL trail since ADR-0011, and the CLI reads it
@@ -56,7 +56,7 @@ presentation is exactly as deep as presentation.
 ### The evidence pages ride the typed destination model (§58, §72, §73)
 
 Three destinations join the closed union — `jobs`, `audit`, `about` —
-each a window singleton with its `zaminpanel://` URL, its address-bar
+each a window singleton with its `zim://` URL, its address-bar
 route, its resting address, and its label. They are lazy chunks (a
 page's code and CSS load when the page first opens; the entry keeps the
 shell + fleet page), and the palette offers all three as commands, so

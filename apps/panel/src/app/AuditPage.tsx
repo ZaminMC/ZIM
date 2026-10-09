@@ -1,4 +1,4 @@
-// zaminpanel://audit/ — the audit page (§72's read side, ADR-0011,
+// zim://audit/ — the audit page (§72's read side, ADR-0011,
 // ADR-0026). The daemon appends one JSONL line per handshake and per
 // mutating command; this page reads the trail back newest-first, paged,
 // and honest about the lines that never parsed (they are counted, never

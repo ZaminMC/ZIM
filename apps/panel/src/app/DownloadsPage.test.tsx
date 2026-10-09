@@ -20,18 +20,18 @@ const listMock = listPublishedReleases as ReturnType<typeof vi.fn>;
 function releaseOf(tag: string, over: Partial<PublishedRelease> = {}): PublishedRelease {
   return {
     tagName: tag,
-    name: `ZaminPanel ${tag} — development pre-release`,
+    name: `ZIM ${tag} — development pre-release`,
     publishedAt: "2026-10-08T17:00:00Z",
     prerelease: true,
-    htmlUrl: `https://github.com/ZaminMC/ZaminPanel/releases/tag/${tag}`,
+    htmlUrl: `https://github.com/ZaminMC/ZIM/releases/tag/${tag}`,
     assets: [
       {
-        name: `ZaminPanel_${tag.replace(/^v/, "")}_x64-setup.exe`,
+        name: `ZIM_${tag.replace(/^v/, "")}_x64-setup.exe`,
         browserDownloadUrl: `https://example.com/${tag}-setup.exe`,
         size: 21_234_567,
       },
       {
-        name: `ZaminPanel-${tag.replace(/^v/, "")}-windows-x64.zip`,
+        name: `ZIM-${tag.replace(/^v/, "")}-windows-x64.zip`,
         browserDownloadUrl: `https://example.com/${tag}-portable.zip`,
         size: 19_111_111,
       },

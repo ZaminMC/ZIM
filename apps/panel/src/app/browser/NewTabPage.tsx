@@ -125,7 +125,7 @@ export function NewTabPage() {
         <p className={styles.hint}>
           A name finds servers here. An address like{" "}
           <code className={styles.code}>localhost:25565</code> opens one. Internal pages live under{" "}
-          <code className={styles.code}>zaminpanel://</code>.
+          <code className={styles.code}>zim://</code>.
         </p>
 
         {entries.length === 0 ? (
@@ -156,7 +156,7 @@ export function NewTabPage() {
                     commitAddress(
                       server.port
                         ? joinAddress(server, host)
-                        : `zaminpanel://server/${server.serverId}`,
+                        : `zim://server/${server.serverId}`,
                       entries,
                       host,
                     )

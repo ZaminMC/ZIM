@@ -47,7 +47,7 @@ this is what it claims, and nothing executes yet" is not.
    manifest is evidence on the page, not a silent skip. The result
    carries `contributionsActive: false` so no client can overpromise.
 
-4. **The room is live in the panel now.** `zaminpanel://extensions/`
+4. **The room is live in the panel now.** `zim://extensions/`
    is a typed destination (§58), in the palette and the tab strip;
    the page renders declarations with `data:*` permissions visually
    apart from `contribution:*` ones, names the problems, states where

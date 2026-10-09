@@ -52,7 +52,7 @@ jobs:
           shellcheck scripts/packaging/install-linux.sh
           shellcheck scripts/packaging/test-install-linux.sh
           shellcheck scripts/packaging/make-portable.sh
-          desktop-file-validate --no-hints scripts/packaging/mc.zamin.panel.desktop
+          desktop-file-validate --no-hints scripts/packaging/mc.zamin.zim.desktop
 
       - name: install-linux.sh round trip
         run: ./scripts/packaging/test-install-linux.sh
@@ -91,7 +91,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zaminpanel-linux
+          name: zim-linux
           path: bundle-out/*
 
   windows:
@@ -151,5 +151,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zaminpanel-windows
+          name: zim-windows
           path: bundle-out/*
