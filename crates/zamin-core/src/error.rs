@@ -198,6 +198,12 @@ pub enum PlatformError {
     #[error("process {program:?} did not finish within {}s", timeout.as_secs())]
     RunTimedOut { program: PathBuf, timeout: Duration },
 
+    /// The requested OS sandbox could not be built. This is a hard stop,
+    /// never a silent downgrade: a server asked to run inside a boundary
+    /// does not run outside it because the boundary failed to assemble.
+    #[error("the sandbox could not be built: {detail}")]
+    SandboxBuild { detail: String },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

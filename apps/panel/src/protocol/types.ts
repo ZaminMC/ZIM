@@ -880,7 +880,19 @@ export interface EffectiveSettingsView {
   mcVersion?: string;
   javaMajorRequired?: number;
   backupKeep: number;
+  /** CPU ceiling, percent of ONE core (400 = four cores). */
+  cpuPercent?: number;
+  /** Storage budget in bytes (daemon-accounted, not an OS quota). */
+  storageBytes?: number;
+  sandboxMode: SandboxMode;
+  networkPolicy: NetworkPolicy;
 }
+
+/** How strongly the OS isolates the server process. */
+export type SandboxMode = "off" | "auto";
+
+/** The server's own outbound network policy. */
+export type NetworkPolicy = "unrestricted" | "local-only" | "blocked-outbound";
 
 export interface ProvenanceView {
   stopTimeoutSecs: FieldProvenance;
@@ -893,6 +905,10 @@ export interface ProvenanceView {
   mcVersion: FieldProvenance;
   javaMajorRequired: FieldProvenance;
   backupKeep: FieldProvenance;
+  cpuPercent: FieldProvenance;
+  storageBytes: FieldProvenance;
+  sandboxMode: FieldProvenance;
+  networkPolicy: FieldProvenance;
 }
 
 export interface ConfigGetResult {
@@ -919,6 +935,10 @@ export interface ServerSettingsPatch {
   mcVersion?: string | null;
   javaMajorRequired?: number | null;
   backupKeep?: number | null;
+  cpuPercent?: number | null;
+  storageBytes?: number | null;
+  sandboxMode?: SandboxMode | null;
+  networkPolicy?: NetworkPolicy | null;
 }
 
 export interface ConfigSetPayload {

@@ -56,8 +56,11 @@ pub struct ProcessSample {
 pub struct SpawnLimits {
     /// The tree's committed-memory cap in bytes (Windows job limit).
     pub memory_bytes: Option<u64>,
-    /// The tree's CPU rate in percent of one full machine (Windows CPU
-    /// rate control; 100 = one core, 400 = four).
+    /// The tree's CPU ceiling expressed as a percent of ONE core
+    /// (100 = one core, 400 = four). The Windows layer converts this
+    /// into the OS's own whole-machine scale (CPU rate control counts
+    /// 10000 = the entire machine) using the host's logical-processor
+    /// count at spawn time.
     pub cpu_percent: Option<u32>,
     /// The tree's maximum simultaneous processes (Windows active-process
     /// job limit).
@@ -75,6 +78,60 @@ impl SpawnLimits {
     }
 }
 
+/// The outbound network policy, mirrored into the platform seam from
+/// `config::NetworkPolicy` so the spawn layer never reaches into the
+/// config model. The platform layer maps each variant onto the OS's own
+/// enforcement (Windows AppContainer capabilities) and documents what
+/// each mapping can and cannot stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetworkSandbox {
+    /// The server's own sockets may reach anything (no capability is
+    /// stripped). The DEFAULT: hosts running a public Minecraft server
+    /// need inbound clients plus plugin outbound, and this is what the
+    /// daemon did before the policy existed.
+    #[default]
+    Unrestricted,
+    /// Internet-bound connects are refused by the OS; loopback stays
+    /// reachable (Windows: no internet capability granted, but the
+    /// container is exempted from the loopback block). What it stops:
+    /// a plugin using the server as a downloader/scanner/C2 client to
+    /// remote hosts. What it cannot stop: honestly documented at the
+    /// enforcement site (inbound still flows — the server must accept
+    /// Minecraft clients to be a Minecraft server).
+    LocalOnly,
+    /// All outbound network capability is stripped, loopback included
+    /// (Windows: no capabilities, no loopback exemption). Inbound
+    /// Minecraft clients still connect — stripping inbound would stop
+    /// the server from being a server at all.
+    BlockedOutbound,
+}
+
+impl NetworkSandbox {
+    pub fn from_policy(policy: crate::config::NetworkPolicy) -> NetworkSandbox {
+        match policy {
+            crate::config::NetworkPolicy::Unrestricted => NetworkSandbox::Unrestricted,
+            crate::config::NetworkPolicy::LocalOnly => NetworkSandbox::LocalOnly,
+            crate::config::NetworkPolicy::BlockedOutbound => NetworkSandbox::BlockedOutbound,
+        }
+    }
+}
+
+/// The OS process-isolation boundary requested for one spawn (Part 2).
+/// The field is the daemon's CONTRACT: `Some` means "spawn inside the
+/// boundary or fail" — the platform layer never downgrades silently, and
+/// a sandbox build failure is a preflight failure (the server does not
+/// run unsandboxed because the sandbox broke).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SandboxSpawn {
+    /// The platform identity for this server's boundary. Windows: the
+    /// AppContainer profile name (`zim.server.<id>`, created once, reused
+    /// across starts, deleted with the server).
+    pub container_name: String,
+    /// The outbound network policy applied at spawn time (capabilities
+    /// granted at process creation — a plugin cannot grant them later).
+    pub network: NetworkSandbox,
+}
+
 /// Everything needed to spawn a server process. stdin/stdout/stderr are
 /// always piped; the log pipeline owns them.
 #[derive(Debug, Clone)]
@@ -85,6 +142,28 @@ pub struct SpawnSpec {
     /// The OS-enforced tree limits, applied at spawn (before the
     /// process can run a single instruction of plugin code).
     pub limits: SpawnLimits,
+    /// `Some` = the spawn must land inside this OS boundary; `None` =
+    /// the plain spawn (used by helper processes, tests, and hosts where
+    /// the caller chose `sandboxMode: off`).
+    pub sandbox: Option<SandboxSpawn>,
+}
+
+impl SpawnSpec {
+    /// The plain (unsandboxed) spec used by helper runs and tests.
+    pub fn plain(
+        program: PathBuf,
+        args: Vec<String>,
+        working_dir: PathBuf,
+        limits: SpawnLimits,
+    ) -> SpawnSpec {
+        SpawnSpec {
+            program,
+            args,
+            working_dir,
+            limits,
+            sandbox: None,
+        }
+    }
 }
 
 /// A spawned process and its platform-specific kill handle.
@@ -110,15 +189,55 @@ impl Spawned {
     }
 }
 
+/// What the OS's enforcement object (the Windows Job Object) reported
+/// through its completion port. Each variant is a boundary the OS itself
+/// refused to cross — translated into SecurityNotice kinds by the daemon,
+/// never synthesized from a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobNotice {
+    /// The active-process limit refused a new process (a plugin's fork
+    /// attempt). Carries the refusing tree's message pid.
+    ActiveProcessLimit { pid: u32 },
+    /// A process in the tree was refused memory past its cap.
+    ProcessMemoryLimit { pid: u32 },
+    /// The tree as a whole was refused memory past its cap.
+    JobMemoryLimit,
+}
+
 /// Per-spawn operations. The daemon owns the child; killing is explicit and
 /// tree-wide (ADR-0005), never a side effect of a handle being dropped.
 /// `Sync` so an actor holding a handle can be awaited from any worker.
+///
+/// The stdio accessors are `take_*` (ownership moves to the caller) and
+/// return boxed `AsyncRead`/`AsyncWrite`: the platform layer may hand back
+/// tokio's own child pipes OR a thread-bridged pipe from the sandboxed
+/// spawn (Windows std exposes no `from_raw_handle` for child stream
+/// types, so the raw path bridges through a blocking thread + channel).
+/// Either way the actor sees one async surface.
 pub trait SpawnHandle: Send + Sync {
     fn pid(&self) -> u32;
-    /// The piped child process: stdin/stdout/stderr and exit waiting.
-    fn child(&mut self) -> &mut tokio::process::Child;
+    /// The piped stdin: ownership leaves the handle on first take.
+    fn take_stdin(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>>, PlatformError>;
+    /// The piped stdout: ownership leaves the handle on first take.
+    fn take_stdout(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>>, PlatformError>;
+    /// The piped stderr: ownership leaves the handle on first take.
+    fn take_stderr(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>>, PlatformError>;
+    /// Non-blocking exit poll (the actor's tick loop owns the wait).
+    fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, PlatformError>;
     /// Ladder step 4: force-terminate the whole process tree.
     fn force_kill_tree(&mut self) -> Result<(), PlatformError>;
+    /// Drain the OS enforcement object's notices since the last call.
+    /// The default is an empty drain — platforms without a notification
+    /// channel honestly report nothing rather than inventing events.
+    fn drain_notices(&mut self) -> Vec<JobNotice> {
+        Vec::new()
+    }
 }
 
 /// Verified process identity: PID plus a start marker. A PID alone is
@@ -256,6 +375,32 @@ pub(crate) const CREATE_NO_WINDOW_SPAWN: u32 = 0x0800_0000;
 
 pub fn process() -> &'static dyn ProcessOps {
     imp::process()
+}
+
+/// The sandbox container identity a server would run under, or `None` on
+/// platforms where the daemon provides no OS process boundary (the
+/// inspector displays exactly this honesty).
+pub fn sandbox_container_name(server_id: &str) -> Option<String> {
+    #[cfg(windows)]
+    return Some(imp::container_profile_name(server_id));
+    #[cfg(not(windows))]
+    {
+        let _ = server_id;
+        None
+    }
+}
+
+/// Retire a server's sandbox boundary (server removal): the AppContainer
+/// profile and its loopback exemption go with the server. No-op where no
+/// boundary exists.
+pub fn sandbox_remove(server_id: &str) {
+    #[cfg(windows)]
+    {
+        let name = imp::container_profile_name(server_id);
+        imp::cleanup_container(&name);
+    }
+    #[cfg(not(windows))]
+    let _ = server_id;
 }
 
 #[cfg(test)]

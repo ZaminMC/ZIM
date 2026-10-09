@@ -1,9 +1,12 @@
 //! Windows process operations: hidden-window spawn into a new process
 //! group and a Job Object (no kill-on-close — the daemon dying must never
 //! kill servers, ADR-0001), creation-time process identity, CTRL_BREAK
-//! graceful signal, and job-based tree termination.
+//! graceful signal, job-based tree termination — and, when the spawn asks
+//! for it, the AppContainer sandbox (`windows_sandbox`): the OS-enforced
+//! filesystem + network boundary the daemon's path checks can never be.
 
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -18,6 +21,7 @@ use windows_sys::Win32::System::JobObjects::{
     JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+use windows_sys::Win32::System::SystemInformation::GetSystemInfo;
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, TerminateProcess, IO_COUNTERS, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_TERMINATE,
@@ -25,8 +29,33 @@ use windows_sys::Win32::System::Threading::{
 
 use crate::error::PlatformError;
 use crate::platform::{
-    ProcessIdentity, ProcessOps, ProcessSample, SpawnHandle, SpawnLimits, SpawnSpec, Spawned,
+    JobNotice, ProcessIdentity, ProcessOps, ProcessSample, SpawnHandle, SpawnLimits, SpawnSpec,
+    Spawned,
 };
+
+#[path = "windows_sandbox.rs"]
+pub(crate) mod sandbox;
+pub use sandbox::{cleanup_container, container_profile_name};
+
+/// Create a job with the spec's limits configured (before any process is
+/// assigned — the enforcement boundary exists before its first inmate).
+unsafe fn create_job_with_limits(limits: &SpawnLimits) -> Result<HANDLE, PlatformError> {
+    let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+    if job.is_null() {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    if let Err(error) = configure_job_limits(job, limits) {
+        CloseHandle(job);
+        return Err(error);
+    }
+    Ok(job)
+}
+
+/// The pid behind a freshly created raw process handle.
+fn process_id_of(process: HANDLE) -> Option<u32> {
+    let pid = unsafe { windows_sys::Win32::System::Threading::GetProcessId(process) };
+    (pid != 0).then_some(pid)
+}
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0200;
@@ -41,6 +70,24 @@ const JOB_OBJECT_CPU_RATE_CONTROL_ENABLE: u32 = 0x0000_0001;
 /// weight-based flag's value in current winnt.h), so the hard-enable
 /// bit carries its winnt.h value with the citation here.
 const JOB_OBJECT_CPU_RATE_CONTROL_HARD_ENABLE: u32 = 0x0000_0002;
+
+/// Logical processors on this host (the CPU-rate scale's denominator).
+fn logical_processors() -> u32 {
+    let mut info = unsafe { std::mem::zeroed() };
+    unsafe { GetSystemInfo(&mut info) };
+    let count = info.dwNumberOfProcessors.max(1);
+    count
+}
+
+/// Translate the config's percent-of-one-core ceiling into Windows' own
+/// whole-machine CPU-rate scale (1..=10000 where 10000 = the WHOLE
+/// machine): wanted = P% of one core out of N cores = (P/100)/N of the
+/// machine = 100·P/N in CpuRate units.
+fn cpu_rate_from_percent(percent_of_core: u32) -> u32 {
+    let cores = logical_processors();
+    let rate = (percent_of_core as u64 * 100) / cores as u64;
+    rate.clamp(1, 10_000) as u32
+}
 
 /// The enforcement step: write the spec's limits into a FRESH job object
 /// BEFORE any process is assigned, so the server's first instruction
@@ -103,12 +150,13 @@ fn configure_job_limits(job: HANDLE, limits: &SpawnLimits) -> Result<(), Platfor
         return Err(std::io::Error::last_os_error().into());
     }
 
-    // CPU rate control lives in its own information class. CpuRate is
-    // Windows' own 1..=10000 scale where 10000 = the WHOLE machine; the
-    // limit carries that scale verbatim (documented on SpawnLimits), so
-    // the translation is the identity and the honesty is the unit.
+    // CPU rate control lives in its own information class. The config
+    // speaks percent-of-one-core ("400 = four cores"); Windows speaks
+    // whole-machine rate (10000 = the entire machine). The conversion
+    // uses the host's logical-processor count so the operator's number
+    // means the same thing on a 4-core laptop and a 64-core server.
     if let Some(percent) = limits.cpu_percent {
-        let cpu_rate = percent.clamp(1, 10_000);
+        let cpu_rate = cpu_rate_from_percent(percent);
         let control = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
             ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE
                 | JOB_OBJECT_CPU_RATE_CONTROL_HARD_ENABLE,
@@ -144,10 +192,28 @@ impl Drop for JobHandle {
     }
 }
 
+/// The two ways this module owns children: the plain tokio spawn
+/// (unsandboxed helper/server starts) and the raw sandboxed spawn (the
+/// AppContainer path, whose pipes/handles the trait converts lazily).
+enum ChildFlavor {
+    Tokio(tokio::process::Child),
+    Raw {
+        stdin: Option<std::os::windows::io::OwnedHandle>,
+        stdout: Option<std::os::windows::io::OwnedHandle>,
+        stderr: Option<std::os::windows::io::OwnedHandle>,
+        process: std::os::windows::io::OwnedHandle,
+        thread: std::os::windows::io::OwnedHandle,
+    },
+}
+
 struct WindowsHandle {
     pid: u32,
-    child: tokio::process::Child,
+    flavor: ChildFlavor,
     job: Option<JobHandle>,
+    /// The job object's completion-port notices; the watcher thread ends
+    /// when this receiver (and its sender) drop. The Mutex exists for
+    /// the trait's `Sync` promise — the actor is the only taker.
+    notices: Option<std::sync::Mutex<std::sync::mpsc::Receiver<JobNotice>>>,
 }
 
 impl SpawnHandle for WindowsHandle {
@@ -155,8 +221,53 @@ impl SpawnHandle for WindowsHandle {
         self.pid
     }
 
-    fn child(&mut self) -> &mut tokio::process::Child {
-        &mut self.child
+    fn take_stdin(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>>, PlatformError> {
+        match &mut self.flavor {
+            ChildFlavor::Tokio(child) => Ok(child
+                .stdin
+                .take()
+                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>)),
+            ChildFlavor::Raw { stdin, .. } => Ok(stdin
+                .take()
+                .map(sandbox::bridge_writer)),
+        }
+    }
+
+    fn take_stdout(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>>, PlatformError> {
+        match &mut self.flavor {
+            ChildFlavor::Tokio(child) => Ok(child
+                .stdout
+                .take()
+                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>)),
+            ChildFlavor::Raw { stdout, .. } => Ok(stdout
+                .take()
+                .map(sandbox::bridge_reader)),
+        }
+    }
+
+    fn take_stderr(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>>, PlatformError> {
+        match &mut self.flavor {
+            ChildFlavor::Tokio(child) => Ok(child
+                .stderr
+                .take()
+                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>)),
+            ChildFlavor::Raw { stderr, .. } => Ok(stderr
+                .take()
+                .map(sandbox::bridge_reader)),
+        }
+    }
+
+    fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, PlatformError> {
+        match &mut self.flavor {
+            ChildFlavor::Tokio(child) => Ok(child.try_wait()?),
+            ChildFlavor::Raw { process, .. } => sandbox::try_wait_raw(process),
+        }
     }
 
     fn force_kill_tree(&mut self) -> Result<(), PlatformError> {
@@ -165,9 +276,26 @@ impl SpawnHandle for WindowsHandle {
                 return Ok(());
             }
         }
-        self.child
-            .start_kill()
-            .map_err(|_| PlatformError::ProcessGone { pid: self.pid })
+        match &mut self.flavor {
+            ChildFlavor::Tokio(child) => child
+                .start_kill()
+                .map_err(|_| PlatformError::ProcessGone { pid: self.pid }),
+            ChildFlavor::Raw { process, .. } => sandbox::kill_raw(process),
+        }
+    }
+
+    fn drain_notices(&mut self) -> Vec<JobNotice> {
+        let Some(rx) = &self.notices else {
+            return Vec::new();
+        };
+        let Ok(rx) = rx.lock() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        while let Ok(notice) = rx.try_recv() {
+            out.push(notice);
+        }
+        out
     }
 }
 
@@ -218,41 +346,102 @@ fn filetime_u64(ft: &FILETIME) -> u64 {
 
 impl ProcessOps for WindowsProcessOps {
     fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, PlatformError> {
-        let mut command = tokio::process::Command::new(&spec.program);
-        command
-            .args(&spec.args)
-            .current_dir(&spec.working_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(false)
-            .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
-
-        let child = command.spawn()?;
-        let pid = child.id().ok_or(PlatformError::ProcessGone { pid: 0 })?;
+        // Two paths share the tail (job creation + limits + assignment +
+        // watcher):
+        // - plain: tokio's Command (the pre-sandbox behavior, unchanged);
+        // - sandboxed: the raw AppContainer spawn. THE CONTRACT: a spawn
+        //   that asked for the boundary either lands inside it or fails
+        //   — never a silent downgrade to unsandboxed.
+        let (pid, mut flavor) = match &spec.sandbox {
+            None => {
+                let mut command = tokio::process::Command::new(&spec.program);
+                command
+                    .args(&spec.args)
+                    .current_dir(&spec.working_dir)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(false)
+                    .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+                let child = command.spawn()?;
+                let pid = child.id().ok_or(PlatformError::ProcessGone { pid: 0 })?;
+                (pid, ChildFlavor::Tokio(child))
+            }
+            Some(sandbox_spawn) => {
+                let container = sandbox::ensure_container(&sandbox_spawn.container_name)?;
+                let raw = sandbox::spawn_appcontainer(spec, &container, sandbox_spawn.network)?;
+                let pid = process_id_of(raw.process.as_raw_handle())
+                    .ok_or(PlatformError::ProcessGone { pid: 0 })?;
+                (pid, ChildFlavor::Raw {
+                    stdin: Some(raw.stdin),
+                    stdout: Some(raw.stdout),
+                    stderr: Some(raw.stderr),
+                    process: raw.process,
+                    thread: raw.thread,
+                })
+            }
+        };
 
         // The job object is the tree-kill mechanism AND the enforcement
         // boundary. Without kill-on-close, the job outlives the daemon
         // and adoption (ADR-0005) still sees a live process. Limits are
         // configured BEFORE the process is assigned; a limit failure
-        // fails the spawn rather than silently running unbounded.
-        let job: Option<JobHandle> = child.raw_handle().and_then(|process_handle| unsafe {
-            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if job.is_null() {
-                return None;
+        // fails the spawn rather than silently running unbounded — on
+        // BOTH paths now: the old plain path silently skipped a failed
+        // job (an unbounded server), which the enforcement rule forbids.
+        // The sandboxed child is still suspended here, so nothing has
+        // executed before the assignment.
+        let job: JobHandle = match &mut flavor {
+            ChildFlavor::Tokio(child) => {
+                let Some(process_handle) = child.raw_handle() else {
+                    return Err(PlatformError::ProcessGone { pid });
+                };
+                let job = unsafe { create_job_with_limits(&spec.limits)? };
+                if unsafe { AssignProcessToJobObject(job, process_handle) } == 0 {
+                    unsafe { CloseHandle(job) };
+                    return Err(PlatformError::Io(std::io::Error::last_os_error()));
+                }
+                JobHandle(job)
             }
-            if configure_job_limits(job, &spec.limits).is_err() {
-                CloseHandle(job);
-                return None;
+            ChildFlavor::Raw { process, .. } => {
+                let job = unsafe { create_job_with_limits(&spec.limits)? };
+                if unsafe { AssignProcessToJobObject(job, process.as_raw_handle()) } == 0 {
+                    unsafe { CloseHandle(job) };
+                    return Err(PlatformError::Io(std::io::Error::last_os_error()));
+                }
+                JobHandle(job)
             }
-            if AssignProcessToJobObject(job, process_handle) == 0 {
-                CloseHandle(job);
-                return None;
-            }
-            Some(JobHandle(job))
-        });
+        };
 
-        Ok(Spawned::new(Box::new(WindowsHandle { pid, child, job })))
+        // The sandboxed child's main thread is still suspended: with the
+        // boundary assigned, let it run. A resume failure terminates the
+        // process and fails the spawn — no zombie, no unbounded start.
+        if let ChildFlavor::Raw { process, thread, .. } = &flavor {
+            sandbox::resume(process, thread)?;
+        }
+
+        // The completion-port watcher: OS-refused allocations and forks
+        // become JobNotices the actor turns into security events.
+        let notices = {
+            let (tx, rx) = std::sync::mpsc::channel();
+            match sandbox::spawn_job_watcher(job.0, tx) {
+                Ok(()) => Some(std::sync::Mutex::new(rx)),
+                // A watcher that cannot start is logged-then-lived-with:
+                // the limits themselves remain enforced; only the OS's
+                // refusal REPORTING is lost, and the honest error says so.
+                Err(error) => {
+                    eprintln!("job notification watcher unavailable: {error}");
+                    None
+                }
+            }
+        };
+
+        Ok(Spawned::new(Box::new(WindowsHandle {
+            pid,
+            flavor,
+            job: Some(job),
+            notices,
+        })))
     }
 
     fn identity(&self, pid: u32) -> Option<ProcessIdentity> {
@@ -398,5 +587,46 @@ impl ProcessOps for WindowsProcessOps {
                 rss_bytes,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod cpu_rate_tests {
+    use super::cpu_rate_from_percent;
+
+    #[test]
+    fn one_core_on_a_single_core_machine_is_the_whole_machine() {
+        // The tests run on whatever host CI provides; the law is checked
+        // relative to the host's own core count: P% of one core must map
+        // to 100·P/N whole-machine units, clamped to 1..=10000.
+        let cores = super::logical_processors();
+        let rate = cpu_rate_from_percent(100);
+        let expected = ((100u64 * 100) / cores as u64).clamp(1, 10_000) as u32;
+        assert_eq!(rate, expected);
+    }
+
+    #[test]
+    fn four_cores_never_exceed_the_whole_machine_scale() {
+        let rate = cpu_rate_from_percent(400);
+        assert!((1..=10_000).contains(&rate));
+        let cores = super::logical_processors() as u64;
+        if cores >= 4 {
+            // On a host with at least four cores, 400% of one core is a
+            // quarter... 100·400/N ≤ 10000 must hold and match exactly.
+            assert_eq!(rate, ((400u64 * 100) / cores).clamp(1, 10_000) as u32);
+        } else {
+            // Fewer cores than requested: the ceiling saturates at the
+            // whole machine rather than being refused — a cap that asks
+            // for more than exists still caps.
+            assert_eq!(rate, 10_000);
+        }
+    }
+
+    #[test]
+    fn a_fractional_small_cap_clamps_to_one() {
+        // 10% of one core on a 64-core host: 100·10/64 = 15 (fine); on a
+        // machine with > 1000 cores it would floor at 1 — the scheduler's
+        // smallest unit — never zero (zero would disable the cap).
+        assert!(cpu_rate_from_percent(10) >= 1);
     }
 }

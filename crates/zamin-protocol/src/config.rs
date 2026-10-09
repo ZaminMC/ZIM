@@ -26,11 +26,39 @@ where
     Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 
+/// The per-server network sandbox policy on the wire (Part 2): what the
+/// server's own outbound sockets may reach. `allowlist` is deliberately
+/// absent — per-destination filtering needs a filter driver the current
+/// Windows enforcement cannot provide unelevated, and the protocol does
+/// not offer a policy the OS cannot enforce.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkPolicyView {
+    #[default]
+    Unrestricted,
+    LocalOnly,
+    BlockedOutbound,
+}
+
+/// How strongly the OS isolates the server process (Part 2). `auto` is
+/// the default: the strongest practical boundary on the host OS (Windows:
+/// an AppContainer + Job Object; other platforms: the Job-Object-style
+/// limits the platform provides, with the filesystem boundary honestly
+/// reported as unenforced there).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxModeView {
+    Off,
+    #[default]
+    Auto,
+}
+
 /// Where an effective value came from (ADR-0007's provenance, on the
 /// wire): the global defaults file, or this server's own config.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FieldProvenance {
+    #[default]
     Global,
     Custom,
 }
@@ -60,6 +88,25 @@ pub struct EffectiveSettingsView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub java_major_required: Option<u32>,
     pub backup_keep: u32,
+    /// CPU ceiling as a percent of ONE core (400 = four cores). The OS
+    /// layer translates this into the platform's own scale at spawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<u32>,
+    /// The storage budget in bytes the daemon accounts and enforces at
+    /// its write APIs (not an OS quota — documented honestly everywhere
+    /// it is shown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_bytes: Option<u64>,
+    /// The process-sandbox mode (see `SandboxModeView`). The layered
+    /// model always answers (default `auto`); the serde default keeps
+    /// older daemons' payloads parseable.
+    #[serde(default)]
+    pub sandbox_mode: SandboxModeView,
+    /// The outbound network policy (see `NetworkPolicyView`). The
+    /// layered model always answers (default `unrestricted`); the serde
+    /// default keeps older daemons' payloads parseable.
+    #[serde(default)]
+    pub network_policy: NetworkPolicyView,
 }
 
 /// Per-field provenance, field-for-field with `EffectiveSettingsView`.
@@ -76,6 +123,18 @@ pub struct ProvenanceView {
     pub mc_version: FieldProvenance,
     pub java_major_required: FieldProvenance,
     pub backup_keep: FieldProvenance,
+    /// The four sandbox-era fields default to `global` so a payload from
+    /// a daemon that predates them still parses (the panel and the
+    /// daemon ship together, but a dev-tools client pointing at an
+    /// older daemon must not break).
+    #[serde(default)]
+    pub cpu_percent: FieldProvenance,
+    #[serde(default)]
+    pub storage_bytes: FieldProvenance,
+    #[serde(default)]
+    pub sandbox_mode: FieldProvenance,
+    #[serde(default)]
+    pub network_policy: FieldProvenance,
 }
 
 /// `config.get {serverId}` — the §38/§39 form: the effective view plus the
@@ -167,6 +226,30 @@ pub struct ServerSettingsPatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub backup_keep: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "tri_state",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cpu_percent: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "tri_state",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub storage_bytes: Option<Option<u64>>,
+    #[serde(
+        default,
+        deserialize_with = "tri_state",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sandbox_mode: Option<Option<SandboxModeView>>,
+    #[serde(
+        default,
+        deserialize_with = "tri_state",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub network_policy: Option<Option<NetworkPolicyView>>,
 }
 
 impl ServerSettingsPatch {
@@ -284,11 +367,42 @@ mod tests {
             "javaPath": "global",
             "mcVersion": "global",
             "javaMajorRequired": "global",
-            "backupKeep": "global"
+            "backupKeep": "global",
+            "cpuPercent": "custom",
+            "storageBytes": "global",
+            "sandboxMode": "global",
+            "networkPolicy": "global"
         }))
         .unwrap();
         assert_eq!(prov.port, FieldProvenance::Custom);
         assert_eq!(prov.max_memory_mb, FieldProvenance::Custom);
+        assert_eq!(prov.cpu_percent, FieldProvenance::Custom);
         assert_eq!(prov.stop_timeout_secs, FieldProvenance::Global);
+    }
+
+    #[test]
+    fn sandbox_policy_fields_round_trip_kebab() {
+        let view: EffectiveSettingsView = serde_json::from_value(serde_json::json!({
+            "stopTimeoutSecs": 60,
+            "startupTimeoutSecs": 120,
+            "backupKeep": 10,
+            "cpuPercent": 400,
+            "storageBytes": 107374182400u64,
+            "sandboxMode": "auto",
+            "networkPolicy": "local-only"
+        }))
+        .unwrap();
+        assert_eq!(view.cpu_percent, Some(400));
+        assert_eq!(view.storage_bytes, Some(107374182400));
+        assert_eq!(view.sandbox_mode, SandboxModeView::Auto);
+        assert_eq!(view.network_policy, NetworkPolicyView::LocalOnly);
+
+        let patch: ServerSettingsPatch = serde_json::from_value(serde_json::json!({
+            "networkPolicy": null,
+            "cpuPercent": 200
+        }))
+        .unwrap();
+        assert_eq!(patch.network_policy, Some(None), "null clears the override");
+        assert_eq!(patch.cpu_percent, Some(Some(200)));
     }
 }

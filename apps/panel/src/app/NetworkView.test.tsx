@@ -29,6 +29,8 @@ const config: ConfigGetResult = {
     port: 25580,
     extraJvmArgs: [],
     backupKeep: 10,
+    sandboxMode: "auto",
+    networkPolicy: "unrestricted",
   },
   provenance: {
     stopTimeoutSecs: "global",
@@ -41,6 +43,10 @@ const config: ConfigGetResult = {
     mcVersion: "global",
     javaMajorRequired: "global",
     backupKeep: "global",
+    cpuPercent: "global",
+    storageBytes: "global",
+    sandboxMode: "global",
+    networkPolicy: "global",
   },
 };
 

@@ -33,6 +33,7 @@ function draftOf(value: string | undefined | null): Draft {
 type Baseline = Record<string, string>;
 
 function adoptFrom(result: ConfigGetResult): { drafts: Record<string, Draft>; baseline: Baseline } {
+  const gib = result.effective.storageBytes;
   const drafts: Record<string, Draft> = {
     jar: draftOf(result.jar),
     javaPath: draftOf(result.effective.javaPath),
@@ -46,6 +47,11 @@ function adoptFrom(result: ConfigGetResult): { drafts: Record<string, Draft>; ba
     startupTimeoutSecs: draftOf(result.effective.startupTimeoutSecs.toString()),
     mcVersion: draftOf(result.effective.mcVersion),
     javaMajorRequired: draftOf(result.effective.javaMajorRequired?.toString()),
+    cpuPercent: draftOf(result.effective.cpuPercent?.toString()),
+    // The budget is entered in whole GiB; the wire carries bytes.
+    storageGiB: draftOf(gib !== undefined ? String(Math.round(gib / 1024 ** 3)) : undefined),
+    sandboxMode: draftOf(result.effective.sandboxMode),
+    networkPolicy: draftOf(result.effective.networkPolicy),
   };
   const baseline: Baseline = {};
   for (const [field, draft] of Object.entries(drafts)) {
@@ -136,6 +142,34 @@ export function StartupView({ serverId }: { serverId: string }) {
       if (startup !== undefined) settings.startupTimeoutSecs = startup;
       const major = num("javaMajorRequired", "The Java major");
       if (major !== undefined) settings.javaMajorRequired = major;
+      const cpu = num("cpuPercent", "The CPU ceiling");
+      if (cpu !== undefined && cpu !== null) settings.cpuPercent = cpu;
+      const storage = num("storageGiB", "The storage budget");
+      if (storage !== undefined && storage !== null)
+        settings.storageBytes = storage * 1024 ** 3;
+      const choice = <T extends string>(
+        field: string,
+        allowed: readonly T[],
+        label: string,
+      ): T | null | undefined => {
+        const draft = drafts[field];
+        if (!draft) return undefined;
+        if (draft.cleared) return null;
+        const text = draft.text.trim();
+        if (text === (baseline[field] ?? "")) return undefined;
+        if (!allowed.includes(text as T)) {
+          throw new Error(`${label} has an invalid value.`);
+        }
+        return text as T;
+      };
+      const sandbox = choice("sandboxMode", ["off", "auto"] as const, "The process sandbox");
+      if (sandbox !== undefined) settings.sandboxMode = sandbox;
+      const network = choice(
+        "networkPolicy",
+        ["unrestricted", "local-only", "blocked-outbound"] as const,
+        "The network policy",
+      );
+      if (network !== undefined) settings.networkPolicy = network;
       const javaPath = str("javaPath");
       if (javaPath !== undefined) settings.javaPath = javaPath;
       const mcVersion = str("mcVersion");
@@ -288,6 +322,89 @@ export function StartupView({ serverId }: { serverId: string }) {
               setDraft("maxMemoryMb", { text: event.target.value, cleared: false })
             }
           />
+        </FieldRow>
+        <FieldRow
+          label="CPU ceiling (% of one core)"
+          provenance={p.cpuPercent}
+          onClear={
+            e.cpuPercent === undefined
+              ? undefined
+              : () => setDraft("cpuPercent", { text: "", cleared: true })
+          }
+          hint="400 = four cores, enforced by the OS scheduler. Empty = uncapped."
+        >
+          <input
+            aria-label="CPU ceiling in percent of one core"
+            type="number"
+            min={10}
+            value={drafts.cpuPercent?.text ?? ""}
+            onChange={(event) =>
+              setDraft("cpuPercent", { text: event.target.value, cleared: false })
+            }
+          />
+        </FieldRow>
+        <FieldRow
+          label="Storage budget (GiB)"
+          provenance={p.storageBytes}
+          onClear={
+            e.storageBytes === undefined
+              ? undefined
+              : () => setDraft("storageGiB", { text: "", cleared: true })
+          }
+          hint="The daemon refuses its own writes past the budget and warns at 90%."
+        >
+          <input
+            aria-label="Storage budget in GiB"
+            type="number"
+            min={1}
+            value={drafts.storageGiB?.text ?? ""}
+            onChange={(event) =>
+              setDraft("storageGiB", { text: event.target.value, cleared: false })
+            }
+          />
+        </FieldRow>
+        <FieldRow
+          label="Process sandbox"
+          provenance={p.sandboxMode}
+          onClear={
+            e.sandboxMode === "auto"
+              ? undefined
+              : () => setDraft("sandboxMode", { text: "", cleared: true })
+          }
+          hint="Auto isolates the server process at the OS boundary (Windows: AppContainer). Off is a deliberate choice, shown as such in Developer Tools."
+        >
+          <select
+            aria-label="Process sandbox mode"
+            value={drafts.sandboxMode?.text ?? "auto"}
+            onChange={(event) =>
+              setDraft("sandboxMode", { text: event.target.value, cleared: false })
+            }
+          >
+            <option value="auto">Auto — strongest OS boundary</option>
+            <option value="off">Off — run unsandboxed</option>
+          </select>
+        </FieldRow>
+        <FieldRow
+          label="Outbound network"
+          provenance={p.networkPolicy}
+          onClear={
+            e.networkPolicy === "unrestricted"
+              ? undefined
+              : () => setDraft("networkPolicy", { text: "", cleared: true })
+          }
+          hint="What the server's own connections may reach. Players always get in — this gates plugins' outbound."
+        >
+          <select
+            aria-label="Outbound network policy"
+            value={drafts.networkPolicy?.text ?? "unrestricted"}
+            onChange={(event) =>
+              setDraft("networkPolicy", { text: event.target.value, cleared: false })
+            }
+          >
+            <option value="unrestricted">Unrestricted</option>
+            <option value="local-only">Local network only</option>
+            <option value="blocked-outbound">Blocked outbound</option>
+          </select>
         </FieldRow>
         <FieldRow
           label="Extra JVM arguments"

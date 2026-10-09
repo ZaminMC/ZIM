@@ -8,15 +8,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
-use zamin_core::config::{self, EffectiveSettings, ServerConfigFile};
+use zamin_core::config::{self, EffectiveSettings, SandboxMode, ServerConfigFile};
 use zamin_core::error::CoreError;
 use zamin_core::logparse;
-use zamin_core::platform::{self, ProcessIdentity, Spawned};
+use zamin_core::platform::{self, JobNotice, ProcessIdentity, SandboxSpawn, Spawned};
+use zamin_core::sandbox::{self as sandbox_core, SecurityJournal, StorageVerdict};
 use zamin_core::supervisor::state::StateMachine;
 use zamin_core::supervisor::LifecycleCommand;
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::server::{CrashClassification, ServerState};
-use zamin_protocol::streams::{LogLevel, LogLine, MetricsSample};
+use zamin_protocol::streams::{
+    CoreEvent, LogLevel, LogLine, MetricsSample, SecurityNoticeKind,
+};
 
 use crate::hub::HubHandle;
 
@@ -26,6 +29,10 @@ const GRACEFUL_GRACE: Duration = Duration::from_secs(10);
 /// sampler's own cost is two small /proc reads (or one syscall pair on
 /// Windows) per second — far under the < 1% core budget.
 const METRICS_INTERVAL: Duration = Duration::from_secs(1);
+/// Storage accounting interval: one budgeted directory walk per server
+/// per 30 s. The walk stops the moment the budget is exceeded, so a
+/// runaway tree costs the budget, not the disk (sandbox/mod.rs).
+const STORAGE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Log lines attached to a crash classification as evidence (§53 crash card).
 const CRASH_EVIDENCE_LINES: usize = 3;
@@ -75,11 +82,18 @@ pub struct Actor {
     /// considers fetched runtimes alongside system-wide candidates.
     managed_java_root: PathBuf,
     hub: HubHandle,
+    /// The engine's shared storage gate: the sampler publishes verdicts,
+    /// the file APIs consult them before touching disk.
+    gate: std::sync::Arc<crate::engine::StorageGate>,
+    /// The data-dir security journal (one file for the whole daemon):
+    /// every boundary notice the UI sees is also fsync'd here, so an
+    /// operator reading the journal reads the same story.
+    journal: std::sync::Arc<SecurityJournal>,
 
     machine: StateMachine,
     spawned: Option<Spawned>,
     identity: Option<ProcessIdentity>,
-    stdin: Option<tokio::process::ChildStdin>,
+    stdin: Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>>,
     started_at_ms: Option<i64>,
 
     // Shutdown-ladder progress, driven by the tick loop so ownership of the
@@ -101,9 +115,17 @@ pub struct Actor {
     /// no process is live — a percent must never span process generations.
     metrics_cpu: Option<(Duration, Instant)>,
     metrics_last_sample: Instant,
+
+    /// Storage accounting state (Part 2): the last verdict, the last
+    /// walk instant, and the last verdict the UI was told about — a
+    /// transition is announced once, not every 30 s. Reset whenever the
+    /// budget is unconfigured.
+    storage_last_sample: Instant,
+    storage_announced: Option<StorageVerdict>,
 }
 
 impl Actor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_id: String,
         root: PathBuf,
@@ -111,6 +133,8 @@ impl Actor {
         global_config_path: PathBuf,
         managed_java_root: PathBuf,
         hub: HubHandle,
+        gate: std::sync::Arc<crate::engine::StorageGate>,
+        journal: std::sync::Arc<SecurityJournal>,
         initial_state: zamin_core::supervisor::state::ServerState,
     ) -> Actor {
         Actor {
@@ -120,6 +144,8 @@ impl Actor {
             global_config_path,
             managed_java_root,
             hub,
+            gate,
+            journal,
             machine: StateMachine::new(initial_state),
             spawned: None,
             identity: None,
@@ -132,9 +158,14 @@ impl Actor {
             startup_timeout_surfaced: false,
             metrics_cpu: None,
             metrics_last_sample: Instant::now(),
+            // The first tick samples storage immediately (a fresh gate
+            // must not stay empty for 30 s while writes flow through).
+            storage_last_sample: Instant::now().checked_sub(STORAGE_INTERVAL).unwrap_or_else(Instant::now),
+            storage_announced: None,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn_task(
         server_id: String,
         root: PathBuf,
@@ -142,6 +173,8 @@ impl Actor {
         global_config_path: PathBuf,
         managed_java_root: PathBuf,
         hub: HubHandle,
+        gate: std::sync::Arc<crate::engine::StorageGate>,
+        journal: std::sync::Arc<SecurityJournal>,
         initial_state: zamin_core::supervisor::state::ServerState,
     ) -> mpsc::Sender<ActorCommand> {
         let (tx, rx) = mpsc::channel(64);
@@ -152,6 +185,8 @@ impl Actor {
             global_config_path,
             managed_java_root,
             hub,
+            gate,
+            journal,
             initial_state,
         );
         tokio::spawn(actor.run(rx));
@@ -351,15 +386,58 @@ impl Actor {
         // JVM's metaspace, code cache, and stacks live outside -Xmx —
         // capping at the heap alone would strangle a healthy server).
         // The process ceiling bounds fork bombs (plugins that exec);
-        // children inherit the job and can never exceed it.
+        // children inherit the job and can never exceed it. The CPU
+        // ceiling is the configured percent-of-one-core; the platform
+        // layer converts it to the OS's own scale.
         let memory_bytes = settings
             .max_memory_mb
             .map(|mb| ((mb as u64) + 512) * 1024 * 1024);
         let limits = zamin_core::platform::SpawnLimits {
             memory_bytes,
-            cpu_percent: None, // no per-server CPU config surface yet (P2)
+            cpu_percent: settings.cpu_percent,
             process_count: Some(64),
             file_size_bytes: None,
+        };
+
+        // The OS process boundary (Part 2). `sandboxMode: auto` — the
+        // default — asks the platform for its strongest practical
+        // boundary (Windows: AppContainer + Job Object); there, a failed
+        // sandbox build FAILS THE SPAWN (fail-closed, never a silent
+        // downgrade to an unbounded process). On platforms with no
+        // boundary the daemon can build, `auto` honestly degrades: the
+        // spawn proceeds plain and a LimitsNotEnforced notice records —
+        // once per start, journal + events — exactly what did NOT hold.
+        // `off` is the operator's explicit choice and is reported as
+        // such in the inspector.
+        let sandbox = match (
+            settings.sandbox_mode,
+            platform::sandbox_container_name(&self.server_id),
+        ) {
+            (SandboxMode::Auto, Some(container_name)) => {
+                Some(SandboxSpawn {
+                    container_name,
+                    network: zamin_core::platform::NetworkSandbox::from_policy(
+                        settings.network_policy,
+                    ),
+                })
+            }
+            (SandboxMode::Auto, None) => {
+                let detail = "no OS process boundary on this platform; the server runs unsandboxed (the configured limits still ride the spawn where the platform provides them)";
+                tracing::warn!(server = %self.server_id, "security notice: {detail}");
+                self.journal
+                    .record(Some(&self.server_id), "security_notice", detail)
+                    .ok();
+                self.hub.publish_event(
+                    Some(self.server_id.clone()),
+                    CoreEvent::SecurityNotice {
+                        server_id: Some(self.server_id.clone()),
+                        kind: SecurityNoticeKind::LimitsNotEnforced,
+                        detail: Some(detail.to_owned()),
+                    },
+                );
+                None
+            }
+            (SandboxMode::Off, _) => None,
         };
 
         let spec = zamin_core::platform::SpawnSpec {
@@ -367,6 +445,7 @@ impl Actor {
             args,
             working_dir: self.root.clone(),
             limits,
+            sandbox,
         };
         let mut spawned = tokio::task::spawn_blocking({
             let spec = spec.clone();
@@ -378,7 +457,19 @@ impl Actor {
 
         let pid = spawned.pid();
         self.identity = platform::process().identity(pid);
-        self.stdin = spawned.handle().child().stdin.take();
+        self.stdin = match spawned.handle().take_stdin() {
+            Ok(stdin) => stdin,
+            Err(error) => {
+                // The server runs, but console commands cannot reach it:
+                // the graceful ladder falls through to the OS signal. A
+                // degraded console is reported, never hidden.
+                tracing::error!(
+                    server = %self.server_id,
+                    "server stdin unavailable ({error}); stop commands fall through to the OS signal ladder"
+                );
+                None
+            }
+        };
         self.spawned = Some(spawned);
         self.started_at_ms = Some(now_ms());
         self.startup_timeout_surfaced = false;
@@ -690,9 +781,50 @@ impl Actor {
         // Child exit check first: an exited process is not "validating" or
         // "stopping" anymore.
         if let Some(spawned) = self.spawned.as_mut() {
-            if let Ok(Some(status)) = spawned.handle().child().try_wait() {
-                self.on_exit(status).await;
-                return;
+            match spawned.handle().try_wait() {
+                Ok(Some(status)) => {
+                    self.on_exit(status).await;
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    // A broken exit poll must not fake a state change; the
+                    // next tick retries. Repeated failures land in the log.
+                    tracing::warn!(server = %self.server_id, "exit poll failed: {error}");
+                }
+            }
+            // The OS enforcement object's notices (Part 2): refusals the
+            // JOB posted — allocations past the memory cap, forks past the
+            // process ceiling. Each becomes a security event + journal
+            // line; nothing here is synthesized from a threshold check.
+            let notices = spawned.handle().drain_notices();
+            for notice in notices {
+                let (kind, detail) = match notice {
+                    JobNotice::ActiveProcessLimit { pid } => (
+                        SecurityNoticeKind::ProcessBlocked,
+                        format!("the OS refused a new process in the server tree (pid {pid}): the active-process ceiling holds"),
+                    ),
+                    JobNotice::ProcessMemoryLimit { pid } => (
+                        SecurityNoticeKind::MemoryLimitReached,
+                        format!("the OS refused memory to pid {pid} at the tree's cap"),
+                    ),
+                    JobNotice::JobMemoryLimit => (
+                        SecurityNoticeKind::MemoryLimitReached,
+                        "the OS refused memory at the tree-wide cap".to_owned(),
+                    ),
+                };
+                tracing::warn!(server = %self.server_id, kind = ?kind, "security notice: {detail}");
+                self.journal
+                    .record(Some(&self.server_id), "security_notice", &detail)
+                    .ok();
+                self.hub.publish_event(
+                    Some(self.server_id.clone()),
+                    CoreEvent::SecurityNotice {
+                        server_id: Some(self.server_id.clone()),
+                        kind,
+                        detail: Some(detail),
+                    },
+                );
             }
         }
         match self.machine.state() {
@@ -736,6 +868,75 @@ impl Actor {
             }
         }
         self.sample_metrics();
+        self.sample_storage().await;
+    }
+
+    /// The storage accountant (Part 2): one budgeted walk per interval
+    /// over the server tree. The verdict (a) becomes a security event ON
+    /// TRANSITION — once, not every sample — and (b) is published into
+    /// the engine's shared storage gate, which refuses daemon-mediated
+    /// writes while the tree is past its budget. The OS cannot hard-stop
+    /// a plugin writing through its own handles (Windows has no
+    /// per-directory quota); this module's doc states that boundary
+    /// honestly and the inspector repeats it.
+    async fn sample_storage(&mut self) {
+        let Some(budget) = self
+            .load_effective_settings()
+            .await
+            .ok()
+            .and_then(|s| s.storage_bytes)
+        else {
+            // Unconfigured: accounted, not capped — an honest absence.
+            self.storage_announced = None;
+            return;
+        };
+        if self.storage_last_sample.elapsed() < STORAGE_INTERVAL {
+            return;
+        }
+        self.storage_last_sample = Instant::now();
+        let root = self.root.clone();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let walk =
+            tokio::task::spawn_blocking(move || sandbox_core::measure_dir(&root, budget, &cancel))
+                .await;
+        let Ok(Ok(walk)) = walk else {
+            // Cancelled or the walk task died: the next interval retries.
+            return;
+        };
+        let verdict = sandbox_core::classify_usage(walk.bytes, Some(budget));
+        self.gate.update(&self.server_id, budget, verdict);
+        if self.storage_announced == Some(verdict) {
+            return; // a steady state is not news
+        }
+        self.storage_announced = Some(verdict);
+        let (kind, level) = match verdict {
+            StorageVerdict::Warning => (Some(SecurityNoticeKind::StorageWarning), "warn"),
+            StorageVerdict::Exceeded => (Some(SecurityNoticeKind::StorageLimitReached), "warn"),
+            _ => (None, "info"),
+        };
+        let detail = format!(
+            "server tree measured {}/{} bytes ({} files); storage verdict: {verdict:?}",
+            walk.bytes, budget, walk.files
+        );
+        match (level, kind) {
+            ("warn", Some(kind)) => {
+                tracing::warn!(server = %self.server_id, "security notice: {detail}");
+                self.journal
+                    .record(Some(&self.server_id), "security_notice", &detail)
+                    .ok();
+                self.hub.publish_event(
+                    Some(self.server_id.clone()),
+                    CoreEvent::SecurityNotice {
+                        server_id: Some(self.server_id.clone()),
+                        kind,
+                        detail: Some(detail),
+                    },
+                );
+            }
+            _ => {
+                tracing::info!(server = %self.server_id, "storage sample: {detail}");
+            }
+        }
     }
 
     /// The 1 Hz metrics sampler (ADR-0006): CPU% from counter deltas, RSS,
@@ -942,14 +1143,28 @@ impl Actor {
         let Some(spawned) = self.spawned.as_mut() else {
             return;
         };
-        let child = spawned.handle().child();
+        let handle = spawned.handle();
+        let stdout = match handle.take_stdout() {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                tracing::error!(server = %self.server_id, "server stdout unavailable: {error}");
+                None
+            }
+        };
+        let stderr = match handle.take_stderr() {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                tracing::error!(server = %self.server_id, "server stderr unavailable: {error}");
+                None
+            }
+        };
 
-        if let Some(stdout) = child.stdout.take() {
+        if let Some(stdout) = stdout {
             let hub = self.hub.clone();
             let server_id = self.server_id.clone();
             tokio::spawn(pump_logs(stdout, server_id, hub, LogLevel::Unknown));
         }
-        if let Some(stderr) = child.stderr.take() {
+        if let Some(stderr) = stderr {
             let hub = self.hub.clone();
             let server_id = self.server_id.clone();
             tokio::spawn(pump_logs(stderr, server_id, hub, LogLevel::Error));

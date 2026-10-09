@@ -14,6 +14,35 @@ use crate::fsops::atomic_write;
 
 pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 
+/// The per-server outbound network policy (Part 2). The OS layer maps
+/// this onto the platform's own enforcement (Windows: AppContainer
+/// capability SIDs — `Unrestricted` grants the internet-client
+/// capabilities, `LocalOnly` strips them but exempts loopback,
+/// `BlockedOutbound` strips them all). An allow-list policy is
+/// deliberately absent: per-destination filtering needs a filter driver
+/// the platform layer cannot install unelevated, and a policy the OS
+/// cannot enforce is never offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkPolicy {
+    Unrestricted,
+    LocalOnly,
+    BlockedOutbound,
+}
+
+/// How strongly the OS isolates the server's process (Part 2). `auto`
+/// means "the strongest practical boundary this platform provides" —
+/// on Windows an AppContainer (filesystem ACL boundary + capability
+/// network gating) wrapped in the enforcement Job Object; the daemon
+/// refuses nothing silently, a failed sandbox build fails the spawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxMode {
+    Off,
+    #[default]
+    Auto,
+}
+
 /// Defaults every server inherits unless it overrides the field.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -35,6 +64,20 @@ pub struct ServerSettingsDefaults {
     /// successful backup (ARCH-REVIEW §16.5 — retention is required, not
     /// optional). The built-in default is applied by `layer`.
     pub backup_keep: Option<u32>,
+    /// CPU ceiling as a percent of ONE core (400 = four cores). The
+    /// platform layer translates this into the OS's own scale (Windows
+    /// CPU-rate control is a fraction of the WHOLE machine) at spawn.
+    /// `None` = uncapped, an honest absence.
+    pub cpu_percent: Option<u32>,
+    /// Storage budget in bytes. The daemon accounts the tree and refuses
+    /// its own write APIs past the budget; the OS cannot hard-stop a
+    /// plugin writing through its own handles (no per-directory quota on
+    /// Windows) — that boundary is sampled + reported, never faked.
+    pub storage_bytes: Option<u64>,
+    /// The process-sandbox strength (see `SandboxMode`). Default `auto`.
+    pub sandbox_mode: Option<SandboxMode>,
+    /// The outbound network policy (see `NetworkPolicy`).
+    pub network_policy: Option<NetworkPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -108,6 +151,10 @@ pub struct EffectiveSettings {
     pub mc_version: Option<String>,
     pub java_major_required: Option<u32>,
     pub backup_keep: u32,
+    pub cpu_percent: Option<u32>,
+    pub storage_bytes: Option<u64>,
+    pub sandbox_mode: SandboxMode,
+    pub network_policy: NetworkPolicy,
 }
 
 /// The built-in default retention when neither config file sets it.
@@ -119,7 +166,7 @@ impl EffectiveSettings {
     pub fn provenance(
         global: &ServerSettingsDefaults,
         per_server: &ServerSettingsDefaults,
-    ) -> [Provenance; 10] {
+    ) -> [Provenance; 14] {
         [
             field_provenance(global.stop_timeout_secs, per_server.stop_timeout_secs),
             field_provenance(global.startup_timeout_secs, per_server.startup_timeout_secs),
@@ -134,6 +181,10 @@ impl EffectiveSettings {
             field_provenance(global.mc_version.clone(), per_server.mc_version.clone()),
             field_provenance(global.java_major_required, per_server.java_major_required),
             field_provenance(global.backup_keep, per_server.backup_keep),
+            field_provenance(global.cpu_percent, per_server.cpu_percent),
+            field_provenance(global.storage_bytes, per_server.storage_bytes),
+            field_provenance(global.sandbox_mode, per_server.sandbox_mode),
+            field_provenance(global.network_policy, per_server.network_policy),
         ]
     }
 }
@@ -186,6 +237,16 @@ pub fn layer(
             .backup_keep
             .or(global.backup_keep)
             .unwrap_or(BACKUP_KEEP_DEFAULT),
+        cpu_percent: per_server.cpu_percent.or(global.cpu_percent),
+        storage_bytes: per_server.storage_bytes.or(global.storage_bytes),
+        sandbox_mode: per_server
+            .sandbox_mode
+            .or(global.sandbox_mode)
+            .unwrap_or(SandboxMode::Auto),
+        network_policy: per_server
+            .network_policy
+            .or(global.network_policy)
+            .unwrap_or(NetworkPolicy::Unrestricted),
     }
 }
 
@@ -265,6 +326,15 @@ pub const TIMEOUT_MAX_SECS: u32 = 86_400; // a day; anything longer is a mistake
 pub const BACKUP_KEEP_MAX: u32 = 1_000;
 pub const JAVA_MAJOR_MIN: u32 = 8;
 pub const JAVA_MAJOR_MAX: u32 = 100;
+/// CPU ceiling bounds (percent of one core): 10% keeps even a quiet
+/// paper server alive; 2048 = twenty cores is more than any single
+/// managed instance needs on a personal machine.
+pub const CPU_PERCENT_MIN: u32 = 10;
+pub const CPU_PERCENT_MAX: u32 = 2_048;
+/// Storage budget floor: 1 GiB. Below that no realistic server fits.
+pub const STORAGE_MIN_BYTES: u64 = 1024 * 1024 * 1024;
+/// Storage budget ceiling: 16 TiB — beyond plausible personal disks.
+pub const STORAGE_MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024 * 1024;
 
 /// Validate one override set before it is written. Every rule states the
 /// field it names, so the error can travel to the UI verbatim.
@@ -308,6 +378,12 @@ pub fn validate_field(field: &str, value: Option<u32>) -> Result<(), CoreError> 
         "javaMajorRequired" => check(
             (JAVA_MAJOR_MIN..=JAVA_MAJOR_MAX).contains(&value),
             &format!("the Java major must be between {JAVA_MAJOR_MIN} and {JAVA_MAJOR_MAX}"),
+        ),
+        "cpuPercent" => check(
+            (CPU_PERCENT_MIN..=CPU_PERCENT_MAX).contains(&value),
+            &format!(
+                "the CPU ceiling must be between {CPU_PERCENT_MIN}% and {CPU_PERCENT_MAX}% of one core"
+            ),
         ),
         _ => Ok(()), // unknown fields are the caller's business
     }

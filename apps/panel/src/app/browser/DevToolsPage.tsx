@@ -12,8 +12,9 @@ import { useConnection } from "../../state/connection";
 import { sortedServers, useServers } from "../../state/servers";
 import { navigateHost } from "../../state/shellLane";
 import { describeError } from "../../state/errors";
+import { getServerConfig } from "../../state/actions";
 import { client } from "../../state/wire";
-import type { CoreEvent } from "../../protocol/types";
+import type { ConfigGetResult, CoreEvent } from "../../protocol/types";
 import styles from "./DevToolsPage.module.css";
 
 type Line = { kind: "in" | "out" | "error" | "info"; text: string };
@@ -72,6 +73,9 @@ export function DevToolsPage() {
   const [historyAt, setHistoryAt] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [feed, setFeed] = useState<CoreEvent[]>([]);
+  // The inspector's sandbox record is per-server config (the same
+  // config.get the Startup tab renders) — fetched, never guessed.
+  const [inspectConfig, setInspectConfig] = useState<ConfigGetResult | null>(null);
 
   const log = (line: Line) => setLines((cur) => [...cur.slice(-200), line]);
 
@@ -101,6 +105,28 @@ export function DevToolsPage() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [lines]);
+
+  // The inspector rides config.get for its selected server; a failed
+  // fetch keeps the last good record rather than a blank panel.
+  useEffect(() => {
+    if (section !== "inspector" || status !== "ready") return;
+    const first = sortedServers(useServers.getState().servers)[0];
+    if (!first) {
+      setInspectConfig(null);
+      return;
+    }
+    let alive = true;
+    void getServerConfig(first.serverId)
+      .then((config) => {
+        if (alive) setInspectConfig(config);
+      })
+      .catch(() => {
+        if (alive) setInspectConfig(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [section, status, servers]);
 
   const run = () => {
     const code = input.trim();
@@ -146,6 +172,11 @@ export function DevToolsPage() {
 
   const sorted = sortedServers(servers);
   const selected = section === "inspector" ? sorted[0] : undefined;
+  const selectedConfig = section === "inspector" ? inspectConfig : null;
+  const selectedCpuPercent = selectedConfig?.effective.cpuPercent;
+  const selectedStorageBytes = selectedConfig?.effective.storageBytes;
+  const selectedNetworkPolicy = selectedConfig?.effective.networkPolicy;
+  const selectedSandboxMode = selectedConfig?.effective.sandboxMode;
 
 
   return (
@@ -243,14 +274,42 @@ export function DevToolsPage() {
               </dd>
               <dt>Status</dt>
               <dd>{selected.state}</dd>
+              <dt>Process sandbox</dt>
+              <dd>
+                {selectedSandboxMode === "off"
+                  ? "Off — the operator chose an unsandboxed process"
+                  : "Auto — the strongest boundary this platform provides (Windows: AppContainer + Job Object)"}
+              </dd>
               <dt>Filesystem</dt>
-              <dd>Jailed to the server root (daemon APIs); OS read isolation: not yet enforced</dd>
+              <dd>
+                Jailed to the server root (daemon APIs); Windows: the process runs inside an
+                AppContainer, so the kernel refuses reads/writes outside the jail however the path
+                is spelled. Other platforms: OS read isolation not enforced, daemon APIs jail only.
+              </dd>
               <dt>Memory</dt>
               <dd>Job-object cap: -Xmx + 512 MiB headroom (Windows: hard)</dd>
+              <dt>CPU</dt>
+              <dd>
+                {selectedCpuPercent
+                  ? `Hard scheduler cap at ${selectedCpuPercent}% of one core`
+                  : "Uncapped — set a ceiling on the Startup tab"}
+              </dd>
               <dt>Processes</dt>
               <dd>Job ceiling 64; children inherit the job, breakaway never granted</dd>
               <dt>Storage</dt>
-              <dd>Accounted by the daemon sampler; writes refused at the budget (not an OS quota)</dd>
+              <dd>
+                {selectedStorageBytes
+                  ? `Budget ${Math.round(selectedStorageBytes / 1024 ** 3)} GiB — accounted by the daemon sampler; daemon-mediated writes refused past the budget (not an OS quota)`
+                  : "Accounted, uncapped — set a budget on the Startup tab"}
+              </dd>
+              <dt>Network</dt>
+              <dd>
+                {selectedNetworkPolicy === "local-only"
+                  ? "Outbound internet refused by the OS; loopback reachable; inbound players unaffected"
+                  : selectedNetworkPolicy === "blocked-outbound"
+                    ? "All outbound refused by the OS; inbound players unaffected"
+                    : "Unrestricted"}
+              </dd>
             </dl>
           ) : null}
         </div>

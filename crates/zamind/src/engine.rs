@@ -8,12 +8,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, oneshot};
+use zamin_core::sandbox::StorageVerdict;
 use zamin_core::server::marker;
 use zamin_core::server::registry::Registry;
 use zamin_core::server::ServerId;
 use zamin_protocol::config::{
-    ConfigGetResult, EffectiveSettingsView, NetworkStatusResult, ProvenanceView,
-    ServerSettingsPatch,
+    ConfigGetResult, EffectiveSettingsView, NetworkPolicyView, NetworkStatusResult, ProvenanceView,
+    SandboxModeView, ServerSettingsPatch,
 };
 use zamin_protocol::discovery::{
     DiscoverParams, DiscoverResult, DiscoveredServer, RootsGetResult, RootsSetParams,
@@ -22,7 +23,9 @@ use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::extensions::{ExtensionProblem, ExtensionView, ExtensionsListResult};
 use zamin_protocol::publish::PublishConfig;
 use zamin_protocol::server::{LifecycleResult, ServerDetails, ServerState, ServerSummary};
-use zamin_protocol::streams::{EventsSnapshot, StreamCursor, StreamKind, SubscribeResult};
+use zamin_protocol::streams::{
+    CoreEvent, EventsSnapshot, SecurityNoticeKind, StreamCursor, StreamKind, SubscribeResult,
+};
 
 use crate::actor::{Actor, ActorCommand, AdoptRecord};
 use crate::hub::{HubError, HubHandle};
@@ -31,6 +34,61 @@ use crate::jobs::{JobFailure, JobRunner};
 #[derive(Clone)]
 pub struct Engine {
     inner: Arc<Inner>,
+}
+
+/// The shared storage gate (Part 2): the per-server actor publishes the
+/// sampler's verdicts here; every daemon-mediated write path (files
+/// staging/commit/mkdir/rename/copy, plugin install staging) consults
+/// the gate BEFORE touching disk. A tree past its budget refuses new
+/// daemon-mediated writes with a typed error until it is under again.
+/// What this does NOT stop — a plugin writing through its own handles —
+/// is the documented OS-quota limitation, surfaced in the inspector.
+pub struct StorageGate {
+    entries: std::sync::Mutex<std::collections::HashMap<String, (u64, StorageVerdict)>>,
+}
+
+impl Default for StorageGate {
+    fn default() -> Self {
+        StorageGate {
+            entries: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl StorageGate {
+    pub fn update(&self, server_id: &str, budget: u64, verdict: StorageVerdict) {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(server_id.to_owned(), (budget, verdict));
+    }
+
+    pub fn remove(&self, server_id: &str) {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(server_id);
+    }
+
+    /// The write gate. No entry = the sampler has not measured yet — the
+    /// write flows (fail-open on ignorance, never on a KNOWN exceeded
+    /// budget; the first sample lands within seconds of the actor's
+    /// first tick).
+    pub fn check_writable(&self, server_id: &str) -> Result<(), ProtocolError> {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match entries.get(server_id) {
+            Some((budget, StorageVerdict::Exceeded)) => Err(ProtocolError::new(
+                ErrorCode::FsNotWritable,
+                format!(
+                    "This server is past its storage budget ({budget} bytes); writes are refused until space is freed or the budget is raised."
+                ),
+            )),
+            _ => Ok(()),
+        }
+    }
 }
 
 struct Inner {
@@ -58,6 +116,12 @@ struct Inner {
     /// tiny and the operations rare; one daemon-wide lock keeps each
     /// whole (no await is ever held across it).
     schedules_io: Mutex<()>,
+    /// The storage gate (see StorageGate): sampler verdicts in, write
+    /// refusals out.
+    storage_gate: std::sync::Arc<StorageGate>,
+    /// The data-dir security journal: one append-only JSONL file the
+    /// actors fsync every boundary notice into.
+    journal: std::sync::Arc<zamin_core::sandbox::SecurityJournal>,
     /// Same story for the per-server config.toml read-modify-write
     /// (ADR-0019's config.set) and the global defaults file.
     config_io: Mutex<()>,
@@ -111,6 +175,7 @@ impl Engine {
         });
         let hub = HubHandle::new();
         let jobs = JobRunner::new(hub.clone());
+        let journal = std::sync::Arc::new(zamin_core::sandbox::SecurityJournal::new(&data_dir));
         Engine {
             inner: Arc::new(Inner {
                 data_dir,
@@ -124,6 +189,8 @@ impl Engine {
                 fabric_url,
                 java_cache: Mutex::new(HashMap::new()),
                 schedules_io: Mutex::new(()),
+                storage_gate: std::sync::Arc::new(StorageGate::default()),
+                journal,
                 config_io: Mutex::new(()),
                 publish_io: Mutex::new(()),
                 boot_ms: now_ms_unix(),
@@ -178,6 +245,8 @@ impl Engine {
             self.inner.data_dir.join("config.toml"),
             self.managed_java_dir(),
             self.inner.hub.clone(),
+            self.inner.storage_gate.clone(),
+            self.inner.journal.clone(),
             zamin_core::supervisor::state::ServerState::NotRunning,
         );
         actors.insert(server_id.to_string(), tx.clone());
@@ -224,6 +293,8 @@ impl Engine {
                 self.inner.data_dir.join("config.toml"),
                 self.managed_java_dir(),
                 self.inner.hub.clone(),
+                self.inner.storage_gate.clone(),
+                self.inner.journal.clone(),
                 zamin_core::supervisor::state::ServerState::Adopting,
             )
             .adopt(AdoptRecord {
@@ -716,7 +787,7 @@ impl Engine {
         .map_err(|e| EngineError::Internal(format!("config task failed: {e}")))?
         .map_err(EngineError::Protocol)?;
 
-        let [stop_timeout_secs, startup_timeout_secs, port, min_memory_mb, max_memory_mb, extra_jvm_args, java_path, mc_version, java_major_required, backup_keep] =
+        let [stop_timeout_secs, startup_timeout_secs, port, min_memory_mb, max_memory_mb, extra_jvm_args, java_path, mc_version, java_major_required, backup_keep, cpu_percent, storage_bytes, sandbox_mode, network_policy] =
             provenance;
         let provenance = ProvenanceView {
             stop_timeout_secs: field_prov(stop_timeout_secs),
@@ -729,6 +800,10 @@ impl Engine {
             mc_version: field_prov(mc_version),
             java_major_required: field_prov(java_major_required),
             backup_keep: field_prov(backup_keep),
+            cpu_percent: field_prov(cpu_percent),
+            storage_bytes: field_prov(storage_bytes),
+            sandbox_mode: field_prov(sandbox_mode),
+            network_policy: field_prov(network_policy),
         };
         Ok(ConfigGetResult {
             server_id: server_id.to_string(),
@@ -747,6 +822,21 @@ impl Engine {
                 mc_version: effective.mc_version,
                 java_major_required: effective.java_major_required,
                 backup_keep: effective.backup_keep,
+                cpu_percent: effective.cpu_percent,
+                storage_bytes: effective.storage_bytes,
+                sandbox_mode: match effective.sandbox_mode {
+                    zamin_core::config::SandboxMode::Off => SandboxModeView::Off,
+                    zamin_core::config::SandboxMode::Auto => SandboxModeView::Auto,
+                },
+                network_policy: match effective.network_policy {
+                    zamin_core::config::NetworkPolicy::Unrestricted => {
+                        NetworkPolicyView::Unrestricted
+                    }
+                    zamin_core::config::NetworkPolicy::LocalOnly => NetworkPolicyView::LocalOnly,
+                    zamin_core::config::NetworkPolicy::BlockedOutbound => {
+                        NetworkPolicyView::BlockedOutbound
+                    }
+                },
             },
             provenance,
         })
@@ -817,6 +907,21 @@ impl Engine {
             zamin_core::config::validate_field("maxMemoryMb", Some(max))
                 .map_err(|e| to_protocol(&e))?;
         }
+        if let Some(cpu) = patch.cpu_percent.flatten() {
+            zamin_core::config::validate_field("cpuPercent", Some(cpu))
+                .map_err(|e| to_protocol(&e))?;
+        }
+        if let Some(bytes) = patch.storage_bytes.flatten() {
+            if !(zamin_core::config::STORAGE_MIN_BYTES..=zamin_core::config::STORAGE_MAX_BYTES)
+                .contains(&bytes)
+            {
+                return Err(EngineError::Protocol(ProtocolError::new(
+                    ErrorCode::ConfigInvalid,
+                    "The storage budget must be between 1 GiB and 16 TiB.",
+                )
+                .with_context("field", "storageBytes")));
+            }
+        }
 
         // The name has no "clear" state: a server always has a name.
         if let Some(name) = &display_name {
@@ -868,6 +973,29 @@ impl Engine {
             }
             if let Some(v) = patch.backup_keep {
                 s.backup_keep = v;
+            }
+            if let Some(v) = patch.cpu_percent {
+                s.cpu_percent = v;
+            }
+            if let Some(v) = patch.storage_bytes {
+                s.storage_bytes = v;
+            }
+            if let Some(v) = patch.sandbox_mode {
+                s.sandbox_mode = v.map(|view| match view {
+                    SandboxModeView::Off => zamin_core::config::SandboxMode::Off,
+                    SandboxModeView::Auto => zamin_core::config::SandboxMode::Auto,
+                });
+            }
+            if let Some(v) = patch.network_policy {
+                s.network_policy = v.map(|view| match view {
+                    NetworkPolicyView::Unrestricted => {
+                        zamin_core::config::NetworkPolicy::Unrestricted
+                    }
+                    NetworkPolicyView::LocalOnly => zamin_core::config::NetworkPolicy::LocalOnly,
+                    NetworkPolicyView::BlockedOutbound => {
+                        zamin_core::config::NetworkPolicy::BlockedOutbound
+                    }
+                });
             }
             if let Some(v) = jar {
                 file.jar = v;
@@ -979,6 +1107,11 @@ impl Engine {
             .remove(server_id)
             .map_err(|e| to_protocol(&e))?;
         let _ = std::fs::remove_dir_all(server_dir(&self.inner.data_dir, server_id.as_str()));
+        // The sandbox boundary goes with the server (Windows: AppContainer
+        // profile + loopback exemption). Best-effort: a leftover profile
+        // is inert (nothing can spawn into it), logged if removal fails.
+        zamin_core::platform::sandbox_remove(server_id.as_str());
+        self.inner.storage_gate.remove(server_id.as_str());
         // Mirror of the registration broadcast: open panels drop the entry.
         self.publish_registry_event(
             server_id,
@@ -1131,7 +1264,11 @@ impl Engine {
             .map_err(EngineError::Protocol)
     }
 
-    /// Run one sync file-manager operation off the async runtime.
+    /// Run one sync file-manager operation off the async runtime. A
+    /// refusal at the containment boundary (traversal, symlink escape,
+    /// sibling prefix) is also a SECURITY NOTICE: the attempt is
+    /// journaled and published on the events stream — the operator sees
+    /// the same story the API returned.
     async fn file_op<T>(
         &self,
         server_id: &ServerId,
@@ -1141,10 +1278,38 @@ impl Engine {
         T: Send + 'static,
     {
         let root = self.file_root(server_id)?;
-        tokio::task::spawn_blocking(move || op(&root))
+        let result = tokio::task::spawn_blocking(move || op(&root))
             .await
-            .map_err(|e| EngineError::Internal(format!("file operation task failed: {e}")))?
-            .map_err(EngineError::Protocol)
+            .map_err(|e| EngineError::Internal(format!("file operation task failed: {e}")))?;
+        let result = match result {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                if matches!(
+                    err.code,
+                    ErrorCode::FsPathEscapesRoot | ErrorCode::FsOutsideRoot | ErrorCode::FsSymlinkRefused
+                ) {
+                    let detail = format!(
+                        "file API request refused at the containment boundary: {} [{:?}]",
+                        err.message, err.code
+                    );
+                    tracing::warn!(server = %server_id.as_str(), "security notice: {detail}");
+                    self.inner
+                        .journal
+                        .record(Some(server_id.as_str()), "security_notice", &detail)
+                        .ok();
+                    self.inner.hub.publish_event(
+                        Some(server_id.to_string()),
+                        CoreEvent::SecurityNotice {
+                            server_id: Some(server_id.to_string()),
+                            kind: SecurityNoticeKind::SandboxViolation,
+                            detail: Some(detail),
+                        },
+                    );
+                }
+                Err(EngineError::Protocol(err))
+            }
+        };
+        result
     }
 
     pub async fn files_list(
@@ -1181,6 +1346,7 @@ impl Engine {
         staging_id: Option<String>,
         content: &str,
     ) -> Result<zamin_protocol::files::FilesWriteResult, EngineError> {
+        self.inner.storage_gate.check_writable(server_id.as_str())?;
         let content = content.to_owned();
         self.file_op(server_id, move |root| {
             crate::files::write(root, staging_id.as_deref(), &content)
@@ -1194,6 +1360,7 @@ impl Engine {
         staging_id: &str,
         target: &str,
     ) -> Result<zamin_protocol::files::FilesCommitResult, EngineError> {
+        self.inner.storage_gate.check_writable(server_id.as_str())?;
         let staging_id = staging_id.to_owned();
         let target = target.to_owned();
         self.file_op(server_id, move |root| {
@@ -1203,6 +1370,7 @@ impl Engine {
     }
 
     pub async fn files_mkdir(&self, server_id: &ServerId, path: &str) -> Result<(), EngineError> {
+        self.inner.storage_gate.check_writable(server_id.as_str())?;
         let path = path.to_owned();
         self.file_op(server_id, move |root| crate::files::mkdir(root, &path))
             .await
@@ -1238,6 +1406,7 @@ impl Engine {
         from: &str,
         to: &str,
     ) -> Result<zamin_protocol::files::FilesCopyResult, EngineError> {
+        self.inner.storage_gate.check_writable(server_id.as_str())?;
         let from = from.to_owned();
         let to = to.to_owned();
         self.file_op(server_id, move |root| crate::files::copy(root, &from, &to))
@@ -3853,4 +4022,54 @@ fn complete_lines_in(buf: &[u8], buf_start: u64, cursor: u64, len: u64) -> usize
         0
     };
     parts.saturating_sub(head + tail)
+}
+
+#[cfg(test)]
+mod storage_gate_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::StorageGate;
+    use zamin_core::sandbox::StorageVerdict;
+    use zamin_protocol::error::ErrorCode;
+
+    #[test]
+    fn an_exceeded_budget_refuses_writes() {
+        let gate = StorageGate::default();
+        gate.update("survival", 100, StorageVerdict::Exceeded);
+        let err = gate
+            .check_writable("survival")
+            .expect_err("an exceeded budget refuses writes");
+        assert_eq!(err.code, ErrorCode::FsNotWritable);
+        assert!(
+            err.message.contains("100"),
+            "the refusal names the budget: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ok_and_warning_flow() {
+        let gate = StorageGate::default();
+        gate.update("survival", 100, StorageVerdict::Ok);
+        gate.check_writable("survival").expect("ok flows");
+        gate.update("survival", 100, StorageVerdict::Warning);
+        gate.check_writable("survival")
+            .expect("warning warns but does not refuse");
+    }
+
+    #[test]
+    fn an_unmeasured_server_flows_fail_open_on_ignorance() {
+        let gate = StorageGate::default();
+        gate.check_writable("never-sampled")
+            .expect("no measurement yet is not a refusal");
+    }
+
+    #[test]
+    fn removal_restores_flow() {
+        let gate = StorageGate::default();
+        gate.update("survival", 100, StorageVerdict::Exceeded);
+        gate.remove("survival");
+        gate.check_writable("survival")
+            .expect("a removed server has no gate left to refuse");
+    }
 }

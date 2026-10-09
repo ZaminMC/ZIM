@@ -22,17 +22,23 @@ tar = "0.4"
 flate2 = "1"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 sha2 = "0.10"
+bytes = { workspace = true }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Isolation",
     "Win32_Storage_FileSystem",
     "Win32_System_Threading",
     "Win32_System_Console",
+    "Win32_System_IO",
     "Win32_System_JobObjects",
+    "Win32_System_Pipes",
     "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
 ] }
 
 [target.'cfg(unix)'.dependencies]

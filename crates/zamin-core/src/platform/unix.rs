@@ -21,8 +21,38 @@ impl SpawnHandle for UnixHandle {
         self.pid
     }
 
-    fn child(&mut self) -> &mut tokio::process::Child {
-        &mut self.child
+    fn take_stdin(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>>, PlatformError> {
+        Ok(self
+            .child
+            .stdin
+            .take()
+            .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>))
+    }
+
+    fn take_stdout(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>>, PlatformError> {
+        Ok(self
+            .child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>))
+    }
+
+    fn take_stderr(
+        &mut self,
+    ) -> Result<Option<Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>>, PlatformError> {
+        Ok(self
+            .child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>))
+    }
+
+    fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, PlatformError> {
+        Ok(self.child.try_wait()?)
     }
 
     fn force_kill_tree(&mut self) -> Result<(), PlatformError> {
@@ -75,6 +105,18 @@ pub fn java_install_roots() -> Vec<PathBuf> {
 
 impl ProcessOps for UnixProcessOps {
     fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, PlatformError> {
+        // The contract is fail-closed: a spawn that asked for the OS
+        // boundary does not silently run without it. Unix hosts currently
+        // provide no AppContainer-equivalent the daemon can build
+        // unprivileged (namespaces need CAP_SYS_ADMIN or unprivileged
+        // userns with their own caveats), so the request is a typed
+        // failure, honestly worded — the operator sees the platform
+        // limitation instead of a server that quietly escaped its jail.
+        if spec.sandbox.is_some() {
+            return Err(PlatformError::SandboxBuild {
+                detail: "OS-level process sandboxing is implemented for Windows (AppContainer + Job Object); this Unix host has no equivalent the daemon can build unprivileged".to_owned(),
+            });
+        }
         let mut command = tokio::process::Command::new(&spec.program);
 
         // The rlimit layer: core dumps off, and a per-process file-size
@@ -262,12 +304,12 @@ mod tests {
     #[test]
     fn working_dir_type_check() {
         // Compile-time shape check for SpawnSpec on this platform.
-        let spec = SpawnSpec {
-            program: PathBuf::from("true"),
-            args: vec![],
-            working_dir: PathBuf::from("/tmp"),
-            limits: SpawnLimits::default(),
-        };
+        let spec = SpawnSpec::plain(
+            PathBuf::from("true"),
+            vec![],
+            PathBuf::from("/tmp"),
+            SpawnLimits::default(),
+        );
         assert_eq!(spec.working_dir, PathBuf::from("/tmp"));
     }
 

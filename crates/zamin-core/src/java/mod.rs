@@ -88,17 +88,17 @@ pub fn managed_candidates(root: &Path) -> Vec<PathBuf> {
 /// Ask the JVM for the truth. Parses stderr of
 /// `java -XshowSettings:properties -version`.
 pub fn inspect(java_path: &Path) -> Result<JavaInfo, CoreError> {
-    let spec = SpawnSpec {
-        program: java_path.to_path_buf(),
-        args: vec![
+    let spec = SpawnSpec::plain(
+        java_path.to_path_buf(),
+        vec![
             "-XshowSettings:properties".to_owned(),
             "-version".to_owned(),
         ],
-        working_dir: std::env::temp_dir(),
+        std::env::temp_dir(),
         // The inspect probe carries no caps: it is the daemon's own
         // short-lived child, not a server tree.
-        limits: SpawnLimits::default(),
-    };
+        SpawnLimits::default(),
+    );
     let started = Instant::now();
     let output = process().run_capture(&spec, INSPECT_TIMEOUT).map_err(|e| {
         CoreError::JavaInspectFailed {

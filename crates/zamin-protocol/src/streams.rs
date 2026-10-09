@@ -173,6 +173,25 @@ pub enum SecurityNoticeKind {
     /// applied at spawn: the server refused to start rather than run
     /// unbounded.
     LimitsNotEnforced,
+    /// The OS itself refused an allocation inside the server's process
+    /// tree: the Windows job object posted a process/job memory-limit
+    /// message on its completion port. An OS-enforced boundary was
+    /// touched — not a daemon guess.
+    MemoryLimitReached,
+    /// The OS refused a new process in the server's tree: the job
+    /// object's active-process limit posted its message (a plugin tried
+    /// to fork past the ceiling and Windows said no).
+    ProcessBlocked,
+    /// A daemon-mediated network operation was refused by the server's
+    /// configured network policy. In-process socket refusals from the
+    /// OS sandbox are NOT observable without a filter driver — those
+    /// surface as connection errors inside the server's own logs, and
+    /// this kind is never faked for them.
+    NetworkPolicyBlocked,
+    /// An installed component carries no verification evidence (not
+    /// from a catalog the daemon can verify). A risk signal to surface,
+    /// never a malware verdict.
+    UntrustedComponent,
     /// Sustained unusual resource shape (memory growth or CPU saturation
     /// far beyond the server's own baseline) — a warning to inspect, not
     /// a verdict about intent.

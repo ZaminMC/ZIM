@@ -28,6 +28,8 @@ function configOf(extra: Partial<ConfigGetResult> = {}): ConfigGetResult {
       startupTimeoutSecs: 120,
       extraJvmArgs: [],
       backupKeep: 10,
+      sandboxMode: "auto",
+      networkPolicy: "unrestricted",
     },
     provenance: {
       stopTimeoutSecs: "global",
@@ -40,6 +42,10 @@ function configOf(extra: Partial<ConfigGetResult> = {}): ConfigGetResult {
       mcVersion: "global",
       javaMajorRequired: "global",
       backupKeep: "global",
+      cpuPercent: "global",
+      storageBytes: "global",
+      sandboxMode: "global",
+      networkPolicy: "global",
     },
     ...extra,
   };
@@ -53,6 +59,8 @@ const baseConfig = configOf({
     maxMemoryMb: 2048,
     extraJvmArgs: [],
     backupKeep: 10,
+    sandboxMode: "auto",
+    networkPolicy: "unrestricted",
   },
 });
 
