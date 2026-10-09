@@ -37,16 +37,15 @@
 }
 
 .primary {
-  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
-  border-color: var(--accent-border);
+  /* Chrome light's primary: flat blue, darker on hover — no gradient,
+     no inset highlight; the one loud thing on a white surface. */
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--accent-contrast);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 .primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, var(--accent-strong), var(--accent-strong));
+  background: var(--accent-strong);
   border-color: var(--accent-strong);
 }
 

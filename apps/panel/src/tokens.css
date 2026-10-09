@@ -1,65 +1,69 @@
 /* Design tokens (STYLE-GUIDE: one tokens file, CSS custom properties).
-   Dark-first: this is a long-session operator tool. The 2026-10 refresh
-   moves the panel from "flat dev tool" to "control center": deeper layered
-   surfaces, tinted washes, real elevation, and a calmer accent. */
+   Official theme: WHITE. This is a desktop product, and its face is the
+   browser-grade light palette — white surfaces, a quiet gray strip,
+   hairline borders, one blue. The reference is Chromium's light theme:
+   precise, dense, hierarchical, quiet. Dark surfaces survive exactly
+   where the domain owns them (the terminal), never as decoration. */
 
 :root {
+  color-scheme: light;
+
   /* surfaces — layered, each step clearly above the last */
-  --bg: #090c11;
-  --surface: #0f141b;
-  --surface-2: #151c25;
-  --surface-3: #1c2430;
-  --surface-4: #232d3b;
-  --border: #212a36;
-  --border-strong: #334052;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f8f9fa;
+  --surface-3: #f1f3f4;
+  --surface-4: #e8eaed;
+  --border: #dadce0;
+  --border-strong: #bdc1c6;
 
   /* text */
-  --text: #e9eef6;
-  --text-muted: #9aa7b9;
-  --text-faint: #667384;
+  --text: #202124;
+  --text-muted: #5f6368;
+  --text-faint: #80868b;
 
   /* brand + semantics */
-  --accent: #5c9df4;
-  --accent-strong: #85b7f8;
-  --accent-soft: rgba(92, 157, 244, 0.13);
-  --accent-border: rgba(92, 157, 244, 0.35);
-  --accent-contrast: #071120;
-  --success: #46d483;
-  --success-soft: rgba(70, 212, 131, 0.12);
-  --warning: #f5b93d;
-  --warning-soft: rgba(245, 185, 61, 0.12);
-  --danger: #f47174;
-  --danger-strong: #f79194;
-  --danger-soft: rgba(244, 113, 116, 0.1);
+  --accent: #1a73e8;
+  --accent-strong: #1967d2;
+  --accent-soft: rgba(26, 115, 232, 0.08);
+  --accent-border: rgba(26, 115, 232, 0.4);
+  --accent-contrast: #ffffff;
+  --success: #188038;
+  --success-soft: rgba(24, 128, 56, 0.08);
+  --warning: #b06000;
+  --warning-soft: rgba(249, 171, 0, 0.12);
+  --danger: #c5221f;
+  --danger-strong: #d93025;
+  --danger-soft: rgba(197, 34, 31, 0.07);
 
   /* semantic borders — the same 0.35 alpha the accent border set; the
      outcome chips (audit, jobs, feedback) used to reach for these with
      var() fallbacks, which worked by luck. Stated once, here. */
-  --success-border: rgba(70, 212, 131, 0.35);
-  --warning-border: rgba(245, 185, 61, 0.35);
-  --danger-border: rgba(244, 113, 116, 0.35);
+  --success-border: rgba(24, 128, 56, 0.35);
+  --warning-border: rgba(176, 96, 0, 0.35);
+  --danger-border: rgba(197, 34, 31, 0.35);
 
   /* the accent ladder's lighter rungs — chart series (cpu/rss/players
      bars) once asked for these and all fell back to the base accent,
      rendering three data series in one indistinguishable color. */
-  --accent-2: #85b7f8;
-  --accent-3: #b9d6fb;
+  --accent-2: #6aa1e8;
+  --accent-3: #a8c7fa;
 
   /* state colors (ADR-0005 lifecycle) */
-  --state-running: #46d483;
-  --state-starting: #f5b93d;
-  --state-stopping: #f5b93d;
-  --state-stopped: #9aa7b9;
-  --state-not-running: #667384;
-  --state-failed-preflight: #f47174;
-  --state-crashed: #f47174;
-  --state-adopting: #c084fc;
-  --state-unknown: #667384;
+  --state-running: #188038;
+  --state-starting: #b06000;
+  --state-stopping: #b06000;
+  --state-stopped: #5f6368;
+  --state-not-running: #80868b;
+  --state-failed-preflight: #c5221f;
+  --state-crashed: #c5221f;
+  --state-adopting: #9334e6;
+  --state-unknown: #80868b;
 
   /* geometry */
-  --radius-s: 8px;
-  --radius-m: 12px;
-  --radius-l: 16px;
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 12px;
   /* The pre-refresh aliases, still used by card containers and inputs —
      they used to resolve to nothing (invalid → 0/transparent), which the
      2026-10 refresh's rename never caught. */
@@ -78,10 +82,10 @@
      edge). Defined here so the ladder is contiguous 4..64. */
   --space-8: 64px;
 
-  /* elevation */
-  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-m: 0 8px 24px rgba(0, 0, 0, 0.35);
-  --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.5);
+  /* elevation — Chrome light: hairline shadows, never glows */
+  --shadow-s: 0 1px 2px rgba(60, 64, 67, 0.16);
+  --shadow-m: 0 1px 3px rgba(60, 64, 67, 0.2), 0 4px 8px 2px rgba(60, 64, 67, 0.08);
+  --shadow-l: 0 1px 3px rgba(60, 64, 67, 0.25), 0 6px 16px 4px rgba(60, 64, 67, 0.12);
 
   /* type */
   --font-ui:
@@ -104,50 +108,51 @@
   --speed-slow: 280ms;
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
 
-  /* terminal (xterm surface) */
-  --term-bg: #0b0f15;
+  /* terminal (xterm surface) — the terminal stays a terminal: its
+     dark canvas is the domain's own, not the theme's decoration. */
+  --term-bg: #202124;
 
   /* -- The browser shell's band (ADR-0033) ---------------------------------
      The frame (strip, toolbar, omnibox, bookmarks) and the popup overlay
      speak THIS palette, and it is defined here — the theme-token layer's
      whole point: a theme change reaches the band without touching
-     frame.css or popup.css. The ladder: strip < surface (the active tab
-     melts into the toolbar through the shared surface), fields sit
-     between. */
-  --frame-bg: var(--bg);
-  --frame-surface: var(--surface-2);
-  --frame-field: #0d1219;
-  --frame-field-hover: #11171f;
-  --frame-fg: var(--text);
-  --frame-fg-dim: var(--text-muted);
-  --frame-hover: rgba(233, 238, 246, 0.07);
-  --frame-hover-strong: rgba(233, 238, 246, 0.11);
-  --frame-line: rgba(233, 238, 246, 0.14);
-  --frame-accent: var(--accent);
-  --frame-accent-soft: var(--accent-soft);
-  --frame-accent-contrast: var(--accent-contrast);
+     frame.css or popup.css. The ladder is Chromium light: gray strip <
+     white surface (the active tab melts into the white toolbar through
+     the shared surface), fields sit between. */
+  --frame-bg: #dee1e6;
+  --frame-surface: #ffffff;
+  --frame-field: #f1f3f4;
+  --frame-field-hover: #e9ebee;
+  --frame-fg: #202124;
+  --frame-fg-dim: #5f6368;
+  --frame-hover: rgba(32, 33, 36, 0.057);
+  --frame-hover-strong: rgba(32, 33, 36, 0.1);
+  --frame-line: rgba(32, 33, 36, 0.16);
+  --frame-accent: #1a73e8;
+  --frame-accent-soft: rgba(26, 115, 232, 0.1);
+  --frame-accent-contrast: #ffffff;
 
-  /* The popup overlay (menus, the group form): one step darker than the
-     surface so a floating menu reads above the toolbar it covers. */
-  --popup-bg: #10161f;
-  --popup-line: rgba(233, 238, 246, 0.1);
+  /* The popup overlay (menus, the group form): white over white chrome,
+     lifted by the shadow ladder and a hairline — a floating menu reads
+     above the toolbar it covers. */
+  --popup-bg: #ffffff;
+  --popup-line: rgba(32, 33, 36, 0.12);
 
   /* Tab groups' six-color palette (tab_group_visual_data.h's spirit):
-     tinted at 20-30% over the strip's ground, never at full strength. */
-  --group-sky: #8ab4f8;
-  --group-grass: #81c995;
-  --group-amber: #fdd663;
-  --group-rose: #f28b82;
-  --group-violet: #c58af9;
-  --group-slate: #9aa0a6;
+     the LIGHT-theme variants — deep enough to read as text on white and
+     the gray strip, tinted at 15-20% for fills. (tab_group_header's
+     light-mode color set.) */
+  --group-sky: #1a73e8;
+  --group-grass: #188038;
+  --group-amber: #b06000;
+  --group-rose: #c5221f;
+  --group-violet: #9334e6;
+  --group-slate: #5f6368;
 }
 
 /* -- Document reset (ADR-0033): the tab-content document owns the whole
-   webview. No UA margins, dark from the first pixel, full-height root —
-   destination pages hang their own 100% geometry off this chain. The
-   2026-10-09 screenshot showed the failure mode when this was missing:
-   the new-tab page collapsed to its content height on a white body,
-   inset 8px by the UA margin, and the window read as broken. */
+   webview. No UA margins, white from the first pixel, full-height root —
+   destination pages hang their own 100% geometry off this chain. */
 html,
 body {
   margin: 0;
@@ -155,7 +160,7 @@ body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 #root {

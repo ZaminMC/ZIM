@@ -272,7 +272,7 @@ export function PluginsView({ serverId }: { serverId: string }) {
         )
       ) : (
         <p className={styles.emptyNote}>
-          Search the catalog to install a plugin — the daemon downloads and
+          Search the catalog to install a plugin — ZIM downloads and
           verifies it, straight into this server's plugin directory.
         </p>
       )}

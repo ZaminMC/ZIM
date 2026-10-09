@@ -282,7 +282,7 @@ export function FeedbackPage() {
         <p className={styles.body}>
           Your words, plus a small diagnostics block so the builders can reproduce: the installed
           version, the platform, and whether a screenshot rides along. Nothing else — no logs, no
-          file contents, no server names. The connection to the daemon is{" "}
+          file contents, no server names. The connection to ZIM's service is{" "}
           {connectionOpen ? "up" : "down"}; the report never includes its traffic.
         </p>
         <pre className={styles.preview}>

@@ -84,8 +84,8 @@ export function AuditPage() {
         <div>
           <h1 className={styles.title}>Audit log</h1>
           <p className={styles.subtitle}>
-            Every mutating command and handshake, newest first — appended by the daemon, read
-            only here.
+            Every changing action and connection event, newest first — written by ZIM's service,
+            read only here.
           </p>
         </div>
         <Button variant="ghost" onClick={() => load(0, false)} disabled={loading}>
@@ -147,8 +147,8 @@ export function AuditPage() {
 
       <p className={styles.note}>
         Reads are not audited: a listing would flood the trail without making anything safer.
-        Every mutating command appears after the daemon has answered it, with the outcome the
-        daemon gave.
+        Every changing action appears here once ZIM's service has answered it, with the outcome
+        that answer gave.
       </p>
     </div>
   );

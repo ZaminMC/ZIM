@@ -172,8 +172,8 @@ export function ServerView({ serverId }: { serverId: string }) {
           </span>
           <p className={styles.goneTitle}>This server is gone.</p>
           <p className={styles.goneBody}>
-            It was removed from the registry — the daemon no longer knows it.
-            The fleet page lists what the daemon still sees.
+            It was removed from the registry — ZIM no longer knows it.
+            The fleet page lists what ZIM still sees.
           </p>
           <Button
             variant="primary"

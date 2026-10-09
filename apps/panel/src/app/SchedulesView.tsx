@@ -179,7 +179,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
       </div>
 
       <p className={styles.note}>
-        The daemon fires these itself — restarts, backups, console lines. Times are the daemon's
+        ZIM fires these itself — restarts, backups, console lines. Times are ZIM's
         own clock, and a schedule never switches a stopped server on.
       </p>
 

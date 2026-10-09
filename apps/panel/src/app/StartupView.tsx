@@ -351,7 +351,7 @@ export function StartupView({ serverId }: { serverId: string }) {
               ? undefined
               : () => setDraft("storageGiB", { text: "", cleared: true })
           }
-          hint="The daemon refuses its own writes past the budget and warns at 90%."
+          hint="ZIM refuses its own writes past the budget and warns at 90%."
         >
           <input
             aria-label="Storage budget in GiB"

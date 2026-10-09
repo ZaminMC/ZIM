@@ -102,7 +102,7 @@ export function LogViewer({ serverId }: { serverId: string }) {
             ) : null}
             {!error && missed > 0 ? (
               <p className={styles.note} role="status">
-                {missed} line{missed === 1 ? "" : "s"} were missed while the daemon's buffer
+                {missed} line{missed === 1 ? "" : "s"} were missed while ZIM's buffer
                 overflowed — older lines live in the log file.
               </p>
             ) : null}

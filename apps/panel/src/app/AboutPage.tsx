@@ -72,8 +72,8 @@ export function AboutPage() {
       <section className={styles.section} aria-label="License">
         <h2 className={styles.sectionTitle}>License</h2>
         <p className={styles.body}>
-          Apache License 2.0. The panel is a client; the daemon owns the processes, the files,
-          and the audit trail (§65 — one authoritative backend).
+          Apache License 2.0. ZIM's service owns the processes, the files, and the audit
+          trail — one authoritative backend, and every surface reads from it.
         </p>
         <p className={styles.body}>
           Found something broken or missing? <strong>Feedback</strong> (zim://feedback/)
