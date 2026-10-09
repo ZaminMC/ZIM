@@ -238,9 +238,12 @@ fn main() {
                 };
                 let window_label = window_label.to_owned();
                 let verb = verb.to_owned();
+                // The closure's `app` is a borrowed reference — the spawned
+                // future is 'static, so it carries its own handle clone.
+                let app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app.state::<ShellState>();
-                    shell::host::handle_tab_menu_verb(app, &state, &window_label, tab_id, &verb);
+                    shell::host::handle_tab_menu_verb(&app, &state, &window_label, tab_id, &verb);
                 });
             });
             Ok(())

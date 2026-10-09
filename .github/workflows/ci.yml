@@ -80,7 +80,7 @@ jobs:
             librsvg2-dev \
             patchelf
       - name: Build the sidecar binaries
-        run: cargo build -p zamind -p zamin-cli
+        run: cargo build --release -p zamind -p zamin-cli
       - name: Stage the sidecars (the context macro embeds their paths)
         run: |
           mkdir -p apps/panel/src-tauri/binaries
