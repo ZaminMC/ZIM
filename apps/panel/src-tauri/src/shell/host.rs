@@ -25,9 +25,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{
-    mpsc, Arc, Mutex, MutexGuard, PoisonError,
-};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,

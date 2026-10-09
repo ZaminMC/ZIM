@@ -638,7 +638,7 @@ pub fn spawn_appcontainer(
     let ok = unsafe {
         CreateProcessW(
             program_w.as_ptr(),
-            cmdline.as_mut_ptr() as *mut u16,
+            cmdline.as_mut_ptr(),
             std::ptr::null(),
             std::ptr::null(),
             1,

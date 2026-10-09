@@ -75,8 +75,7 @@ const JOB_OBJECT_CPU_RATE_CONTROL_HARD_ENABLE: u32 = 0x0000_0002;
 fn logical_processors() -> u32 {
     let mut info = unsafe { std::mem::zeroed() };
     unsafe { GetSystemInfo(&mut info) };
-    let count = info.dwNumberOfProcessors.max(1);
-    count
+    info.dwNumberOfProcessors.max(1)
 }
 
 /// Translate the config's percent-of-one-core ceiling into Windows' own
@@ -195,8 +194,10 @@ impl Drop for JobHandle {
 /// The two ways this module owns children: the plain tokio spawn
 /// (unsandboxed helper/server starts) and the raw sandboxed spawn (the
 /// AppContainer path, whose pipes/handles the trait converts lazily).
+/// The tokio child rides a Box — the raw variant's five handles would
+/// otherwise pad every Tokio variant with ~200 dead bytes.
 enum ChildFlavor {
-    Tokio(tokio::process::Child),
+    Tokio(Box<tokio::process::Child>),
     Raw {
         stdin: Option<std::os::windows::io::OwnedHandle>,
         stdout: Option<std::os::windows::io::OwnedHandle>,
@@ -359,7 +360,7 @@ impl ProcessOps for WindowsProcessOps {
                     .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
                 let child = command.spawn()?;
                 let pid = child.id().ok_or(PlatformError::ProcessGone { pid: 0 })?;
-                (pid, ChildFlavor::Tokio(child))
+                (pid, ChildFlavor::Tokio(Box::new(child)))
             }
             Some(sandbox_spawn) => {
                 let container = sandbox::ensure_container(&sandbox_spawn.container_name)?;
