@@ -250,7 +250,7 @@ describe("<PopupApp /> the group form", () => {
 
   it("the Create button is disabled while the name is empty", async () => {
     await openForm();
-    const create = screen.getByRole("button", { name: "Create group" }) as HTMLButtonElement;
+    const create = screen.getByRole<HTMLButtonElement>("button", { name: "Create group" });
     expect(create.disabled).toBe(true);
   });
 });
@@ -301,20 +301,20 @@ describe("<PopupApp /> the app menu", () => {
   it("reads the zoom posture and bounds the row", async () => {
     await renderAppMenu({ zoom: 1 });
     expect(screen.getByText("100%")).toBeTruthy();
-    const reset = screen.getByRole("button", { name: "Reset zoom" }) as HTMLButtonElement;
+    const reset = screen.getByRole<HTMLButtonElement>("button", { name: "Reset zoom" });
     expect(reset.disabled).toBe(true);
-    const zoomIn = screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement;
+    const zoomIn = screen.getByRole<HTMLButtonElement>("button", { name: "Zoom in" });
     expect(zoomIn.disabled).toBe(false);
   });
 
   it("bounds the zoom row at both ends", async () => {
     await renderAppMenu({ zoom: 0.25 });
-    expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Zoom out" }).disabled).toBe(true);
 
     cleanup();
     invoked = [];
     await renderAppMenu({ zoom: 5 });
-    expect((screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Zoom in" }).disabled).toBe(true);
   });
 
   it("Developer tools navigates the active tab, then closes", async () => {

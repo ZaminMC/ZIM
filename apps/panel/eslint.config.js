@@ -84,6 +84,12 @@ export default tseslint.config(
       "@typescript-eslint/require-await": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/non-nullable-type-assertion-style": "off",
+      // Tests spy by extracting the method from its object — the scoping
+      // hazard the rule guards against is the test's whole point.
+      "@typescript-eslint/unbound-method": "off",
+      // Empty classes are stand-ins for modules the test mocks
+      // (`Channel: class {}`); there is nothing for them to carry.
+      "@typescript-eslint/no-extraneous-class": "off",
     },
   },
 );

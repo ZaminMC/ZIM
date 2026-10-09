@@ -65,7 +65,7 @@ describe("PromptDialog", () => {
         onClose={vi.fn()}
       />,
     );
-    const input = screen.getByRole("textbox", { name: "Server name" }) as HTMLInputElement;
+    const input = screen.getByRole<HTMLInputElement>("textbox", { name: "Server name" });
     expect(input.value).toBe("survival");
     expect(document.activeElement).toBe(input);
   });
