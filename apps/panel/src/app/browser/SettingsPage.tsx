@@ -222,11 +222,11 @@ function UpdatesSection() {
         </div>
         <div className={styles.rowActions}>
           {phase.kind === "available" ? (
-            <Button onClick={() => void installNow()}>Install now</Button>
+            <Button onClick={() => void installNow()}>Download update</Button>
           ) : null}
           {phase.kind === "ready" ? (
             <Button variant="primary" onClick={() => void restart()}>
-              Restart now
+              Restart to apply
             </Button>
           ) : null}
           {phase.kind === "checking" || busy ? null : (
@@ -269,9 +269,10 @@ function UpdatesSection() {
 
       <div className={styles.row}>
         <div className={styles.rowMain}>
-          <span className={styles.rowName}>Install updates automatically</span>
+          <span className={styles.rowName}>Download updates automatically</span>
           <span className={styles.rowDetail}>
-            Download and install without asking. The restart is always yours to make.
+            Fetch an offered update without asking. Applying it is the restart — and the restart
+            is always yours to make.
           </span>
         </div>
         <Button

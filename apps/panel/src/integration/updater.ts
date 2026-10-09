@@ -6,6 +6,18 @@
 // "unavailable" looks like (STYLE-GUIDE: honest states, never a fake
 // success).
 //
+// The one seam law that keeps the lane seamless (§82): DOWNLOAD and APPLY
+// are two different operations with two different blast radii.
+//   • download() only fetches the package — on every platform it is safe to
+//     run at any moment, and nothing on screen changes ownership.
+//   • applyAndRestart() is where Windows hands the process over: the plugin
+//     launches the signed NSIS installer (passive progress bar), the
+//     installer uninstalls the current build, installs the new one,
+//     relaunches, and the plugin ends this process with exit(0) before the
+//     call resolves. That is why apply is NEVER automatic — it must sit
+//     behind an explicit operator click, or the panel would close itself
+//     mid-work the moment a release lands on the channel.
+//
 // Every method answers a Result instead of throwing: an update lane that
 // fails must be a visible state (§81), never a silent one and never a
 // crash.
@@ -30,10 +42,12 @@ export interface UpdateBackend {
   currentVersion(): Promise<UpdateResult<string | null>>;
   /** Ask the channel: an offer, null when this version is the newest. */
   check(): Promise<UpdateResult<UpdateOffer | null>>;
-  /** Download and install the offer the last check returned. */
-  install(): Promise<UpdateResult<null>>;
-  /** Restart the app into the installed version. */
-  relaunch(): Promise<UpdateResult<null>>;
+  /** Fetch the update package. Safe everywhere; nothing applies yet. */
+  download(): Promise<UpdateResult<null>>;
+  /** Apply the downloaded package and restart into it. On Windows this
+   *  ends the process inside the call (the installer relaunches itself);
+   *  on macOS/Linux the panel falls back to its own relaunch. */
+  applyAndRestart(): Promise<UpdateResult<null>>;
 }
 
 function failure(what: string, error: unknown): { ok: false; message: string } {
@@ -41,17 +55,31 @@ function failure(what: string, error: unknown): { ok: false; message: string } {
   return { ok: false, message: `${what}: ${message}` };
 }
 
-// The updater plugin hands back a live object from check(); its install()
-// must be called on THAT object, so the real backend keeps the one pending
-// offer in its own slot — the store sees plain data only.
+// The updater plugin hands back a live object from check(); its download()
+// and install() must be called on THAT object, so the real backend keeps the
+// one pending offer in its own slot — the store sees plain data only.
 type PluginUpdate = {
   version: string;
   body?: string;
   date?: string;
-  downloadAndInstall?: (onEvent?: (event: unknown) => void) => Promise<void>;
+  download?: (onEvent?: (event: unknown) => void) => Promise<void>;
+  install?: (options?: { restartAfterInstall?: boolean }) => Promise<void>;
+  /** The resource's own release (the Rust side holds the offer's bytes). */
+  close?: () => Promise<void>;
 };
 
 let pendingOffer: PluginUpdate | null = null;
+/** Whether the pending offer's package has been fetched (its resource holds
+ *  the bytes Rust-side; closing a downloaded offer would throw them away). */
+let offerDownloaded = false;
+
+/** Drop a superseded offer's Rust-side resource — but never a downloaded
+ *  one, whose bytes are the reason the next restart can apply offline. */
+function discardPending(): void {
+  if (pendingOffer && !offerDownloaded) void pendingOffer.close?.();
+  pendingOffer = null;
+  offerDownloaded = false;
+}
 
 export function realUpdateBackend(): Promise<UpdateBackend | null> {
   if (!isTauri) return Promise.resolve(null);
@@ -69,6 +97,9 @@ export function realUpdateBackend(): Promise<UpdateBackend | null> {
       try {
         const plugin = await import("@tauri-apps/plugin-updater");
         const update = await plugin.check();
+        // A fresh answer replaces the old offer; the old resource is only
+        // released when nothing was downloaded into it.
+        discardPending();
         pendingOffer = update ?? null;
         if (!update) return { ok: true, value: null };
         return {
@@ -80,33 +111,44 @@ export function realUpdateBackend(): Promise<UpdateBackend | null> {
           },
         };
       } catch (error) {
-        pendingOffer = null;
+        discardPending();
         return failure("the update check failed", error);
       }
     },
 
-    async install() {
+    async download() {
       const update = pendingOffer;
-      if (!update?.downloadAndInstall) {
+      if (!update?.download) {
         return { ok: false, message: "No update is pending — check for updates first." };
       }
       try {
-        await update.downloadAndInstall();
+        await update.download();
+        offerDownloaded = true;
         return { ok: true, value: null };
       } catch (error) {
-        return failure("the update install failed", error);
+        return failure("the update download failed", error);
       }
     },
 
-    async relaunch() {
+    async applyAndRestart() {
+      const update = pendingOffer;
+      if (!update?.install) {
+        return { ok: false, message: "No update is pending — check for updates first." };
+      }
       try {
-        const plugin = await import("@tauri-apps/plugin-process");
-        await plugin.relaunch();
+        // Windows: the plugin spawns the signed installer (passive), which
+        // uninstalls the current build, installs the new one, relaunches,
+        // and then ends this process — the promise below never resolves.
+        await update.install({ restartAfterInstall: true });
+        // macOS/Linux: the package is applied in place; the panel still
+        // runs the old binary, so the restart is the panel's own move.
+        const process = await import("@tauri-apps/plugin-process");
+        await process.relaunch();
         // A successful relaunch never returns; reaching this line means the
         // OS refused the restart.
         return { ok: false, message: "The restart did not happen — relaunch manually." };
       } catch (error) {
-        return failure("the restart failed", error);
+        return failure("the update install failed", error);
       }
     },
   });

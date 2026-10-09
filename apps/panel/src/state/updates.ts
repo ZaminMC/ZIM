@@ -4,34 +4,36 @@
 // plain browser and the lane degrades honestly to "unavailable" in dev.
 //
 // The rules this store follows:
-//   • §82 — no fake states: "ready" means the installer actually ran; the
-//     restart is the operator's call, never forced mid-work. Nothing is
-//     persisted about the lane's runtime phase — a fresh boot is idle.
+//   • §82 — no fake states: "ready" means the package is downloaded and
+//     verified; applying it is the restart, and the restart is the
+//     operator's own click — never forced mid-work (on Windows the apply
+//     ends the process, see integration/updater.ts). Nothing is persisted
+//     about the lane's runtime phase — a fresh boot is idle.
 //   • §81 — failures are human sentences carrying the technical message,
 //     never a bare code.
-//   • Automatic means download + install; the restart stays explicit.
+//   • Automatic means download; the apply waits for the explicit restart.
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { UpdateBackend, UpdateOffer } from "../integration/updater";
 import { realUpdateBackend } from "../integration/updater";
 
-/** The lane's honest phases — the banner and the settings rows render
+/** The lane's honest phases — the frame banner and the settings rows render
  *  exactly what these say, nothing more. */
 export type UpdatePhase =
   | { kind: "unavailable" } // browser dev: no desktop host, no lane
   | { kind: "idle" } // desktop: the lane exists, no answer yet
   | { kind: "checking" }
   | { kind: "upToDate"; version: string }
-  | { kind: "available"; offer: UpdateOffer } // waiting on the operator (auto-install off)
-  | { kind: "downloading"; offer: UpdateOffer } // the installer runs under this phase
-  | { kind: "ready"; offer: UpdateOffer } // installed; the restart is pending
+  | { kind: "available"; offer: UpdateOffer } // waiting on the operator (auto-download off)
+  | { kind: "downloading"; offer: UpdateOffer } // the package fetch runs under this phase
+  | { kind: "ready"; offer: UpdateOffer } // downloaded; the apply is the restart
   | { kind: "error"; message: string };
 
 export interface UpdatesPrefs {
   /** Ask the channel on boot and every six hours. */
   autoCheck: boolean;
-  /** Install an offered update without asking (the restart stays manual). */
+  /** Download an offered update without asking (the apply stays manual). */
   autoInstall: boolean;
 }
 
@@ -44,9 +46,9 @@ interface UpdatesState {
   setAutoInstall: (on: boolean) => void;
   /** Ask the channel now. A manual check runs even when auto-check is off. */
   check: (manual: boolean) => Promise<void>;
-  /** Install the pending offer when auto-install is off. */
+  /** Download the pending offer when auto-download is off. */
   installNow: () => Promise<void>;
-  /** Restart into the installed version (only honest from "ready"). */
+  /** Apply the downloaded update and restart (only honest from "ready"). */
   restart: () => Promise<void>;
   /** Acknowledge an error / the "up to date" answer — back to idle. */
   dismiss: () => void;
@@ -126,9 +128,9 @@ export function updatesSentence(phase: UpdatePhase): string {
     case "available":
       return `ZIM ${phase.offer.version} is available.`;
     case "downloading":
-      return `ZIM ${phase.offer.version} is downloading — the install follows on its own.`;
+      return `ZIM ${phase.offer.version} is downloading — nothing applies until you restart.`;
     case "ready":
-      return `ZIM ${phase.offer.version} is installed — restart to switch to it.`;
+      return `ZIM ${phase.offer.version} is ready — restart to apply it.`;
     case "error":
       return phase.message;
   }
@@ -154,9 +156,9 @@ export const useUpdates = create<UpdatesState>()(
         const offer = pendingOffer;
         if (backend === null || !offer) return;
         set({ phase: { kind: "downloading", offer } });
-        const installed = await backend.install();
-        if (!installed.ok) {
-          set({ phase: { kind: "error", message: installed.message } });
+        const downloaded = await backend.download();
+        if (!downloaded.ok) {
+          set({ phase: { kind: "error", message: downloaded.message } });
           return;
         }
         set({ phase: { kind: "ready", offer } });
@@ -224,9 +226,11 @@ export const useUpdates = create<UpdatesState>()(
 
         restart: async () => {
           if (backend === null || get().phase.kind !== "ready") return;
-          const relaunched = await backend.relaunch();
-          if (!relaunched.ok) {
-            set({ phase: { kind: "error", message: relaunched.message } });
+          // Windows: the apply ends the process inside this call and the
+          // installer relaunches the new build — this promise never lands.
+          const applied = await backend.applyAndRestart();
+          if (!applied.ok) {
+            set({ phase: { kind: "error", message: applied.message } });
           }
         },
 

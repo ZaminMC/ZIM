@@ -41,8 +41,9 @@ export function AboutPage() {
         </dl>
         <p className={styles.note}>
           Update checks run at boot and every six hours while "check automatically" is on; the
-          Settings page owns those preferences. An offered update installs itself when "install
-          automatically" is on, and the panel waits — it never restarts the session on its own.
+          Settings page owns those preferences. An offered update downloads itself when "download
+          automatically" is on, and the panel waits — applying it is the restart, and the panel
+          never restarts the session on its own.
         </p>
       </section>
 

@@ -551,6 +551,16 @@ body {
 }
 .update-pill:hover { background: var(--accent-strong); }
 
+/* The downloading state is not a control — nothing is clickable while the
+   package fetches, so the pill renders as a span: no hover glow, no
+   pointer, quieter surface. */
+.update-pill--busy {
+  background: var(--frame-surface);
+  color: var(--text-muted);
+  cursor: default;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 30%);
+}
+
 /* Reduced motion floor (ADR-0030): no stylesheet can outrun it. */
 @media (prefers-reduced-motion: reduce) {
   .tab, .tab * { transition: none !important; }

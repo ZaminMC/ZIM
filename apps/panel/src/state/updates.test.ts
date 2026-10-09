@@ -2,7 +2,8 @@
 // store can make, against an injected backend — no desktop host, no
 // network, no real time. The rules under test are the founder's: no fake
 // states (§82), honest sentences on failure (§81), the restart never
-// forced, and "automatic" means download+install but never the restart.
+// forced, and "automatic" means download — the apply is the restart and
+// stays the operator's own click.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UpdateBackend, UpdateOffer } from "../integration/updater";
@@ -19,26 +20,26 @@ const offer: UpdateOffer = { version: "0.1.9", notes: "fixes", pubDate: "2026-10
 
 interface FakeBackend extends UpdateBackend {
   checks: number;
-  installs: number;
-  relaunches: number;
+  downloads: number;
+  applies: number;
 }
 
 function fakeBackend(over: Partial<UpdateBackend> = {}): FakeBackend {
   const backend: FakeBackend = {
     checks: 0,
-    installs: 0,
-    relaunches: 0,
+    downloads: 0,
+    applies: 0,
     currentVersion: async () => ({ ok: true, value: "0.1.4" }),
     check: async () => {
       backend.checks += 1;
       return { ok: true, value: null };
     },
-    install: async () => {
-      backend.installs += 1;
+    download: async () => {
+      backend.downloads += 1;
       return { ok: true, value: null };
     },
-    relaunch: async () => {
-      backend.relaunches += 1;
+    applyAndRestart: async () => {
+      backend.applies += 1;
       return { ok: true, value: null };
     },
   };
@@ -85,7 +86,7 @@ describe("the update lane store", () => {
     expect(useUpdates.getState().phase).toEqual({ kind: "upToDate", version: "0.1.4" });
   });
 
-  it("auto-install runs the whole lane: offer → install → ready", async () => {
+  it("auto-download runs the fetch lane: offer → download → ready, nothing applies", async () => {
     const backend = fakeBackend();
     backend.check = async () => {
       backend.checks += 1;
@@ -94,11 +95,12 @@ describe("the update lane store", () => {
     setUpdateBackend(backend);
     await useUpdates.getState().check(false);
     expect(backend.checks).toBe(1);
-    expect(backend.installs).toBe(1);
+    expect(backend.downloads).toBe(1);
+    expect(backend.applies).toBe(0); // the apply is never automatic
     expect(useUpdates.getState().phase).toEqual({ kind: "ready", offer });
   });
 
-  it("auto-install off stops at available; Install now finishes the lane", async () => {
+  it("auto-download off stops at available; Download update finishes the fetch", async () => {
     const backend = fakeBackend();
     backend.check = async () => {
       backend.checks += 1;
@@ -108,11 +110,12 @@ describe("the update lane store", () => {
     useUpdates.setState({ prefs: { autoCheck: true, autoInstall: false } });
 
     await useUpdates.getState().check(true);
-    expect(backend.installs).toBe(0);
+    expect(backend.downloads).toBe(0);
     expect(useUpdates.getState().phase).toEqual({ kind: "available", offer });
 
     await useUpdates.getState().installNow();
-    expect(backend.installs).toBe(1);
+    expect(backend.downloads).toBe(1);
+    expect(backend.applies).toBe(0);
     expect(useUpdates.getState().phase).toEqual({ kind: "ready", offer });
   });
 
@@ -130,19 +133,22 @@ describe("the update lane store", () => {
     expect(useUpdates.getState().phase).toEqual({ kind: "idle" });
   });
 
-  it("a failed install is an error carrying the installer's message", async () => {
+  it("a failed download is an error carrying the message", async () => {
     const backend = fakeBackend();
     backend.check = async () => ({ ok: true, value: offer });
-    backend.install = async () => ({ ok: false, message: "the update install failed: disk full" });
+    backend.download = async () => ({
+      ok: false,
+      message: "the update download failed: disk full",
+    });
     setUpdateBackend(backend);
     await useUpdates.getState().check(false);
     expect(useUpdates.getState().phase).toEqual({
       kind: "error",
-      message: "the update install failed: disk full",
+      message: "the update download failed: disk full",
     });
   });
 
-  it("a check never stomps a running install", async () => {
+  it("a check never stomps a running download", async () => {
     const backend = fakeBackend();
     setUpdateBackend(backend);
     useUpdates.setState({
@@ -175,21 +181,21 @@ describe("the update lane store", () => {
     const backend = fakeBackend();
     setUpdateBackend(backend);
     await useUpdates.getState().installNow();
-    expect(backend.installs).toBe(0);
+    expect(backend.downloads).toBe(0);
     expect(useUpdates.getState().phase).toEqual({ kind: "idle" });
   });
 
-  it("restart works only from ready, and a refused restart says so", async () => {
+  it("restart works only from ready, and a refused apply says so", async () => {
     const backend = fakeBackend();
     setUpdateBackend(backend);
     await useUpdates.getState().restart();
-    expect(backend.relaunches).toBe(0);
+    expect(backend.applies).toBe(0);
 
     useUpdates.setState({ phase: { kind: "ready", offer } });
     await useUpdates.getState().restart();
-    expect(backend.relaunches).toBe(1);
+    expect(backend.applies).toBe(1);
 
-    backend.relaunch = async () => ({ ok: false, message: "the restart failed: denied" });
+    backend.applyAndRestart = async () => ({ ok: false, message: "the restart failed: denied" });
     await useUpdates.getState().restart();
     expect(useUpdates.getState().phase).toEqual({
       kind: "error",
@@ -243,8 +249,8 @@ describe("the update lane store", () => {
     expect(updatesSentence({ kind: "checking" })).toMatch(/Asking/);
     expect(updatesSentence({ kind: "upToDate", version: "0.1.4" })).toMatch(/0\.1\.4/);
     expect(updatesSentence({ kind: "available", offer })).toMatch(/0\.1\.9 is available/);
-    expect(updatesSentence({ kind: "downloading", offer })).toMatch(/downloading/);
-    expect(updatesSentence({ kind: "ready", offer })).toMatch(/restart/);
+    expect(updatesSentence({ kind: "downloading", offer })).toMatch(/nothing applies until you restart/);
+    expect(updatesSentence({ kind: "ready", offer })).toMatch(/restart to apply/);
     expect(updatesSentence({ kind: "error", message: "boom" })).toBe("boom");
   });
 });

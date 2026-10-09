@@ -34,6 +34,7 @@ import {
   type Snapshot,
 } from "./frameIpc";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
+import { startUpdates, stopUpdates, updatesSentence, useUpdates } from "../state/updates";
 import { CMD } from "../commandIds";
 import {
   IconBack,
@@ -103,13 +104,16 @@ function Glyph({ url }: { url: string }) {
 
 export function FrameApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  // The update lane's phases, read straight from the store the frame owns.
+  const updatePhase = useUpdates((s) => s.phase);
+  const installNow = useUpdates((s) => s.installNow);
+  const restart = useUpdates((s) => s.restart);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const omniboxRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{ tab: number; start_x: number; start_y: number; moved: boolean } | null>(null);
   const [menu, setMenu] = useState<{ tab: number; x: number; y: number } | null>(null);
   const [omniboxText, setOmniboxText] = useState<string | null>(null);
   const [joinNote, setJoinNote] = useState<string | null>(null);
-  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   // The boot must never fail silently: a white window teaches nothing.
   // Three spaced retries, then an honest error panel with a manual retry.
   const [bootError, setBootError] = useState<string | null>(null);
@@ -362,39 +366,19 @@ export function FrameApp() {
     };
   }, [menu]);
 
-  // The update lane (ADR-0024): the frame owns the pill now.
+  // The update lane (ADR-0024): ONE lane, owned by the frame webview —
+  // the only React root that lives for the whole session (hidden-to-tray
+  // included). The frame used to run a private plugin cadence with a
+  // click-to-apply pill; on Windows `update.install()` ends the process,
+  // so that pill was a forced shutdown. The store's lane splits download
+  // (safe, automatic when enabled) from apply (the explicit restart), and
+  // this pill renders exactly its phases. Content pages keep their own
+  // manual checks; an offer is bound to the context that checked it, so
+  // the pill only ever speaks for the frame's own lane.
   useEffect(() => {
     if (!isTauri()) return;
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const { check } = await import("@tauri-apps/plugin-updater");
-        const update = await check();
-        if (!cancelled && update) setUpdateAvailable(update.version);
-      } catch {
-        // The dev channel may be unreachable; the pill simply stays off.
-      }
-    };
-    void check();
-    const timer = window.setInterval(() => void check(), 6 * 60 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  const installUpdate = useCallback(async () => {
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      const update = await check();
-      if (update) {
-        await update.install();
-        await relaunch();
-      }
-    } catch {
-      setUpdateAvailable(null);
-    }
+    void startUpdates();
+    return () => stopUpdates();
   }, []);
 
   // The browser keyboard contract (ADR-0032), frame side.
@@ -914,9 +898,17 @@ export function FrameApp() {
         </div>
       ) : null}
 
-      {updateAvailable ? (
-        <button className="update-pill" onClick={() => void installUpdate()}>
-          Update available{updateAvailable ? ` — v${updateAvailable}` : ""} — click to install
+      {updatePhase.kind === "available" ? (
+        <button className="update-pill" onClick={() => void installNow()}>
+          {updatesSentence(updatePhase)}
+        </button>
+      ) : null}
+      {updatePhase.kind === "downloading" ? (
+        <span className="update-pill update-pill--busy">{updatesSentence(updatePhase)}</span>
+      ) : null}
+      {updatePhase.kind === "ready" ? (
+        <button className="update-pill" onClick={() => void restart()}>
+          {updatesSentence(updatePhase)}
         </button>
       ) : null}
     </div>
