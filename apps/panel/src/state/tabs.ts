@@ -17,7 +17,7 @@
 
 import { create } from "zustand";
 import { navigateHost } from "./shellLane";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeHost } from "../integration/tauri";
 import type { Destination } from "./destinations";
 import { tabKey, type TabKey } from "./destinations";
 
@@ -90,7 +90,7 @@ const onHost = (): boolean =>
 
 const hostCommand = (id: number, arg?: Record<string, unknown>): void => {
   if (!onHost()) return;
-  void invoke("shell_command", { id, arg: arg ?? null }).catch(() => {
+  void invokeHost("shell_command", { id, arg: arg ?? null }).catch(() => {
     // The host answers every mirrored verb; a failure here is the dev
     // bridge's absence, never a user-facing error.
   });
@@ -295,7 +295,6 @@ export const useTabs = create<TabsState>()((set) => ({
       const resting = s.tabs.find((t) => tabKeyOf(t) === "new");
       const index = s.tabs.findIndex((t) => t.id === id);
       const tab = resting ?? freshTab({ kind: "new" });
-      void index;
       const others = s.tabs.filter((t) => t.id !== tab.id);
       others.splice(Math.min(index + 1, others.length), 0, tab);
       return { tabs: others, activeId: tab.id };
@@ -418,11 +417,10 @@ export const useTabs = create<TabsState>()((set) => ({
     });
   },
 
-  moveToNewWindow: (id) => {
+  moveToNewWindow: (_id) => {
     // §50's handoff belonged to the old single-webview shell; the host's
     // tear-off (ADR-0033) owns multi-window now. The verb stays honest:
     // it refuses rather than pretending.
-    void id;
     return null;
   },
 

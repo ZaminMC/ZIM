@@ -285,9 +285,13 @@ export function FrameApp() {
   }, [boot]);
 
   // The strip's re-measure whenever it (re)appears: boot, bookmarks-bar
-  // posture flips, any snapshot that changes the band's shape.
+  // posture flips, any snapshot that changes the band's shape. The two
+  // shape fields are the effect's actual inputs — read off the snapshot
+  // once so the dependency array names values, not optional chains.
+  const headerHeight = snap?.header_height;
+  const bookmarksVisible = snap?.bookmarks_bar_visible;
   useEffect(() => {
-    if (!snap) return;
+    if (headerHeight === undefined) return; // no snapshot yet — nothing to measure
     const frame = window.requestAnimationFrame(() => {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
@@ -295,7 +299,7 @@ export function FrameApp() {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [snap?.header_height, snap?.bookmarks_bar_visible]);
+  }, [headerHeight, bookmarksVisible]);
 
   // The reveal law + the scroll clamp, applied on every snapshot: the
   // active tab must be visible (Chrome scrolls just enough), and the
@@ -315,11 +319,8 @@ export function FrameApp() {
   }, [snap]);
 
   // FOCUS_LOCATION → focus the omnibox; its resting text rides snapshots.
-  useEffect(() => {
-    return () => {
-      void onFocusAddress(() => omniboxRef.current?.focus()).then((off) => off());
-    };
-  }, []);
+  // One subscription, registered on mount, off on unmount — the omnibox
+  // ref is read at event time, so the effect needs no dependencies.
   useEffect(() => {
     const offPromise = onFocusAddress(() => omniboxRef.current?.focus());
     return () => {
@@ -369,13 +370,13 @@ export function FrameApp() {
       try {
         const { check } = await import("@tauri-apps/plugin-updater");
         const update = await check();
-        if (!cancelled && update) setUpdateAvailable(update.version ?? "");
+        if (!cancelled && update) setUpdateAvailable(update.version);
       } catch {
         // The dev channel may be unreachable; the pill simply stays off.
       }
     };
     void check();
-    const timer = window.setInterval(check, 6 * 60 * 60 * 1000);
+    const timer = window.setInterval(() => void check(), 6 * 60 * 60 * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

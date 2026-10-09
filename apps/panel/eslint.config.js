@@ -35,7 +35,7 @@ export default tseslint.config(
             {
               group: ["@tauri-apps/**"],
               message:
-                "Only src/bridge/tauri.ts may import the Tauri API; go through the Transport layer.",
+                "Only src/integration/tauri.ts may import the Tauri API; go through the integration seam.",
             },
             {
               group: ["ws", "node:*", "fs", "path", "net", "child_process"],
@@ -67,6 +67,13 @@ export default tseslint.config(
     // vitest config needs a default export per the tool contract.
     files: ["*.config.ts", "*.config.js"],
     rules: { "import/no-default-export": "off" },
+  },
+  {
+    // The integration seam is the sanctioned importer of the desktop API
+    // (its own header states the contract); every other module routes
+    // through it.
+    files: ["src/integration/tauri.ts"],
+    rules: { "no-restricted-imports": "off" },
   },
   {
     files: ["**/*.test.ts", "**/*.test.tsx"],

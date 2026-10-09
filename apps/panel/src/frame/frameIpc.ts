@@ -2,8 +2,7 @@
 // and events (shell/host.rs). Everything here is the VIEW side of
 // ADR-0033: the model is authoritative, this only speaks for it.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invokeHost, listenHost, type Unlisten } from "../integration/tauri";
 
 /** Running under the desktop host (false = browser dev bridge). */
 export const isTauri = (): boolean =>
@@ -67,7 +66,7 @@ export interface Snapshot {
 /** A browser command (the ported command ID space, shell/commands.rs). */
 export const shellCommand = (id: number, arg?: Record<string, unknown>): Promise<void> =>
   isTauri()
-    ? invoke("shell_command", { id, arg: arg ?? null })
+    ? invokeHost("shell_command", { id, arg: arg ?? null })
     : demoActive()
       ? (demoCommand(id, arg ?? null), Promise.resolve())
       : Promise.resolve();
@@ -84,11 +83,11 @@ export type AddressRequest =
 
 export const omniboxCommit = (text: string): Promise<CommitOutcome> =>
   isTauri()
-    ? invoke<CommitOutcome>("shell_omnibox_commit", { text })
+    ? invokeHost<CommitOutcome>("shell_omnibox_commit", { text })
     : Promise.resolve({ kind: "query", text });
 
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
-  isTauri() ? invoke("shell_omnibox_classify", { text }) : Promise.resolve(null);
+  isTauri() ? invokeHost("shell_omnibox_classify", { text }) : Promise.resolve(null);
 
 /** Open the application-owned popup overlay (tab-menu | app-menu),
  *  anchored at frame coordinates. The browser demo has no popup host;
@@ -100,17 +99,17 @@ export const shellPopup = (
   y: number,
 ): Promise<void> =>
   isTauri()
-    ? invoke("shell_popup", { kind, tabId, x, y })
+    ? invokeHost("shell_popup", { kind, tabId, x, y })
     : Promise.resolve();
 
 /** Dismiss a window's popup overlay — a no-op when none is open, so it
  *  can ride every pointerdown cheaply. */
 export const dismissPopup = (): Promise<void> =>
-  isTauri() ? invoke("shell_popup_dismiss").then(() => {}) : Promise.resolve();
+  isTauri() ? invokeHost("shell_popup_dismiss").then(() => {}) : Promise.resolve();
 
 export const bootFrame = (): Promise<Snapshot | null> =>
   isTauri()
-    ? invoke<Snapshot>("shell_boot")
+    ? invokeHost<Snapshot>("shell_boot")
     : demoActive()
       ? Promise.resolve(demoSnapshot())
       : new Promise((resolve) => {
@@ -122,7 +121,7 @@ export const bootFrame = (): Promise<Snapshot | null> =>
 
 export const reportFrameSize = (width: number, height: number): Promise<void> =>
   isTauri()
-    ? invoke("shell_window_resized", { width, height })
+    ? invokeHost("shell_window_resized", { width, height })
     : demoActive()
       ? ((demo.strip_width = width), demoEmit(), Promise.resolve())
       : Promise.resolve();
@@ -133,7 +132,7 @@ export const shellDrag = (
   payload: { tab_id?: number; x?: number; y?: number; screen_x?: number; screen_y?: number } = {},
 ): Promise<void> =>
   isTauri()
-    ? invoke("shell_drag", {
+    ? invokeHost("shell_drag", {
         phase,
         tab_id: payload.tab_id ?? null,
         x: payload.x ?? null,
@@ -145,16 +144,16 @@ export const shellDrag = (
 
 // -- Events -------------------------------------------------------------------
 
-export function onSnapshot(handler: (snap: Snapshot) => void): Promise<UnlistenFn> {
+export function onSnapshot(handler: (snap: Snapshot) => void): Promise<Unlisten> {
   if (demoActive()) return demoOnSnapshot(handler);
-  return listen<Snapshot>("shell://snapshot", (event) => handler(event.payload));
+  return listenHost<Snapshot>("shell://snapshot", handler);
 }
 
-export function onFocusAddress(handler: () => void): Promise<UnlistenFn> {
+export function onFocusAddress(handler: () => void): Promise<Unlisten> {
   // No host, no event lane (the demo lane never receives focus pushes);
   // subscribing through @tauri-apps/api outside Tauri would throw.
   if (!isTauri()) return Promise.resolve(() => {});
-  return listen("shell://focus-address", () => handler());
+  return listenHost("shell://focus-address", () => handler());
 }
 
 // -- View-side geometry mirrors (tested against the model's law) -------------
@@ -403,7 +402,7 @@ function demoEmit(): void {
   window.setTimeout(() => demoListeners.forEach((fn) => fn(snap)), 0);
 }
 
-function demoOnSnapshot(handler: (snap: Snapshot) => void): Promise<UnlistenFn> {
+function demoOnSnapshot(handler: (snap: Snapshot) => void): Promise<Unlisten> {
   demoListeners.add(handler);
   window.setTimeout(() => handler(demoSnapshot()), 0);
   return Promise.resolve(() => demoListeners.delete(handler));

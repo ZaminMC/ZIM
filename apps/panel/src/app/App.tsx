@@ -10,8 +10,7 @@
 // untouched by construction.
 
 import { Suspense, lazy, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invokeHost, listenHost, type Unlisten } from "../integration/tauri";
 import type { Destination } from "../state/destinations";
 import { navigateHost } from "../state/shellLane";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
@@ -169,8 +168,8 @@ export function App() {
       return () => window.removeEventListener("zamin:toggle-palette", onPalette);
     }
     let disposed = false;
-    const unlisteners: Promise<UnlistenFn>[] = [];
-    void invoke<{ fallback: boolean; destination?: Destination; reload?: number }>(
+    const unlisteners: Promise<Unlisten>[] = [];
+    void invokeHost<{ fallback: boolean; destination?: Destination; reload?: number }>(
       "shell_tab_hello",
     ).then((hello) => {
       if (disposed || hello.fallback || !hello.destination) return;
@@ -178,22 +177,22 @@ export function App() {
       setReloadToken(hello.reload ?? 0);
     });
     unlisteners.push(
-      listen<{
+      listenHost<{
         tab_id: number;
         destination?: Destination;
         can_back: boolean;
         can_forward: boolean;
         reload?: number;
-      }>("shell://tab", (event) => {
+      }>("shell://tab", (tab) => {
         if (disposed) return;
-        if (event.payload.destination) setDestination(event.payload.destination);
-        if (event.payload.reload != null) setReloadToken(event.payload.reload);
+        if (tab.destination) setDestination(tab.destination);
+        if (tab.reload != null) setReloadToken(tab.reload);
       }),
     );
     // The frame's Ctrl+K arrives through the host (a CustomEvent never
     // crosses webviews) — ring the palette open/closed.
     unlisteners.push(
-      listen("shell://toggle-palette", () => {
+      listenHost("shell://toggle-palette", () => {
         if (disposed) return;
         setPaletteOpen(!useUi.getState().paletteOpen);
       }),
@@ -211,22 +210,22 @@ export function App() {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as (HTMLElement & { isContentEditable: boolean }) | null;
       const api: BrowserKeyApi = {
-        newTab: () => void invoke("shell_command", { id: 34014, arg: null }),
-        reopenClosedTab: () => void invoke("shell_command", { id: 34028, arg: null }),
-        closeActiveTab: () => void invoke("shell_command", { id: 34015, arg: null }),
+        newTab: () => void invokeHost("shell_command", { id: 34014, arg: null }),
+        reopenClosedTab: () => void invokeHost("shell_command", { id: 34028, arg: null }),
+        closeActiveTab: () => void invokeHost("shell_command", { id: 34015, arg: null }),
         cycleTab: (step) =>
-          void invoke("shell_command", { id: step >= 0 ? 34016 : 34017, arg: null }),
+          void invokeHost("shell_command", { id: step >= 0 ? 34016 : 34017, arg: null }),
         selectTabIndex: (index) =>
-          void invoke("shell_command", {
+          void invokeHost("shell_command", {
             id: index === "last" ? 50002 : 34018 + index,
             arg: null,
           }),
-        focusAddressBar: () => void invoke("shell_command", { id: 39001, arg: null }),
-        reload: () => void invoke("shell_command", { id: 33002, arg: null }),
-        goBack: () => void invoke("shell_command", { id: 50006, arg: null }),
-        goForward: () => void invoke("shell_command", { id: 50007, arg: null }),
-        bookmarkActive: () => void invoke("shell_command", { id: 35000, arg: null }),
-        toggleBookmarksBar: () => void invoke("shell_command", { id: 40009, arg: null }),
+        focusAddressBar: () => void invokeHost("shell_command", { id: 39001, arg: null }),
+        reload: () => void invokeHost("shell_command", { id: 33002, arg: null }),
+        goBack: () => void invokeHost("shell_command", { id: 50006, arg: null }),
+        goForward: () => void invokeHost("shell_command", { id: 50007, arg: null }),
+        bookmarkActive: () => void invokeHost("shell_command", { id: 35000, arg: null }),
+        toggleBookmarksBar: () => void invokeHost("shell_command", { id: 40009, arg: null }),
         togglePalette: () => setPaletteOpen(!useUi.getState().paletteOpen),
         paletteOpen: () => useUi.getState().paletteOpen,
       };
@@ -248,7 +247,7 @@ export function App() {
     // Any pointerdown here is an interaction a popup overlay must yield
     // to (cheap no-op when none is open).
     if (!onHost()) return;
-    const onDown = () => void invoke("shell_popup_dismiss").catch(() => {});
+    const onDown = () => void invokeHost("shell_popup_dismiss").catch(() => {});
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, []);
