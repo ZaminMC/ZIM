@@ -1357,8 +1357,7 @@ pub async fn shell_drag(
                 // DetachIntoNewBrowserAndRunMoveLoop, drop-based
                 // adaptation: first hit-test the OTHER windows' strip
                 // bands — a drop over one of them MOVES the tab there
-                // (drag between windows); only a drop on empty screen
-                // tears off into a new window at the pointer.
+                // (drag between windows).
                 if let Some((target, local_x)) = window_strip_at(&app, &state, &window_name, sx, sy)
                 {
                     return move_tab_between_windows(
@@ -1370,6 +1369,16 @@ pub async fn shell_drag(
                         local_x,
                     );
                 }
+                // A drop inside the SOURCE window — its content area
+                // included — never tears off: the tab returns to the
+                // source strip. Chromium tears off only when the drop
+                // lands OFF the browser window entirely; a drag that
+                // dipped past the strip band and released back inside
+                // the window is a dock-back, not a new window (the
+                // "my tab vanished into a spawned window" disease).
+                if window_contains(&app, &window_name, sx, sy) {
+                    return reorder_in_strip(&app, &state, &window_name, id, x);
+                }
                 let tab = {
                     let mut inner = state.lock();
                     let strip = inner.strip(&window_name);
@@ -1377,45 +1386,7 @@ pub async fn shell_drag(
                 };
                 spawn_tearoff(&app, &state, tab.destination().clone(), sx, sy)
             } else {
-                {
-                    let mut inner = state.lock();
-                    // The width reads before the strip's mutable borrow:
-                    // the guard can't serve both at once (E0502's law).
-                    let strip_width = inner
-                        .strip_widths
-                        .get(&window_name)
-                        .copied()
-                        .unwrap_or(1024.0);
-                    let slots = {
-                        let strip = inner.strip(&window_name);
-                        let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
-                            .tabs
-                            .iter()
-                            .map(|t| (t.id, t.pinned, false, t.group))
-                            .collect();
-                        let group_tuples: Vec<(u32, bool, &str)> = strip
-                            .groups
-                            .values()
-                            .map(|g| (g.id, g.collapsed, g.label.as_str()))
-                            .collect();
-                        let active = strip.active.unwrap_or(0);
-                        layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
-                    };
-                    if let Some(x) = x {
-                        // The lift-out rule: the insertion index runs over
-                        // the REMAINING tabs — the dragged tab's own slot
-                        // never participates in its own drop verdict.
-                        let others: Vec<layout::Slot> = slots
-                            .iter()
-                            .filter(|s| !s.header && s.id != id)
-                            .cloned()
-                            .collect();
-                        let index = layout::drop_index(&others, x);
-                        inner.strip(&window_name).reorder_drop(id, index);
-                    }
-                }
-                emit_tab_state(&app, &state, &window_name);
-                sync(&app, &state, &window_name)
+                reorder_in_strip(&app, &state, &window_name, id, x)
             }
         }
         "cancel" => {
@@ -1426,6 +1397,79 @@ pub async fn shell_drag(
         }
         _ => Err(format!("unknown drag phase {phase}")),
     }
+}
+
+/// The in-strip reorder — the drop's shared tail (the plain drop and
+/// the dock-back both land here). The model x runs drop_index over the
+/// slots MINUS the dragged tab (the lift-out rule), the model reorders,
+/// and the sync re-lays the window out.
+fn reorder_in_strip(
+    app: &AppHandle,
+    state: &ShellState,
+    window_name: &str,
+    id: TabId,
+    x: Option<f32>,
+) -> Result<(), String> {
+    {
+        let mut inner = state.lock();
+        // The width reads before the strip's mutable borrow:
+        // the guard can't serve both at once (E0502's law).
+        let strip_width = inner
+            .strip_widths
+            .get(window_name)
+            .copied()
+            .unwrap_or(1024.0);
+        let slots = {
+            let strip = inner.strip(window_name);
+            let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
+                .tabs
+                .iter()
+                .map(|t| (t.id, t.pinned, false, t.group))
+                .collect();
+            let group_tuples: Vec<(u32, bool, &str)> = strip
+                .groups
+                .values()
+                .map(|g| (g.id, g.collapsed, g.label.as_str()))
+                .collect();
+            let active = strip.active.unwrap_or(0);
+            layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
+        };
+        if let Some(x) = x {
+            // The lift-out rule: the insertion index runs over the
+            // REMAINING tabs — the dragged tab's own slot never
+            // participates in its own drop verdict.
+            let others: Vec<layout::Slot> = slots
+                .iter()
+                .filter(|s| !s.header && s.id != id)
+                .cloned()
+                .collect();
+            let index = layout::drop_index(&others, x);
+            inner.strip(window_name).reorder_drop(id, index);
+        }
+    }
+    emit_tab_state(app, state, window_name);
+    sync(app, state, window_name)
+}
+
+/// Does this screen point land inside the window's outer rect? Logical
+/// units throughout — the frame's screenX/screenY are CSS pixels, the
+/// window's physical rect divides by its own scale factor.
+fn window_contains(app: &AppHandle, label: &str, screen_x: f32, screen_y: f32) -> bool {
+    let Some(window) = app.get_window(label) else {
+        return false;
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let Ok(outer) = window.outer_position() else {
+        return false;
+    };
+    let Ok(size) = window.outer_size() else {
+        return false;
+    };
+    let x = outer.x as f32 / scale as f32;
+    let y = outer.y as f32 / scale as f32;
+    let w = size.width as f32 / scale as f32;
+    let h = size.height as f32 / scale as f32;
+    screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + h
 }
 
 /// Which OTHER window's strip band does this screen point land on, and

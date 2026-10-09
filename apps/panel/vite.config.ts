@@ -8,6 +8,14 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    watch: {
+      // The Tauri host crate builds in place (workspace exclude); its
+      // target/ tree sits inside this project and its churn — thousands
+      // of fingerprint files appearing and vanishing mid-build — is not
+      // UI source. Ignored: the dev server's watcher never trips over a
+      // cargo build again.
+      ignored: ["**/src-tauri/target/**", "**/node_modules/**", "**/dist/**"],
+    },
   },
   build: {
     target: "es2022",

@@ -126,21 +126,85 @@ export const reportFrameSize = (width: number, height: number): Promise<void> =>
       ? ((demo.strip_width = width), demoEmit(), Promise.resolve())
       : Promise.resolve();
 
-/** The drag session — phase events into the ported TabDragController. */
+/** The drag session — phase events into the ported TabDragController.
+ *  The demo mirrors the model's drop law (reorder_drop: the dragged
+ *  tab lifts out, the insertion index runs over the REMAINING tabs in
+ *  model order) so the browser harness exercises the same reorder the
+ *  host performs — UI iteration must not need the desktop host. */
 export const shellDrag = (
   phase: "start" | "move" | "drop" | "cancel",
   payload: { tab_id?: number; x?: number; y?: number; screen_x?: number; screen_y?: number } = {},
-): Promise<void> =>
-  isTauri()
-    ? invokeHost("shell_drag", {
-        phase,
-        tab_id: payload.tab_id ?? null,
-        x: payload.x ?? null,
-        y: payload.y ?? null,
-        screen_x: payload.screen_x ?? null,
-        screen_y: payload.screen_y ?? null,
-      })
-    : Promise.resolve();
+): Promise<void> => {
+  if (isTauri()) {
+    return invokeHost("shell_drag", {
+      phase,
+      tab_id: payload.tab_id ?? null,
+      x: payload.x ?? null,
+      y: payload.y ?? null,
+      screen_x: payload.screen_x ?? null,
+      screen_y: payload.screen_y ?? null,
+    });
+  }
+  if (demoActive() && phase === "drop") {
+    const tid = payload.tab_id ?? -1;
+    if (tid >= 0 && payload.x != null) demoDragDrop(tid, payload.x);
+  }
+  return Promise.resolve();
+};
+
+/** The drop's insertion law, view side — mirrors shell/tabs.rs's
+ *  move_to: the drop index lives in SLOT space (the pinned block
+ *  leads), the array lives in MODEL space. An unpinned tab never
+ *  lands inside the pinned block; a pinned one never leaves it by
+ *  drop index (block_edge's clamp). The dragged tab inserts before
+ *  the anchor the clamped index names, in array terms. */
+export function insertAtDropIndex<T extends { id: number; pinned: boolean }>(
+  rest: T[],
+  dragged: T,
+  index: number,
+): T[] {
+  const laidOut = [...rest].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  const pinnedCount = laidOut.filter((t) => t.pinned).length;
+  const clamped = dragged.pinned
+    ? Math.min(Math.max(index, 0), pinnedCount)
+    : Math.max(index, pinnedCount);
+  const anchor = laidOut[clamped];
+  const out = [...rest];
+  if (!anchor) {
+    out.push(dragged);
+    return out;
+  }
+  const pos = out.findIndex((t) => t.id === anchor.id);
+  out.splice(pos < 0 ? out.length : pos, 0, dragged);
+  return out;
+}
+
+/** The demo's reorder echo — shell/tabs.rs's reorder_drop at fixture
+ *  scale: lift the tab out, insert at the drop index among the others
+ *  (the block-edge clamp included). The mutation is worthless without
+ *  a push: demoEmit() re-reads the fixture through the same layout law
+ *  the host's emit_tab_state rides — without it the reorder happened
+ *  invisibly (the harness's own silent-drop disease). */
+function demoDragDrop(tabId: number, x: number): void {
+  const slots = demoLayoutStrip({
+    strip_width: demo.strip_width,
+    tabs: demo.tabs.map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
+    groups: demo.groups,
+    active: demo.active,
+  });
+  const others = slots.filter((s) => !s.header && s.id !== tabId);
+  const index = dropIndexFromSlots(others, x);
+  const from = demo.tabs.findIndex((t) => t.id === tabId);
+  if (from < 0) return;
+  const [gone] = demo.tabs.splice(from, 1);
+  if (!gone) return;
+  // insertAtDropIndex keeps the input members' references — the full
+  // fixture rows ride along; no lossy id-lookup rebuild (a lookup in
+  // the post-splice array could never find the lifted tab and the
+  // emit's snapshot read a hole: reading 'id' of undefined).
+  demo.tabs = insertAtDropIndex(demo.tabs, gone, index);
+  demoEmit();
+}
 
 // -- Events -------------------------------------------------------------------
 

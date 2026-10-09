@@ -18,8 +18,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bootFrame,
+  demoLayoutStrip,
   dismissPopup,
   dropIndexFromSlots,
+  insertAtDropIndex,
   isTauri,
   omniboxClassify,
   omniboxCommit,
@@ -150,35 +152,47 @@ export function FrameApp() {
   );
 
   // The drag session — Chromium's TabDragController, frame side. A
-  // pointerdown captures the pointer, a 10 DIP threshold arms the drag
-  // (the porting spec's threshold), and from there the session reports
+  // pointerdown ARMS the session; the 10 DIP threshold STARTS it: the
+  // pointer capture and the host's drag session both begin only when
+  // the drag is real. Capturing on the press would retarget the
+  // release's click to the tab and eat the close button's (the dead-
+  // close disease); a plain click must also never open a drag session
+  // on the host. From the threshold on, the session reports
   // rAF-coalesced moves (the host's detach magnetism watches y), lifts
-  // the tab, and places the insertion indicator over a drop-index mirror.
-  // Drop: view x converts to model x (the lane's scroll), then the host
-  // reorders — or tears off when the pointer left the strip.
+  // the tab, and places the insertion indicator over a drop-index
+  // mirror. Drop: view x converts to model x (the lane's scroll), then
+  // the host reorders — or tears off when the pointer left the window.
   const startDragSession = useCallback((event: React.PointerEvent, tabId: number) => {
     if (event.button !== 0) return;
+    // A press on the close button never arms a drag — upstream's
+    // MaybeStartDrag refuses non-tab presses; the click belongs to the
+    // button and nothing may retarget it.
+    if ((event.target as HTMLElement | null)?.closest(".tab-close")) return;
+    const element = event.currentTarget as HTMLElement;
+    const pointerId = event.pointerId;
     const startX = event.clientX;
     const startY = event.clientY;
     let moved = false;
+    let done = false;
     let raf = 0;
     let last = { x: event.clientX, y: event.clientY, sx: event.screenX, sy: event.screenY };
     dragRef.current = { tab: tabId, start_x: startX, start_y: startY, moved: false };
-    // Capture: the session must survive the pointer leaving the webview —
-    // a tear-off drop lands past the window's edge.
-    try {
-      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    } catch {
-      // A failed capture still drags inside the window; the drop just
-      // loses its beyond-the-edge reach.
-    }
-    void shellDrag("start", { tab_id: tabId, screen_x: event.screenX, screen_y: event.screenY });
-
     const onMove = (ev: PointerEvent) => {
       last = { x: ev.clientX, y: ev.clientY, sx: ev.screenX, sy: ev.screenY };
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10) {
         moved = true;
         if (dragRef.current) dragRef.current.moved = true;
+        // The threshold is where the drag begins: capture the pointer
+        // (the session must survive the pointer leaving the webview — a
+        // tear-off drop lands past the window's edge) and announce the
+        // session to the host.
+        try {
+          element.setPointerCapture(pointerId);
+        } catch {
+          // A failed capture still drags inside the window; the drop just
+          // loses its beyond-the-edge reach.
+        }
+        void shellDrag("start", { tab_id: tabId, screen_x: last.sx, screen_y: last.sy });
       }
       if (!moved) return;
       cancelAnimationFrame(raf);
@@ -194,14 +208,18 @@ export function FrameApp() {
       });
     };
     const finish = (commit: boolean) => {
+      if (done) return;
+      done = true;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
       window.removeEventListener("keydown", onKey);
+      element.removeEventListener("lostpointercapture", onLost);
       cancelAnimationFrame(raf);
       dragRef.current = null;
       setDragPointer(null);
       if (commit && moved) dragJustEnded.current = performance.now();
+      if (!moved) return; // a press that never became a drag: nothing to tell the host
       if (commit) {
         void shellDrag("drop", {
           tab_id: tabId,
@@ -219,10 +237,16 @@ export function FrameApp() {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") finish(false);
     };
+    // A lost capture (alt-tab, an OS gesture swallowing the pointer)
+    // must never hang the session: the tab settles back and the next
+    // press starts fresh. The normal release fires this too — after
+    // finish() already ran, and the done guard makes it a no-op.
+    const onLost = () => finish(false);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
     window.addEventListener("keydown", onKey);
+    element.addEventListener("lostpointercapture", onLost);
   }, []);
 
   const boot = useCallback((attempt = 0) => {
@@ -474,30 +498,51 @@ export function FrameApp() {
       ? Math.max(snap.strip_width - 174, 0)
       : Math.min(stripUsedEnd + 4, Math.max(snap.strip_width - 174, 0));
 
-  // The drag session's visuals: the lifted tab and its insertion
-  // indicator. The indicator computes over the slots MINUS the dragged
-  // tab (the lift-out rule the host's drop applies) and only while the
-  // pointer stays in the strip band — beyond it the drop is a tear-off
-  // and no in-strip insertion exists.
+  // The drag session's live strip (Chromium's animated track): while
+  // the pointer stays in the band, the strip renders the layout AS IF
+  // the dragged tab already stood at the preview index — the neighbors
+  // slide, the gap travels with the pointer, and the release lands the
+  // tab exactly where the gap sits (the model settles at the drop, so
+  // the post-drop snapshot matches what is already on screen). Beyond
+  // the band the posture is a tear-off: the model slots hold, the gap
+  // closes, and the lifted tab floats alone. The preview runs over the
+  // slots MINUS the dragged tab (the lift-out rule the drop applies),
+  // so the verdict can never chase its own gap.
   const dragTabId = dragPointer != null ? (dragRef.current?.tab ?? null) : null;
   const inStripBand = dragPointer != null && dragPointer.y <= 41 + 15;
-  let insertX: number | null = null;
+  let visualSlots = snap.slots;
   if (dragTabId != null && inStripBand) {
-    const others = snap.slots.filter((s) => s.header || s.id !== dragTabId);
-    const preview = dropIndexFromSlots(others, dragPointer.x + scrollValue);
-    const tabsOnly = others;
-    const prev = tabsOnly[preview - 1];
-    const next = tabsOnly[preview];
-    if (prev && next) {
-      insertX = (prev.x + prev.width + next.x) / 2;
-    } else if (next) {
-      insertX = Math.max(next.x - 9, 6);
-    } else if (prev) {
-      insertX = prev.x + prev.width - 18;
+    const draggedSlot = snap.slots.find((s) => !s.header && s.id === dragTabId);
+    const draggedTab = snap.tabs.find((t) => t.id === dragTabId);
+    if (draggedSlot && draggedTab) {
+      const preview = dropIndexFromSlots(
+        snap.slots.filter((s) => s.header || s.id !== dragTabId),
+        dragPointer.x + scrollValue,
+      );
+      // The hypothetical arrangement — the dragged tab re-inserted at
+      // the preview index under the SAME insertion law the model's
+      // move_to applies (the pinned block's edge clamps the index) —
+      // laid out by the same law the model uses, so the drop lands
+      // exactly where the gap sits and the release is seamless.
+      const withDragged = insertAtDropIndex(
+        snap.tabs
+          .filter((t) => t.id !== dragTabId)
+          .map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
+        { id: draggedTab.id, pinned: draggedTab.pinned, group: draggedTab.group },
+        preview,
+      );
+      visualSlots = demoLayoutStrip({
+        strip_width: snap.strip_width,
+        tabs: withDragged,
+        groups: snap.groups,
+        active: snap.active ?? 0,
+      });
     }
   }
   // The dragged tab follows the pointer, clamped to the window's span
-  // (translate is rigid, so local and visual deltas agree).
+  // (translate is rigid, so local and visual deltas agree). The base is
+  // the MODEL slot — the visual layout reshuffles under it every frame,
+  // and a hypothetical base would compound the delta into a drift.
   const dragDx = (slotX: number, width: number): number | null => {
     if (dragTabId == null || dragPointer == null) return null;
     const visualX = slotX - scrollValue;
@@ -561,7 +606,7 @@ export function FrameApp() {
             setScroll(stripScroll(snap.slots, snap.strip_width, scrollRef.current + delta).value);
           }}
         >
-          {snap.slots.flatMap((slot, idx) => {
+          {visualSlots.flatMap((slot, idx) => {
             const parts: React.JSX.Element[] = [];
             // Separators: the VIEW owns the adjacency truth — an
             // explicit 2×20 mark between two adjacent inactive tab
@@ -569,7 +614,7 @@ export function FrameApp() {
             // a chip or an absolutely-positioned run). The span sits
             // BETWEEN the tab divs in DOM order so hover of either
             // neighbor hides it through the sibling/:has() rules.
-            const prevSlot = idx > 0 ? snap.slots[idx - 1] : undefined;
+            const prevSlot = idx > 0 ? visualSlots[idx - 1] : undefined;
             if (prevSlot && !slot.header && !prevSlot.header && !slot.closing && !prevSlot.closing) {
               const prevTab = snap.tabs.find((t) => t.id === prevSlot.id);
               const curTab = snap.tabs.find((t) => t.id === slot.id);
@@ -615,8 +660,12 @@ export function FrameApp() {
             const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
             // The drag session's lift: the moved tab follows the pointer
             // (clamped to the window) with the settle transitions off.
+            // The translate's base is the MODEL slot — the visual layout
+            // reshuffles under the session, and a hypothetical base
+            // would compound the pointer delta into a drift.
             const dragging = dragTabId === tab.id;
-            const dx = dragging ? dragDx(slot.x, slot.width) : null;
+            const modelSlot = dragging ? snap.slots.find((s) => !s.header && s.id === tab.id) : null;
+            const dx = dragging && modelSlot ? dragDx(modelSlot.x, modelSlot.width) : null;
             // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
             // cannot fit beside a glyph — the slot shows its glyph alone,
             // centered in the visible span, the way Chromium's minimum
@@ -635,7 +684,11 @@ export function FrameApp() {
                   slot.closing ? "tab-closing" : "",
                 ].join(" ")}
                 style={{
-                  left: slot.x,
+                  // The dragged tab renders from its MODEL slot — the
+                  // translate is expressed against that base, and the
+                  // visual layout's hypothetical x would compound into
+                  // a double offset (tab flung off-window).
+                  left: dragging && modelSlot ? modelSlot.x : slot.x,
                   width: slot.width,
                   ...(dx != null
                     ? { transform: `translateX(${dx}px)`, transition: "none", willChange: "transform" }
@@ -694,11 +747,6 @@ export function FrameApp() {
             );
             return parts;
           })}
-          {/* The insertion indicator — the drag session's drop preview
-              (DragInsertionIndicator): a 2px accent bar at the boundary
-              the drop would land on. It only exists while the pointer
-              stays in the strip band; beyond it the drop tears off. */}
-          {insertX != null ? <div className="drag-insert" style={{ left: insertX }} /> : null}
         </div>
         {/* Scroll chevrons (tab_strip scrolling): only while the layout
             overflows its minimum run, riding the strip's right reserve. */}
@@ -812,6 +860,23 @@ export function FrameApp() {
             <IconStar />
           </button>
         </div>
+        {/* The update pill lives IN the toolbar's flow — it used to
+            float fixed over the toolbar's right side and read as an
+            overlap of the chrome it covered. A flex item cannot overlap
+            anything: the omnibox gives way, the dots stay clear. */}
+        {updatePhase.kind === "available" ? (
+          <button className="update-pill" onClick={() => void installNow()}>
+            {updatesSentence(updatePhase)}
+          </button>
+        ) : null}
+        {updatePhase.kind === "downloading" ? (
+          <span className="update-pill update-pill--busy">{updatesSentence(updatePhase)}</span>
+        ) : null}
+        {updatePhase.kind === "ready" ? (
+          <button className="update-pill" onClick={() => void restart()}>
+            {updatesSentence(updatePhase)}
+          </button>
+        ) : null}
         {/* The three-dot menu — the browser-level actions live here and
             nowhere else; server management stays in the server's own
             views. The popup overlay anchors under the button. */}
@@ -902,19 +967,6 @@ export function FrameApp() {
         </div>
       ) : null}
 
-      {updatePhase.kind === "available" ? (
-        <button className="update-pill" onClick={() => void installNow()}>
-          {updatesSentence(updatePhase)}
-        </button>
-      ) : null}
-      {updatePhase.kind === "downloading" ? (
-        <span className="update-pill update-pill--busy">{updatesSentence(updatePhase)}</span>
-      ) : null}
-      {updatePhase.kind === "ready" ? (
-        <button className="update-pill" onClick={() => void restart()}>
-          {updatesSentence(updatePhase)}
-        </button>
-      ) : null}
     </div>
   );
 }

@@ -127,6 +127,14 @@
   --frame-fg-dim: #5f6368;
   --frame-hover: rgba(32, 33, 36, 0.057);
   --frame-hover-strong: rgba(32, 33, 36, 0.1);
+  /* The STRIP's own hover: OPAQUE, ~12% darker than the strip ground —
+     the user's Chrome reference crop reads 227 → 199. The tab bodies'
+     chain law paints the next unit over the previous unit's right 18px,
+     which only works when the fill under it is opaque: a translucent
+     wash was both invisible and bled through the neighbor's transparent
+     body (the pixel-leak family). Contrast with --frame-hover above,
+     which serves the WHITE toolbar grounds where translucency is safe. */
+  --strip-hover: #c3c6ca;
   --frame-line: rgba(32, 33, 36, 0.16);
   --frame-accent: #1a73e8;
   --frame-accent-soft: rgba(26, 115, 232, 0.1);

@@ -70,7 +70,12 @@ body {
 }
 
 .tab-inactive { background: transparent; color: var(--frame-fg-dim); z-index: 1; }
-.tab-inactive:hover { background: var(--frame-hover); color: var(--frame-fg); }
+/* The hover fill is OPAQUE and visibly darker (the user's Chrome
+   reference: the strip darkens ~12% under the pointer). The old 5.7%
+   translucent wash was invisible at a glance AND bled through the
+   neighbor's transparent body across the 18px overlap zone — the
+   chain law needs an opaque fill to have anything to cover with. */
+.tab-inactive:hover { background: var(--strip-hover); color: var(--frame-fg); }
 .tab-active {
   background: var(--frame-surface);
   color: var(--frame-fg);
@@ -131,8 +136,17 @@ body {
 
 /* The dragged tab lifts above everything (Chromium's dragging tab is
    the top-most view in the strip) and follows the pointer without the
-   settle transitions. */
-.tab-dragging { z-index: 4; cursor: grabbing; }
+   settle transitions. It also paints OPAQUE with the selected fill —
+   an inactive tab's transparent body would show every tab, chip, and
+   separator underneath it as ghost pixels sliding across the lifted
+   tab (the user's "weird tab pixels" shot). Chromium's dragged tab
+   renders as the selected tab, always. */
+.tab-dragging {
+  z-index: 4;
+  cursor: grabbing;
+  background: var(--frame-surface);
+  color: var(--frame-fg);
+}
 
 /* Minimum-width tabs (the shrink law's 32 DIP floor): the glyph alone
    fits — title, mute state, and close give way. */
@@ -168,7 +182,12 @@ body {
 }
 .tab:hover .tab-close,
 .tab-active .tab-close { opacity: 0.85; }
-.tab .tab-close:hover { opacity: 1; background: var(--frame-hover-strong); }
+/* The close hover sits 24px inside the slot — clear of the 18px
+   overlap zone — so a translucent darken is safe here (nothing
+   beneath it but the tab's own body). 12% matches the strip's hover
+   strength on both the active (white) and inactive (strip ground)
+   bodies. */
+.tab .tab-close:hover { opacity: 1; background: rgba(32, 33, 36, 0.12); }
 .tab-pinned .tab-close { display: none; }
 
 /* Separators: explicit 2×20 marks the VIEW renders at the boundary
@@ -263,22 +282,6 @@ body {
    the eye see it go: fade while the slot shrinks, then it's gone. */
 .tab-closing { opacity: 0; transition: opacity 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1); }
 
-/* The drag session's insertion indicator — a 2px surface bar at the
-   preview boundary, the DOM stand-in for Chromium's
-   DragInsertionIndicator (drag insertion markers are edge-anchored
-   bars, not gaps). */
-.drag-insert {
-  position: absolute;
-  bottom: 0;
-  z-index: 3;
-  width: 2px;
-  height: 27px;
-  margin-bottom: 2px;
-  border-radius: 1px;
-  background: var(--frame-accent);
-  pointer-events: none;
-}
-
 /* The overflow lane: the model's slots translate inside it while the
    strip's own chrome (+ button, chevrons, caption) stays put. The lane
    never eats clicks — bare areas must stay the window's drag region —
@@ -290,8 +293,7 @@ body {
 }
 .strip-lane .tab,
 .strip-lane .group-chip,
-.strip-lane .tab-separator,
-.strip-lane .drag-insert { pointer-events: auto; }
+.strip-lane .tab-separator { pointer-events: auto; }
 
 /* The scroll chevrons (tab_strip scrolling): they ride the strip's
    right reserve only while the layout overflows — the view mounts them
@@ -309,7 +311,7 @@ body {
   color: var(--frame-fg-dim);
   cursor: default;
 }
-.strip-chev:hover { background: var(--frame-hover); color: var(--frame-fg); }
+.strip-chev:hover { background: var(--strip-hover); color: var(--frame-fg); }
 .strip-chev[disabled] { opacity: 0.3; }
 
 .new-tab {
@@ -322,11 +324,13 @@ body {
   border: none;
   background: transparent;
   color: var(--frame-fg-dim);
-  border-radius: 10px 10px 0 0;
+  /* The hover paints a CIRCLE (the user's Chrome reference crop): a
+     round fill around the +, not a band-wide rect. */
+  border-radius: 50%;
   cursor: default;
   transition: background 120ms ease-out, color 120ms ease-out;
 }
-.new-tab:hover { background: var(--frame-hover); color: var(--frame-fg); }
+.new-tab:hover { background: var(--strip-hover); color: var(--frame-fg); }
 
 .window-controls {
   position: absolute;
@@ -542,19 +546,21 @@ body {
 /* The update notice lives INSIDE the band — the frame webview is only
    the header (83px, 111 with bookmarks), so a bottom-fixed toast would
    be clipped off by the webview's edge (0.4.3's invisible pill). It
-   docks over the toolbar's right end, left of the star. */
+   rides the toolbar's flex flow (see the block below). */
 .update-pill {
-  position: fixed;
-  right: 48px;
-  top: 45px;
-  z-index: 9;
-  max-width: 420px;
+  /* In the toolbar's flow — the fixed/right/top float used to hang
+     OVER the toolbar's right side and read as an overlap of the chrome
+     it covered. A flex item occupies space; the omnibox gives way. */
+  position: static;
+  flex: none;
+  margin-left: 6px;
+  max-width: 340px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border: none;
-  border-radius: 15px;
-  padding: 7px 14px;
+  border-radius: 14px;
+  padding: 6px 12px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;
