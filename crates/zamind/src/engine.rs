@@ -915,11 +915,13 @@ impl Engine {
             if !(zamin_core::config::STORAGE_MIN_BYTES..=zamin_core::config::STORAGE_MAX_BYTES)
                 .contains(&bytes)
             {
-                return Err(EngineError::Protocol(ProtocolError::new(
-                    ErrorCode::ConfigInvalid,
-                    "The storage budget must be between 1 GiB and 16 TiB.",
-                )
-                .with_context("field", "storageBytes")));
+                return Err(EngineError::Protocol(
+                    ProtocolError::new(
+                        ErrorCode::ConfigInvalid,
+                        "The storage budget must be between 1 GiB and 16 TiB.",
+                    )
+                    .with_context("field", "storageBytes"),
+                ));
             }
         }
 
@@ -1286,7 +1288,9 @@ impl Engine {
             Err(err) => {
                 if matches!(
                     err.code,
-                    ErrorCode::FsPathEscapesRoot | ErrorCode::FsOutsideRoot | ErrorCode::FsSymlinkRefused
+                    ErrorCode::FsPathEscapesRoot
+                        | ErrorCode::FsOutsideRoot
+                        | ErrorCode::FsSymlinkRefused
                 ) {
                     let detail = format!(
                         "file API request refused at the containment boundary: {} [{:?}]",

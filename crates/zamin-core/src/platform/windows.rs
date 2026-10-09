@@ -229,9 +229,7 @@ impl SpawnHandle for WindowsHandle {
                 .stdin
                 .take()
                 .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>)),
-            ChildFlavor::Raw { stdin, .. } => Ok(stdin
-                .take()
-                .map(sandbox::bridge_writer)),
+            ChildFlavor::Raw { stdin, .. } => Ok(stdin.take().map(sandbox::bridge_writer)),
         }
     }
 
@@ -243,9 +241,7 @@ impl SpawnHandle for WindowsHandle {
                 .stdout
                 .take()
                 .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>)),
-            ChildFlavor::Raw { stdout, .. } => Ok(stdout
-                .take()
-                .map(sandbox::bridge_reader)),
+            ChildFlavor::Raw { stdout, .. } => Ok(stdout.take().map(sandbox::bridge_reader)),
         }
     }
 
@@ -257,9 +253,7 @@ impl SpawnHandle for WindowsHandle {
                 .stderr
                 .take()
                 .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Sync + Unpin>)),
-            ChildFlavor::Raw { stderr, .. } => Ok(stderr
-                .take()
-                .map(sandbox::bridge_reader)),
+            ChildFlavor::Raw { stderr, .. } => Ok(stderr.take().map(sandbox::bridge_reader)),
         }
     }
 
@@ -372,13 +366,16 @@ impl ProcessOps for WindowsProcessOps {
                 let raw = sandbox::spawn_appcontainer(spec, &container, sandbox_spawn.network)?;
                 let pid = process_id_of(raw.process.as_raw_handle())
                     .ok_or(PlatformError::ProcessGone { pid: 0 })?;
-                (pid, ChildFlavor::Raw {
-                    stdin: Some(raw.stdin),
-                    stdout: Some(raw.stdout),
-                    stderr: Some(raw.stderr),
-                    process: raw.process,
-                    thread: raw.thread,
-                })
+                (
+                    pid,
+                    ChildFlavor::Raw {
+                        stdin: Some(raw.stdin),
+                        stdout: Some(raw.stdout),
+                        stderr: Some(raw.stderr),
+                        process: raw.process,
+                        thread: raw.thread,
+                    },
+                )
             }
         };
 
@@ -416,7 +413,10 @@ impl ProcessOps for WindowsProcessOps {
         // The sandboxed child's main thread is still suspended: with the
         // boundary assigned, let it run. A resume failure terminates the
         // process and fails the spawn — no zombie, no unbounded start.
-        if let ChildFlavor::Raw { process, thread, .. } = &flavor {
+        if let ChildFlavor::Raw {
+            process, thread, ..
+        } = &flavor
+        {
             sandbox::resume(process, thread)?;
         }
 

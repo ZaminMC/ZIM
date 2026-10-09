@@ -17,9 +17,7 @@ use zamin_core::supervisor::state::StateMachine;
 use zamin_core::supervisor::LifecycleCommand;
 use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::server::{CrashClassification, ServerState};
-use zamin_protocol::streams::{
-    CoreEvent, LogLevel, LogLine, MetricsSample, SecurityNoticeKind,
-};
+use zamin_protocol::streams::{CoreEvent, LogLevel, LogLine, MetricsSample, SecurityNoticeKind};
 
 use crate::hub::HubHandle;
 
@@ -160,7 +158,9 @@ impl Actor {
             metrics_last_sample: Instant::now(),
             // The first tick samples storage immediately (a fresh gate
             // must not stay empty for 30 s while writes flow through).
-            storage_last_sample: Instant::now().checked_sub(STORAGE_INTERVAL).unwrap_or_else(Instant::now),
+            storage_last_sample: Instant::now()
+                .checked_sub(STORAGE_INTERVAL)
+                .unwrap_or_else(Instant::now),
             storage_announced: None,
         }
     }
@@ -413,14 +413,10 @@ impl Actor {
             settings.sandbox_mode,
             platform::sandbox_container_name(&self.server_id),
         ) {
-            (SandboxMode::Auto, Some(container_name)) => {
-                Some(SandboxSpawn {
-                    container_name,
-                    network: zamin_core::platform::NetworkSandbox::from_policy(
-                        settings.network_policy,
-                    ),
-                })
-            }
+            (SandboxMode::Auto, Some(container_name)) => Some(SandboxSpawn {
+                container_name,
+                network: zamin_core::platform::NetworkSandbox::from_policy(settings.network_policy),
+            }),
             (SandboxMode::Auto, None) => {
                 let detail = "no OS process boundary on this platform; the server runs unsandboxed (the configured limits still ride the spawn where the platform provides them)";
                 tracing::warn!(server = %self.server_id, "security notice: {detail}");

@@ -40,20 +40,19 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GENERIC_ALL, HANDLE, HANDLE_FLAG_INHERIT,
-    INVALID_HANDLE_VALUE, LocalFree, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, LocalFree, SetHandleInformation, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GENERIC_ALL,
+    HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW,
     EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeleteAppContainerProfile,
-    DeriveAppContainerSidFromAppContainerName,
+    CreateAppContainerProfile, DeleteAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
 use windows_sys::Win32::Security::{
-    DeriveCapabilitySidsFromName, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES,
-    SUB_CONTAINERS_AND_OBJECTS_INHERIT, SID_AND_ATTRIBUTES,
+    DeriveCapabilitySidsFromName, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
@@ -171,10 +170,7 @@ unsafe fn finish_container(
     let slice = std::slice::from_raw_parts(string, len);
     let sid_string = String::from_utf16_lossy(slice);
     unsafe { LocalFree(string as _) };
-    Ok(Container {
-        sid,
-        sid_string,
-    })
+    Ok(Container { sid, sid_string })
 }
 
 /// Grant the container SID full control of the server directory tree.
@@ -274,7 +270,10 @@ fn policy_capabilities(network: NetworkSandbox) -> Vec<SID_AND_ATTRIBUTES> {
         if ok != 0 {
             for i in 0..sid_count as usize {
                 let p = unsafe { *sids.add(i) };
-                out.push(SID_AND_ATTRIBUTES { Sid: p, Attributes: 0 });
+                out.push(SID_AND_ATTRIBUTES {
+                    Sid: p,
+                    Attributes: 0,
+                });
             }
         }
         // A failed derivation degrades to "fewer capabilities granted",
@@ -320,8 +319,7 @@ pub fn cleanup_container(name: &str) {
                 while *string.add(len) != 0 {
                     len += 1;
                 }
-                let sid_string =
-                    String::from_utf16_lossy(std::slice::from_raw_parts(string, len));
+                let sid_string = String::from_utf16_lossy(std::slice::from_raw_parts(string, len));
                 remove_loopback_exemption(&sid_string);
             }
         }
@@ -345,7 +343,11 @@ fn make_pipe(child_reads: bool) -> Result<(OwnedHandle, OwnedHandle), PlatformEr
     if unsafe { CreatePipe(&mut read, &mut write, &sa, 0) } == 0 {
         return Err(last_os_error("creating the stdio pipe"));
     }
-    let (ours, theirs) = if child_reads { (write, read) } else { (read, write) };
+    let (ours, theirs) = if child_reads {
+        (write, read)
+    } else {
+        (read, write)
+    };
     // Our end must not leak into the sandboxed process.
     unsafe { SetHandleInformation(ours, HANDLE_FLAG_INHERIT, 0) };
     Ok((
@@ -739,8 +741,9 @@ pub fn spawn_job_watcher(
             job,
             windows_sys::Win32::System::JobObjects::JobObjectAssociateCompletionPortInformation,
             &assoc as *const _ as *const c_void,
-            std::mem::size_of::<windows_sys::Win32::System::JobObjects::JOBOBJECT_ASSOCIATE_COMPLETION_PORT>()
-                as u32,
+            std::mem::size_of::<
+                windows_sys::Win32::System::JobObjects::JOBOBJECT_ASSOCIATE_COMPLETION_PORT,
+            >() as u32,
         )
     };
     if ok == 0 {
