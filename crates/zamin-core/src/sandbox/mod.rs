@@ -17,7 +17,7 @@
 //! platform/windows.rs); this module documents that boundary and keeps
 //! the accounting honest.
 
-use std::io::{Read as _, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -94,11 +94,7 @@ pub struct StorageWalk {
 /// (a link out of the sandbox cannot smuggle another tree's bytes into
 /// the count, nor can it turn the walk into a cycle). Cancellation is
 /// honored between entries.
-pub fn measure_dir(
-    root: &Path,
-    budget: u64,
-    cancel: &AtomicBool,
-) -> std::io::Result<StorageWalk> {
+pub fn measure_dir(root: &Path, budget: u64, cancel: &AtomicBool) -> std::io::Result<StorageWalk> {
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     let mut bytes: u64 = 0;
     let mut files: u64 = 0;
@@ -169,12 +165,7 @@ impl SecurityJournal {
     /// rotated or deleted file cannot wedge the daemon) with append
     /// semantics, fsync'd — a boundary event that a crash loses was
     /// never recorded.
-    pub fn record(
-        &self,
-        server_id: Option<&str>,
-        kind: &str,
-        detail: &str,
-    ) -> std::io::Result<()> {
+    pub fn record(&self, server_id: Option<&str>, kind: &str, detail: &str) -> std::io::Result<()> {
         let entry = serde_json::json!({
             "ts": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -186,7 +177,10 @@ impl SecurityJournal {
         });
         let line = serde_json::to_string(&entry)
             .unwrap_or_else(|_| r#"{"kind":"security.journal.serialize.failed"}"#.to_owned());
-        let _guard = self.lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

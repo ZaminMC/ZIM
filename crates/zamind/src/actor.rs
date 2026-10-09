@@ -357,7 +357,7 @@ impl Actor {
             .map(|mb| ((mb as u64) + 512) * 1024 * 1024);
         let limits = zamin_core::platform::SpawnLimits {
             memory_bytes,
-            cpu_percent: None,  // no per-server CPU config surface yet (P2)
+            cpu_percent: None, // no per-server CPU config surface yet (P2)
             process_count: Some(64),
             file_size_bytes: None,
         };

@@ -433,7 +433,11 @@ fn a_cached_jdk_installs_offline() {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
-        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     };
 
     // A controllable one-file server: flipping `down` closes the socket.
@@ -442,31 +446,38 @@ fn a_cached_jdk_installs_offline() {
     let addr = listener.local_addr().unwrap();
     let down_thread = Arc::downgrade(&down);
     listener.set_nonblocking(true).unwrap();
-    let server = std::thread::spawn(move || loop {
-        if down_thread.upgrade().map(|d| d.load(Ordering::Relaxed)) == Some(true) {
-            return;
-        }
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let mut buf = [0u8; 4096];
-                let _ = std::io::Read::read(&mut stream, &mut buf);
-                let request = String::from_utf8_lossy(&buf);
-                let (ctype, body) = if request.contains(".sha256") {
-                    ("text/plain", format!("{sha}  OpenJDK21.tar.gz\n").into_bytes())
-                } else {
-                    ("application/gzip", bytes.clone())
-                };
-                let head = format!(
+    let sha_thread = sha.clone();
+    let server = std::thread::spawn(move || {
+        let sha = sha_thread;
+        loop {
+            if down_thread.upgrade().map(|d| d.load(Ordering::Relaxed)) == Some(true) {
+                return;
+            }
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut buf = [0u8; 4096];
+                    let _ = std::io::Read::read(&mut stream, &mut buf);
+                    let request = String::from_utf8_lossy(&buf);
+                    let (ctype, body) = if request.contains(".sha256") {
+                        (
+                            "text/plain",
+                            format!("{sha}  OpenJDK21.tar.gz\n").into_bytes(),
+                        )
+                    } else {
+                        ("application/gzip", bytes.clone())
+                    };
+                    let head = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
                 );
-                let _ = stream.write_all(head.as_bytes());
-                let _ = stream.write_all(&body);
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(&body);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(_) => return,
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(_) => return,
         }
     });
     let base = format!("http://{addr}");

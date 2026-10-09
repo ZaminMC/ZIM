@@ -229,7 +229,7 @@ pub fn install_jdk(
                     bytes_done: p.bytes_done,
                     total: p.total,
                 });
-            })),
+            }))
         },
         // The JDK fetch keeps the downloader's original discipline: a
         // fresh runtime directory, never an overwrite.
@@ -240,7 +240,10 @@ pub fn install_jdk(
             let artifact = cache.fetch(
                 &asset.url,
                 Some(crate::software::Verified::Sha256(&asset.sha256)),
-                &format!("jdk-{}.archive", validate_release_name(&asset.release_name)?),
+                &format!(
+                    "jdk-{}.archive",
+                    validate_release_name(&asset.release_name)?
+                ),
                 &options,
             )?;
             (artifact.path, true)
@@ -248,7 +251,8 @@ pub fn install_jdk(
         None => {
             // Download next to the managed root so extraction is a plain
             // read (the no-cache path keeps its old shape).
-            let archive_path = managed_root.join(format!(".jdk-download-{}.part", std::process::id()));
+            let archive_path =
+                managed_root.join(format!(".jdk-download-{}.part", std::process::id()));
             let download = crate::software::download_to_dir(
                 &asset.url,
                 managed_root,

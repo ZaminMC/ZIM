@@ -207,11 +207,13 @@ async fn session_loop(
         // cached retries) stay inline.
         if request.method == methods::DAEMON_PING {
             outbound
-                .reply(Response::ok(request.id, serde_json::json!({ "pong": true })))
+                .reply(Response::ok(
+                    request.id,
+                    serde_json::json!({ "pong": true }),
+                ))
                 .await;
             continue;
         }
-
 
         let engine = engine.clone();
         let audit = audit.clone();

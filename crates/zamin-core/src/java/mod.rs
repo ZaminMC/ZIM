@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::error::CoreError;
-use crate::platform::{process, SpawnSpec};
+use crate::platform::{process, SpawnLimits, SpawnSpec};
 
 pub const INSPECT_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -95,6 +95,9 @@ pub fn inspect(java_path: &Path) -> Result<JavaInfo, CoreError> {
             "-version".to_owned(),
         ],
         working_dir: std::env::temp_dir(),
+        // The inspect probe carries no caps: it is the daemon's own
+        // short-lived child, not a server tree.
+        limits: SpawnLimits::default(),
     };
     let started = Instant::now();
     let output = process().run_capture(&spec, INSPECT_TIMEOUT).map_err(|e| {

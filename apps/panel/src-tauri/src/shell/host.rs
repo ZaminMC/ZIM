@@ -440,7 +440,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     for webview in host_window.webviews() {
         let label = webview.label();
         if label.starts_with(&format!("tab-{window_label}-")) && !live.contains(label) {
-            let _ = host_window.remove_child(&webview);
+            let _ = webview.close();
         }
     }
 
@@ -524,10 +524,10 @@ pub fn dismiss_popup(app: &AppHandle, state: &ShellState, window_label: &str) {
     let Some(_popup) = state.lock().popups.remove(window_label) else {
         return;
     };
-    if let Some(host_window) = app.get_window(window_label) {
-        if let Some(webview) = app.get_webview(&popup_label(window_label)) {
-            let _ = host_window.remove_child(&webview);
-        }
+    // The webview closes itself — tauri 2.12's child-webview removal is
+    // Webview::close (the manager unregisters it with the window).
+    if let Some(webview) = app.get_webview(&popup_label(window_label)) {
+        let _ = webview.close();
     }
 }
 
@@ -629,6 +629,7 @@ pub async fn shell_tab_navigate(
 fn destination_identity(d: &Destination) -> String {
     match d {
         Destination::New => "new".into(),
+        Destination::DevTools => "devtools".into(),
         Destination::Servers => "servers".into(),
         Destination::Server { server_id } => format!("server:{server_id}"),
         Destination::Console { server_id } => format!("console:{server_id}"),

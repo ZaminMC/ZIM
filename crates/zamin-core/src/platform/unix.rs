@@ -85,23 +85,28 @@ impl ProcessOps for UnixProcessOps {
         let file_size = spec.limits.file_size_bytes;
         #[cfg(unix)]
         {
-            use std::os::unix::process::CommandExt;
-            command.pre_exec(move || {
-                // RLIMIT_CORE = 0: no core dumps, ever.
-                let core = libc::rlimit {
-                    rlim_cur: 0,
-                    rlim_max: 0,
-                };
-                unsafe { libc::setrlimit(libc::RLIMIT_CORE, &core) };
-                if let Some(bytes) = file_size {
-                    let fsize = libc::rlimit {
-                        rlim_cur: bytes,
-                        rlim_max: bytes,
+            // SAFETY: setrlimit in the forked child before exec — no
+            // shared state with the parent's threads is touched.
+            unsafe {
+                command.pre_exec(move || {
+                    // RLIMIT_CORE = 0: no core dumps, ever.
+                    let core = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
                     };
-                    unsafe { libc::setrlimit(libc::RLIMIT_FSIZE, &fsize) };
-                }
-                Ok(())
-            });
+                    // SAFETY: a plain syscall with a stack-local struct.
+                    let _ = libc::setrlimit(libc::RLIMIT_CORE, &core);
+                    if let Some(bytes) = file_size {
+                        let fsize = libc::rlimit {
+                            rlim_cur: bytes,
+                            rlim_max: bytes,
+                        };
+                        // SAFETY: as above.
+                        let _ = libc::setrlimit(libc::RLIMIT_FSIZE, &fsize);
+                    }
+                    Ok(())
+                })
+            };
         }
         command
             .args(&spec.args)
@@ -260,6 +265,7 @@ mod tests {
             program: PathBuf::from("true"),
             args: vec![],
             working_dir: PathBuf::from("/tmp"),
+            limits: SpawnLimits::default(),
         };
         assert_eq!(spec.working_dir, PathBuf::from("/tmp"));
     }

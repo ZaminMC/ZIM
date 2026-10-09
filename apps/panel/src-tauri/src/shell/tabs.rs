@@ -35,6 +35,7 @@ pub type GroupId = u32;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Destination {
     New,
+    DevTools,
     Servers,
     Server { server_id: String },
     Console { server_id: String },
@@ -58,6 +59,7 @@ impl Destination {
     pub fn url(&self) -> String {
         match self {
             Destination::New => "zim://new".into(),
+            Destination::DevTools => "zim://devtools/".into(),
             Destination::Servers => "zim://servers/".into(),
             Destination::Settings => "zim://settings/".into(),
             Destination::Jobs => "zim://jobs/".into(),
@@ -90,6 +92,7 @@ impl Destination {
         };
         match page {
             "new" => Destination::New,
+            "devtools" => Destination::DevTools,
             "servers" => Destination::Servers,
             "settings" => Destination::Settings,
             "jobs" => Destination::Jobs,
@@ -131,6 +134,7 @@ impl Destination {
     pub fn label(&self) -> String {
         match self {
             Destination::New => "New tab".into(),
+            Destination::DevTools => "Developer tools".into(),
             Destination::Servers => "Fleet".into(),
             Destination::Server { server_id } => format!("Server {server_id}"),
             Destination::Console { server_id } => format!("Console {server_id}"),

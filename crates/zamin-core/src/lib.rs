@@ -10,7 +10,6 @@
 
 pub mod backup;
 pub mod cache;
-pub mod sandbox;
 pub mod config;
 pub mod discovery;
 pub mod error;
@@ -23,6 +22,7 @@ pub mod ping;
 pub mod platform;
 pub mod plugins;
 pub mod publish;
+pub mod sandbox;
 pub mod schedules;
 pub mod server;
 pub mod software;

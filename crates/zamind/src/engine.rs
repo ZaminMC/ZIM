@@ -1631,9 +1631,9 @@ impl Engine {
         host: Option<String>,
         port: u16,
     ) -> zamin_protocol::join::JoinCheckResult {
+        use std::io::ErrorKind;
         use zamin_core::ping::server_list_ping;
         use zamin_protocol::join::{JoinCheckResult, JoinState};
-        use std::io::ErrorKind;
         let hostname = host.clone().unwrap_or_else(|| "127.0.0.1".into());
         let addr = format!("{hostname}:{port}");
         let result = server_list_ping(&addr, &hostname, port).await;

@@ -184,10 +184,11 @@ impl Cache {
             path: entry.join(META_FILE),
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, source.to_string()),
         })?;
-        let mut meta_file = File::create(entry.join(META_FILE)).map_err(|source| CoreError::Io {
-            path: entry.join(META_FILE),
-            source,
-        })?;
+        let mut meta_file =
+            File::create(entry.join(META_FILE)).map_err(|source| CoreError::Io {
+                path: entry.join(META_FILE),
+                source,
+            })?;
         meta_file
             .write_all(&meta_bytes)
             .map_err(|source| CoreError::Io {
@@ -340,7 +341,11 @@ mod tests {
     fn digest_of(bytes: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(bytes);
-        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
     }
 
     #[test]
@@ -410,23 +415,31 @@ mod tests {
             progress: None,
             replace: false,
         };
-        assert!(install_from_cache(&artifact, &digest_of(b"jar"), &dest_dir, "server.jar", &options).is_err());
+        assert!(install_from_cache(
+            &artifact,
+            &digest_of(b"jar"),
+            &dest_dir,
+            "server.jar",
+            &options
+        )
+        .is_err());
         // The old bytes survive a refused install.
-        assert_eq!(
-            std::fs::read(dest_dir.join("server.jar")).unwrap(),
-            b"old"
-        );
+        assert_eq!(std::fs::read(dest_dir.join("server.jar")).unwrap(), b"old");
         // And the replace lane installs over them.
         let options = DownloadOptions {
             cancel: std::sync::Arc::new(AtomicBool::new(false)),
             progress: None,
             replace: true,
         };
-        install_from_cache(&artifact, &digest_of(b"jar"), &dest_dir, "server.jar", &options).unwrap();
-        assert_eq!(
-            std::fs::read(dest_dir.join("server.jar")).unwrap(),
-            b"jar"
-        );
+        install_from_cache(
+            &artifact,
+            &digest_of(b"jar"),
+            &dest_dir,
+            "server.jar",
+            &options,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(dest_dir.join("server.jar")).unwrap(), b"jar");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -434,8 +447,8 @@ mod tests {
     fn distinct_urls_never_share_an_entry() {
         let root = temp_root("distinct");
         let cache = Cache::new(root.clone());
-        let bytes_a = b"alpha";
-        let bytes_b = b"beta";
+        let bytes_a: &[u8] = b"alpha";
+        let bytes_b: &[u8] = b"beta";
         for (url, bytes, name) in [
             ("https://example.test/a.jar", bytes_a, "a.jar"),
             ("https://example.test/b.jar", bytes_b, "b.jar"),
