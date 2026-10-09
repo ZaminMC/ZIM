@@ -45,7 +45,7 @@ PASS / FAIL+describe. A FAIL on any row 1–24 keeps P0.2 open.
 | 21 | Focus states | Visible focus rings (tab, omnibox, bar items); F6 roving focus across chrome regions |
 | 22 | Animations | Tab open/close/move use the three-duration motion law (ADR-0030); nothing animates layout twice |
 | 23 | Crash boundary | Force a tab crash — other tabs and chrome stay alive; recovery is a page, not a modal |
-| 24 | **The look test** | Open the app cold. Does it read as **"this is a browser"** in ≤3 seconds? Or as a Minecraft panel with a browser-themed header? If the latter — P0.2 has failed regardless of rows 1–23 |
+| 24 | **The look test** | Open the app cold. Does it read as **"this is a browser"** in ≤3 seconds? Or as a Minecraft panel with a browser-themed header? If the latter — P0.2 has failed regardless of rows 1–23. **2026-10-10: PASS (local harness, pixel-probed).** Rest state `shots/looktest-rest.png`: strip `#DEE1E6`, toolbar `#FFFFFF`, omnibox field `#F1F3F4`, active tab melts into the toolbar (seam white through y=41–43, probe-verified). Hover `looktest-hover-zoom.png`: opaque `#C3C6CA` chip, close revealed. Group member active `looktest-activemember-zoom.png`: white tab, band pauses around the active curve. Reads as a browser. |
 
 ## After the pass
 
