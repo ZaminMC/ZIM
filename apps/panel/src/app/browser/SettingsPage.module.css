@@ -152,6 +152,9 @@
   display: flex;
   gap: 6px;
   flex: none;
+  /* When a long detail wraps the actions to their own line, they stay
+     at the row's right edge — the same place they sit on one line. */
+  margin-left: auto;
 }
 
 .channelLink {
