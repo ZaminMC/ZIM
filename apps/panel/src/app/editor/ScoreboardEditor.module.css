@@ -25,7 +25,7 @@
 .label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -36,7 +36,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-raised);
-  color: var(--text-primary);
+  color: var(--text);
   font: inherit;
 }
 
@@ -83,7 +83,7 @@
 .add {
   border: 1px solid var(--border);
   background: var(--surface-raised);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 12px;
@@ -99,7 +99,7 @@
 .mini:not(:disabled):hover,
 .add:not(:disabled):hover {
   border-color: var(--accent);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .add {
@@ -130,7 +130,7 @@
 .previewTitle {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

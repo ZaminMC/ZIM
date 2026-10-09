@@ -42,7 +42,7 @@
 .control textarea {
   width: 100%;
   max-width: 340px;
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   color: var(--text);

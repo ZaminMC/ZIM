@@ -55,7 +55,7 @@
 }
 
 .route[data-signin="signed-in"] {
-  color: var(--text-normal);
+  color: var(--text-m);
 }
 
 .route[data-signin="invalid"] {
@@ -74,7 +74,7 @@
   background: var(--surface-raised, rgba(255, 255, 255, 0.04));
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   border-radius: 6px;
-  color: var(--text-normal, inherit);
+  color: var(--text-m, inherit);
   padding: var(--space-2) var(--space-3);
   font: inherit;
   outline: none;
@@ -144,12 +144,12 @@
 
 .alert {
   border: 1px solid var(--danger-border, rgba(229, 83, 75, 0.4));
-  background: var(--danger-bg, rgba(229, 83, 75, 0.08));
+  background: var(--danger-soft, rgba(229, 83, 75, 0.08));
 }
 
 .success {
-  border: 1px solid var(--ok-border, rgba(63, 185, 80, 0.4));
-  background: var(--ok-bg, rgba(63, 185, 80, 0.08));
+  border: 1px solid var(--success-border, rgba(63, 185, 80, 0.4));
+  background: var(--success-soft);
 }
 
 .url {

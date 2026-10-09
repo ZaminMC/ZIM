@@ -261,12 +261,12 @@
   font-size: var(--text-xs);
   border: none;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .modeTabActive {
-  background: var(--accent-weak, var(--surface-2));
+  background: var(--accent-soft, var(--surface-2));
   color: var(--text);
 }
 
@@ -296,7 +296,7 @@
 }
 
 .composeKey {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
@@ -321,7 +321,7 @@
   border-radius: var(--radius-m);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -329,14 +329,14 @@
 }
 
 .toggle[aria-checked="true"] {
-  background: var(--accent-weak, var(--surface-2));
+  background: var(--accent-soft, var(--surface-2));
   color: var(--accent);
   border-color: var(--accent);
 }
 
 .composeNote,
 .reloadNote {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 

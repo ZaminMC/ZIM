@@ -32,6 +32,19 @@
   --danger-strong: #f79194;
   --danger-soft: rgba(244, 113, 116, 0.1);
 
+  /* semantic borders — the same 0.35 alpha the accent border set; the
+     outcome chips (audit, jobs, feedback) used to reach for these with
+     var() fallbacks, which worked by luck. Stated once, here. */
+  --success-border: rgba(70, 212, 131, 0.35);
+  --warning-border: rgba(245, 185, 61, 0.35);
+  --danger-border: rgba(244, 113, 116, 0.35);
+
+  /* the accent ladder's lighter rungs — chart series (cpu/rss/players
+     bars) once asked for these and all fell back to the base accent,
+     rendering three data series in one indistinguishable color. */
+  --accent-2: #85b7f8;
+  --accent-3: #b9d6fb;
+
   /* state colors (ADR-0005 lifecycle) */
   --state-running: #46d483;
   --state-starting: #f5b93d;

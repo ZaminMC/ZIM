@@ -103,7 +103,7 @@
 }
 
 .reason strong {
-  color: var(--text-strong, var(--text));
+  color: var(--text, var(--text));
 }
 
 .actions button:disabled {

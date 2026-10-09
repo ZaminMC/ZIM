@@ -60,7 +60,7 @@
 }
 
 .dotAvailable {
-  background: var(--ok, #4ade80);
+  background: var(--success, #4ade80);
 }
 
 .dotInUse {

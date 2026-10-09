@@ -135,7 +135,7 @@
 }
 
 .paused {
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0 8px;
