@@ -77,9 +77,11 @@ body {
   background: var(--frame-surface);
   color: var(--frame-fg);
   font-weight: 500;
-  /* Chromium paints the active tab LAST (TabContainer renders active
-     above its siblings) — its body and both bottom curls must cover a
-     neighbor's hover fill or a chip's corner, never the reverse. */
+  /* Chromium paints the active tab above its tab siblings (TabContainer
+     renders active above inactive) — its body and both bottom curls must
+     cover a neighbor's hover fill, never the reverse. One exception is
+     the chain law below: the NEXT unit's opaque body wins its own left
+     overlap zone, so a group chip following this tab paints over it. */
   z-index: 2;
 }
 
@@ -211,8 +213,14 @@ body {
    a floating pill — the slot's overlap paints over the previous tab's
    curve zone, and a translucent pill would bleed that tab through. So:
    full tab height, tab radius, opaque tint over the strip's ground.
-   z-index 1: the ACTIVE tab (z 2) paints its body and curl above the
-   chip's corner, exactly as upstream's paint order does. */
+   z-index 3: the overlap chain's law is "the next unit paints over the
+   previous unit's right 18px" (the same law that centers pinned content
+   in its visible span). The chip is opaque, so it must win the zone or
+   its leading cap dissolves into whatever tab precedes it — the amputated
+   "urvival" chip. The active tab's floor curl loses nothing the eye can
+   see: the chip's own body anchors the same floor the curl melts into.
+   Above the active tab (2), below the dragged tab (4), like upstream's
+   paint order: dragged > group header > active > rest. */
 .group-chip {
   position: absolute;
   bottom: 0;
@@ -225,7 +233,7 @@ body {
   background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 20%, var(--frame-bg));
   cursor: default;
   transition: background 120ms ease-out, left 200ms cubic-bezier(0.2, 0, 0, 1);
-  z-index: 1;
+  z-index: 3;
 }
 .group-chip:hover {
   background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 30%, var(--frame-bg));

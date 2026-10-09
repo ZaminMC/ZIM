@@ -126,30 +126,58 @@ describe("FilesView", () => {
     expect(listFilesMock).toHaveBeenCalledTimes(1); // no navigation happened
   });
 
-  it("prompts for rename and delete actions", async () => {
+  it("asks for rename and delete in the app's own dialogs", async () => {
     listFilesMock.mockResolvedValue(listing([entryOf("old.txt", "file", { sizeBytes: 1 })]));
     render(<FilesView serverId="smp" />);
     await waitFor(() => expect(screen.getByText("old.txt")).toBeTruthy());
 
-    const prompt = vi.spyOn(window, "prompt").mockReturnValue("new.txt");
     fireEvent.click(screen.getByRole("button", { name: "rename" }));
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    expect(dialog.textContent).toContain('Rename "old.txt"');
+    const nameBox = await waitFor(() =>
+      screen.getByRole<HTMLInputElement>("textbox", { name: "New name" }),
+    );
+    expect(nameBox.value).toBe("old.txt"); // prefilled with the current name
+    fireEvent.change(nameBox, { target: { value: "new.txt" } });
+    fireEvent.submit(nameBox.closest("form")!);
     await waitFor(() => expect(renameEntryMock).toHaveBeenCalledWith("smp", "old.txt", "new.txt"));
 
-    prompt.mockRestore();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("This cannot be undone."));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(deleteEntryMock).toHaveBeenCalledWith("smp", "old.txt"));
-    confirm.mockRestore();
   });
 
-  it("copies a row to the prompted destination and never overwrites silently", async () => {
+  it("the rename dialog refuses an unchanged name", async () => {
+    listFilesMock.mockResolvedValue(listing([entryOf("old.txt", "file", { sizeBytes: 1 })]));
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByText("old.txt")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "rename" }));
+    const nameBox = await waitFor(() =>
+      screen.getByRole<HTMLInputElement>("textbox", { name: "New name" }),
+    );
+    fireEvent.submit(nameBox.closest("form")!); // same name submitted
+    const alert = await waitFor(() => screen.getByRole("alert"));
+    expect(alert.textContent).toContain("the same as the current one");
+    expect(renameEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("copies a row to the asked destination and never overwrites silently", async () => {
     listFilesMock.mockResolvedValue(listing([entryOf("config.yml", "file", { sizeBytes: 4 })]));
     render(<FilesView serverId="smp" />);
     await waitFor(() => expect(screen.getByText("config.yml")).toBeTruthy());
 
-    const prompt = vi.spyOn(window, "prompt").mockReturnValue("config copy.yml");
     fireEvent.click(screen.getByRole("button", { name: "copy" }));
-    await waitFor(() => expect(copyFilesEntryMock).toHaveBeenCalledWith("smp", "config.yml", "config copy.yml"));
+    const toBox = await waitFor(() =>
+      screen.getByRole<HTMLInputElement>("textbox", { name: "Destination path" }),
+    );
+    expect(toBox.value).toBe("config copy.yml"); // the suggested destination
+    fireEvent.change(toBox, { target: { value: "config copy.yml" } });
+    fireEvent.submit(toBox.closest("form")!);
+    await waitFor(() =>
+      expect(copyFilesEntryMock).toHaveBeenCalledWith("smp", "config.yml", "config copy.yml"),
+    );
 
     // The typed refusal is the message — the panel says the honest word.
     copyFilesEntryMock.mockRejectedValue(
@@ -160,8 +188,11 @@ describe("FilesView", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "copy" }));
+    const again = await waitFor(() =>
+      screen.getByRole<HTMLInputElement>("textbox", { name: "Destination path" }),
+    );
+    fireEvent.submit(again.closest("form")!);
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("FS_COPY_TARGET_EXISTS"));
-    prompt.mockRestore();
   });
 
   it("searches the whole root, opens hits, and returns to the listing on clear", async () => {
@@ -287,12 +318,13 @@ describe("FilesView", () => {
     // The honest sentence rides the bar.
     expect(screen.getByText(/read at boot/)).toBeTruthy();
 
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "Save & Restart" }));
+    // The application's own confirm — the native window.confirm is gone.
+    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("players will be disconnected"));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await waitFor(() => expect(restartServerMock).toHaveBeenCalledWith("smp"));
     // The bytes landed first, then the restart — one honest order.
     expect(writeWholeFileMock).toHaveBeenCalled();
-    confirm.mockRestore();
   });
 
   it("a stopped server gets the save, not a restart button", async () => {

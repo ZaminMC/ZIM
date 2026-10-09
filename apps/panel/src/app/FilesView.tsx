@@ -44,6 +44,7 @@ import { restartServer } from "../state/actions";
 import { useServers } from "../state/servers";
 import { describeError } from "../state/errors";
 import { Button } from "../ui/Button";
+import { ConfirmDialog, PromptDialog } from "../ui/PromptDialog";
 import { useDeferredWindow } from "../ui/deferred";
 import styles from "./FilesView.module.css";
 
@@ -53,6 +54,17 @@ const EDIT_LIMIT_BYTES = 1024 * 1024; // the editor is for text files
 // bigger trees go through backups, which stream.
 const DOWNLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 const SEARCH_DEBOUNCE_MS = 250;
+
+// The verbs that ask before they act. The dialog layer turns one of these
+// into an app-owned question; the confirm handler carries the act().
+type FileAsk =
+  | { kind: "confirm-restart" }
+  | { kind: "delete"; path: string }
+  | { kind: "copy"; from: string; name: string; suggested: string }
+  | { kind: "move"; from: string; name: string }
+  | { kind: "rename"; name: string }
+  | { kind: "mkdir" }
+  | { kind: "newfile" };
 
 // The deferred window resets on array identity; a fresh [] per render
 // would reset it every time, so the empty fallback is a constant.
@@ -118,6 +130,11 @@ export function FilesView({ serverId }: { serverId: string }) {
   const [searchResult, setSearchResult] = useState<FilesSearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
+
+  // The application's own question dialogs (never window.prompt/confirm):
+  // one slot holds the verb currently asking, the dialog below renders it.
+  // Each verb carries its own honest refusal.
+  const [ask, setAsk] = useState<FileAsk | null>(null);
 
   const refresh = useCallback(
     (path: string) => {
@@ -276,27 +293,16 @@ export function FilesView({ serverId }: { serverId: string }) {
       const suggested = entry.name.includes(".")
         ? `${entry.name.slice(0, entry.name.lastIndexOf("."))} copy${entry.name.slice(entry.name.lastIndexOf("."))}`
         : `${entry.name} copy`;
-      const to = window.prompt(`Copy ${entry.name} to (server-root path):`, join(dir, suggested));
-      if (!to || to === from) return;
-      act(
-        () =>
-          copyFilesEntry(serverId, from, to).then(() => {
-            setSearchBox("");
-          }),
-        "copy failed",
-      );
+      setAsk({ kind: "copy", from, name: entry.name, suggested: join(dir, suggested) });
     },
-    [dir, act, serverId],
+    [dir],
   );
 
   const moveEntry = useCallback(
     (entry: FilesEntry) => {
-      const from = join(dir, entry.name);
-      const to = window.prompt(`Move ${from} to (server-root path):`, from);
-      if (!to || to === from) return;
-      act(() => renameEntry(serverId, from, to), "move failed");
+      setAsk({ kind: "move", from: join(dir, entry.name), name: entry.name });
     },
-    [dir, act, serverId],
+    [dir],
   );
 
   const downloadEntry = useCallback(
@@ -434,11 +440,14 @@ export function FilesView({ serverId }: { serverId: string }) {
 
   // Save, then the confirmed restart: two promises, one honest order —
   // the bytes are on the daemon before anything asks a player to wait.
+  // The question is the application's own ConfirmDialog; this runs only
+  // after its confirm verb.
   const saveAndRestart = useCallback(() => {
+    setAsk({ kind: "confirm-restart" });
+  }, []);
+
+  const runSaveAndRestart = useCallback(() => {
     if (openPath === null) return;
-    if (!window.confirm(`Restart ${serverId} now? The new settings apply at boot, and players will be disconnected.`)) {
-      return;
-    }
     setBusy(true);
     setError(null);
     const bytes = new TextEncoder().encode(draft);
@@ -450,7 +459,7 @@ export function FilesView({ serverId }: { serverId: string }) {
       .then(() => refresh(dir))
       .catch((cause: unknown) => {
         const described = describeError(cause);
-        setError({ message: `described.title`, code: described.code });
+        setError({ message: described.title, code: described.code });
       })
       .finally(() => setBusy(false));
   }, [serverId, openPath, draft, dir, refresh]);
@@ -625,19 +634,13 @@ export function FilesView({ serverId }: { serverId: string }) {
             </Button>
             <Button
               disabled={busy}
-              onClick={() => {
-                const name = window.prompt("New folder name (inside the current directory):");
-                if (name) act(() => mkdir(serverId, join(dir, name)), "mkdir failed");
-              }}
+              onClick={() => setAsk({ kind: "mkdir" })}
             >
               New folder
             </Button>
             <Button
               disabled={busy}
-              onClick={() => {
-                const name = window.prompt("New empty file name:");
-                if (name) act(() => writeWholeFile(serverId, join(dir, name), new Uint8Array()), "create failed");
-              }}
+              onClick={() => setAsk({ kind: "newfile" })}
             >
               New file
             </Button>
@@ -765,12 +768,7 @@ export function FilesView({ serverId }: { serverId: string }) {
                         <button
                           className={styles.rowButton}
                           disabled={busy}
-                          onClick={() => {
-                            const next = window.prompt(`Rename ${entry.name} to:`);
-                            if (next && next !== entry.name) {
-                              act(() => renameEntry(serverId, path, join(dir, next)), "rename failed");
-                            }
-                          }}
+                          onClick={() => setAsk({ kind: "rename", name: entry.name })}
                         >
                           rename
                         </button>
@@ -800,11 +798,7 @@ export function FilesView({ serverId }: { serverId: string }) {
                         <button
                           className={styles.rowButton}
                           disabled={busy}
-                          onClick={() => {
-                            if (window.confirm(`Delete ${path}? This cannot be undone.`)) {
-                              act(() => deleteEntry(serverId, path), "delete failed");
-                            }
-                          }}
+                          onClick={() => setAsk({ kind: "delete", path })}
                         >
                           delete
                         </button>
@@ -841,6 +835,125 @@ export function FilesView({ serverId }: { serverId: string }) {
           ) : null}
         </>
       )}
+      {ask?.kind === "confirm-restart" ? (
+            <ConfirmDialog
+              title={`Restart ${serverId} now?`}
+              body="The new settings apply at boot, and players will be disconnected."
+              confirmLabel="Restart"
+              danger
+              onConfirm={runSaveAndRestart}
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "delete" ? (
+            <ConfirmDialog
+              title={`Delete ${ask.path}?`}
+              body="This cannot be undone."
+              confirmLabel="Delete"
+              danger
+              onConfirm={() => act(() => deleteEntry(serverId, ask.path), "delete failed")}
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "copy" ? (
+            <PromptDialog
+              title={`Copy "${ask.name}" to`}
+              hint="Server-root path"
+              label="Destination path"
+              initial={ask.suggested}
+              confirmLabel="Copy"
+              validate={(value) => {
+                const to = value.trim();
+                if (to.length === 0) return "A destination path is required.";
+                if (to === ask.from) return "The destination is the same as the source.";
+                return null;
+              }}
+              onConfirm={(to) =>
+                act(
+                  () =>
+                    copyFilesEntry(serverId, ask.from, to).then(() => {
+                      setSearchBox("");
+                    }),
+                  "copy failed",
+                )
+              }
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "move" ? (
+            <PromptDialog
+              title={`Move "${ask.name}" to`}
+              hint="Server-root path"
+              label="Destination path"
+              initial={ask.from}
+              confirmLabel="Move"
+              validate={(value) => {
+                const to = value.trim();
+                if (to.length === 0) return "A destination path is required.";
+                if (to === ask.from) return "The destination is the same as the source.";
+                return null;
+              }}
+              onConfirm={(to) => act(() => renameEntry(serverId, ask.from, to), "move failed")}
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "rename" ? (
+            <PromptDialog
+              title={`Rename "${ask.name}"`}
+              hint="The new name inside the current directory"
+              label="New name"
+              initial={ask.name}
+              confirmLabel="Rename"
+              validate={(value) => {
+                const next = value.trim();
+                if (next.length === 0) return "A name is required.";
+                if (next === ask.name) return "The new name is the same as the current one.";
+                return null;
+              }}
+              onConfirm={(next) =>
+                act(
+                  () => renameEntry(serverId, join(dir, ask.name), join(dir, next)),
+                  "rename failed",
+                )
+              }
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "mkdir" ? (
+            <PromptDialog
+              title="New folder"
+              hint={`Inside ${dir === "" || dir === "." ? "the server root" : dir}`}
+              label="Folder name"
+              initial=""
+              confirmLabel="Create"
+              validate={(value) =>
+                value.trim().length === 0 ? "A folder name is required." : null
+              }
+              onConfirm={(name) =>
+                act(() => mkdir(serverId, join(dir, name)), "mkdir failed")
+              }
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "newfile" ? (
+            <PromptDialog
+              title="New empty file"
+              hint={`Inside ${dir === "" || dir === "." ? "the server root" : dir}`}
+              label="File name"
+              initial=""
+              confirmLabel="Create"
+              validate={(value) =>
+                value.trim().length === 0 ? "A file name is required." : null
+              }
+              onConfirm={(name) =>
+                act(
+                  () => writeWholeFile(serverId, join(dir, name), new Uint8Array()),
+                  "create failed",
+                )
+              }
+              onClose={() => setAsk(null)}
+            />
+          ) : null}
     </section>
   );
 }

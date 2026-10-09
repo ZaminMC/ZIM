@@ -23,6 +23,7 @@ import { ErrorNote } from "../ui/ErrorNote";
 import { runningJob, useJobs } from "../state/jobs";
 import { formatBytes } from "../state/metrics";
 import { Button } from "../ui/Button";
+import { ConfirmDialog } from "../ui/PromptDialog";
 import { IconPuzzle, IconSearch } from "../ui/icons";
 import styles from "./PluginsView.module.css";
 
@@ -140,9 +141,16 @@ export function PluginsView({ serverId }: { serverId: string }) {
     [serverId],
   );
 
-  const remove = useCallback(
+  // The question is the application's own ConfirmDialog — one slot holds
+  // the file currently asked about.
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const remove = useCallback((fileName: string) => {
+    setRemoving(fileName);
+  }, []);
+
+  const runRemove = useCallback(
     (fileName: string) => {
-      if (!window.confirm(`Remove ${fileName} from the server?`)) return;
       setError(null);
       void pluginsDelete(serverId, fileName)
         .then(refreshInstalled)
@@ -339,6 +347,16 @@ export function PluginsView({ serverId }: { serverId: string }) {
             })}
           </ul>
         </div>
+      ) : null}
+      {removing !== null ? (
+        <ConfirmDialog
+          title={`Remove ${removing} from the server?`}
+          body="The plugin's jar is deleted from the server's plugins folder. This cannot be undone."
+          confirmLabel="Remove"
+          danger
+          onConfirm={() => runRemove(removing)}
+          onClose={() => setRemoving(null)}
+        />
       ) : null}
     </section>
   );
