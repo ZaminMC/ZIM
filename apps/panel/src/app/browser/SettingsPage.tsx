@@ -129,7 +129,13 @@ function DiscoveryRootsSection() {
   return (
     <section className={styles.section} aria-label="Server discovery">
       <h2 className={styles.sectionTitle}>Server discovery</h2>
-      {error ? <ErrorNote error={error} /> : null}
+      {error ? (
+        /* §81: the owning view keeps the alert frame — the note renders
+           inside this quiet card, not as a naked sentence. */
+        <div className={styles.errorRow} role="alert">
+          <ErrorNote error={error} />
+        </div>
+      ) : null}
       {roots === null && !error ? (
         <p className={styles.rowDetail}>Asking the daemon for its scan roots…</p>
       ) : null}

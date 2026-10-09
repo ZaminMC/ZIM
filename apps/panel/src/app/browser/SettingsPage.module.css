@@ -190,3 +190,13 @@
   color: var(--text-faint);
   font-size: var(--text-s);
 }
+
+/* The alert frame a discovery failure wears (§81): one quiet card in
+   the row family, tinted danger — the sentence and its remediation live
+   inside it, never naked on the page. */
+.errorRow {
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 112, 112, 0.35);
+  border-radius: var(--radius-m);
+  background: rgba(226, 112, 112, 0.06);
+}
