@@ -23,6 +23,8 @@ body {
 }
 
 .frame {
+  position: relative; /* the caption buttons anchor here (hoisted from
+                         the strip so both presentations share them) */
   display: flex;
   flex-direction: column;
   width: 100vw;
@@ -591,6 +593,97 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tab, .tab * { transition: none !important; }
 }
+
+/* -- §54: the vertical rail (ADR-0026) -------------------------------------
+   The SAME tab objects as a left rail: full-width rows, the pinned head
+   compact at the top, groups as stacked chips. Presentation only — no
+   identity rule changes, no model mutation. The frame webview becomes a
+   RAIL COLUMN (the host bounds it at RAIL_WIDTH × full height), so the
+   children re-stack: toolbar first, the tab rows filling the rest, the
+   bookmarks at the foot. Rows have no corner curves to tuck — the 18px
+   overlap chain and the bottom curls are the horizontal band's laws and
+   stand down here. */
+
+.frame.vertical {
+  width: 240px; /* layout::RAIL_WIDTH — the host's bounds agree */
+  height: 100%;
+  border-right: 1px solid var(--frame-line);
+}
+
+/* The children re-stack by order: toolbar, the rail's rows, bookmarks.
+   The toolbar GROWS: its content wraps to two rows (nav, then the
+   omnibox), and the band's fixed 42px would clip them into the rows
+   below. The right reserve clears the caption buttons pinned over it. */
+.frame.vertical .toolbar {
+  order: 1;
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 42px;
+  padding-right: 132px;
+}
+.frame.vertical .strip {
+  order: 2;
+  flex: 1;
+  min-height: 0;
+  align-items: flex-start;
+  /* Rows are cards that melt into nothing — scrolled rows must clip at
+     the lane's edges instead of painting over the toolbar above. */
+  overflow: hidden;
+}
+.frame.vertical .bookmarks {
+  order: 3;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  max-height: 38%;
+  overflow-y: auto;
+}
+.frame.vertical .bookmark { max-width: none; }
+
+/* The omnibox takes its own full-width row under the nav buttons. */
+.frame.vertical .omnibox-wrap { flex-basis: 100%; margin: 4px 0 0; }
+
+/* Rows: full-width, top-anchored, rounded all over — a row is a card,
+   not a hanging tab. */
+.frame.vertical .tab,
+.frame.vertical .group-chip {
+  bottom: auto;
+  border-radius: 8px;
+  transition: background 120ms ease-out, top 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+.frame.vertical .tab { padding: 0 10px; }
+/* The active row keeps its white card — but melts into nothing (there
+   is no toolbar beneath it to melt into; the curls stand down). */
+.frame.vertical .tab-active { background: var(--frame-surface); box-shadow: var(--shadow-s); }
+.frame.vertical .tab-active::before,
+.frame.vertical .tab-active::after { display: none; }
+/* No separators: rows separate themselves. */
+.frame.vertical .tab-separator { display: none; }
+/* The group band becomes the row's left edge — the rail's own group
+   accent (the horizontal law's underline rotated a quarter turn). */
+.frame.vertical .tab-group-underline {
+  left: 0;
+  right: auto;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  height: auto;
+  border-radius: 0;
+}
+/* The group chip row keeps its tint full-width. */
+.frame.vertical .group-chip { z-index: auto; }
+
+/* The + is a row at the stack's end (the view positions it by top). */
+.frame.vertical .new-tab {
+  width: calc(100% - 12px);
+  border-radius: 8px;
+  justify-content: center;
+}
+
+/* The caption buttons pin over the toolbar row's right end — the same
+   top-right corner of the rail, one instance for both presentations. */
+.frame.vertical .window-controls { height: 42px; }
+.frame.vertical .window-controls button { width: 40px; height: 42px; }
 
 /* -- Boot failure: the frame must never fail as a white window ----------- */
 

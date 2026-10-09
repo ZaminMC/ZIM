@@ -19,8 +19,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bootFrame,
   demoLayoutStrip,
+  demoLayoutStripVertical,
   dismissPopup,
   dropIndexFromSlots,
+  dropIndexFromSlotsVertical,
   insertAtDropIndex,
   isTauri,
   omniboxClassify,
@@ -33,6 +35,7 @@ import {
   shellDrag,
   shellPopup,
   stripScroll,
+  stripScrollVertical,
   type Snapshot,
 } from "./frameIpc";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
@@ -126,6 +129,14 @@ export function FrameApp() {
   const [scroll, setScroll] = useState(0);
   const scrollRef = useRef(0);
   scrollRef.current = scroll;
+  // The rail's viewport height (§54): the vertical scroll law measures
+  // the rows against the lane's own height. Measured wherever the strip
+  // is measured — the same rAF report the host's width law rides.
+  const [railHeight, setRailHeight] = useState(600);
+  // The axis the drag session reports on — a ref mirror of the
+  // snapshot's presentation flag, because the session's finish() runs at
+  // event time and must not close over a stale render's value.
+  const verticalRef = useRef(false);
   // The live drag session's pointer (frame coordinates), non-null only
   // once the drag crosses its threshold — the render reads it to lift
   // the dragged tab and place the insertion indicator.
@@ -221,9 +232,16 @@ export function FrameApp() {
       if (commit && moved) dragJustEnded.current = performance.now();
       if (!moved) return; // a press that never became a drag: nothing to tell the host
       if (commit) {
+        // The drop carries the coordinate along the strip's OWN axis
+        // (pointer X in the band, pointer Y in the rail), the lane's
+        // scroll shift included — the host's drop law consumes it in the
+        // matching orientation.
+        const axis = verticalRef.current
+          ? last.y + scrollRef.current
+          : last.x + scrollRef.current;
         void shellDrag("drop", {
           tab_id: tabId,
-          x: last.x + scrollRef.current, // view → model: the lane's shift
+          x: axis,
           y: last.y,
           screen_x: last.sx,
           screen_y: last.sy,
@@ -301,6 +319,7 @@ export function FrameApp() {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
         void reportFrameSize(rect.width, rect.height);
+        setRailHeight(rect.height);
       }
     };
     report();
@@ -324,6 +343,7 @@ export function FrameApp() {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
         void reportFrameSize(rect.width, rect.height);
+        setRailHeight(rect.height);
       }
     });
     return () => window.cancelAnimationFrame(frame);
@@ -458,6 +478,7 @@ export function FrameApp() {
       if (stripRef.current) {
         const rect = stripRef.current.getBoundingClientRect();
         void reportFrameSize(rect.width, rect.height);
+        setRailHeight(rect.height);
       }
     };
     window.addEventListener("resize", onResize);
@@ -482,21 +503,35 @@ export function FrameApp() {
     return <div className="frame frame-boot">…</div>;
   }
 
+  // §54 (ADR-0026): the presentation axis. Everything below reads this —
+  // the same tab objects, the same commands, a turned view.
+  const vertical = snap.vertical;
+  verticalRef.current = vertical;
+
   const stripUsedEnd = snap.slots.length
     ? Math.max(...snap.slots.map((s) => s.x + s.width))
     : 0;
   // The scroll posture: the model's law shrank the tabs; whatever still
   // overflows scrolls (stripScroll's reserve mirrors the + clamp zone).
-  const { max: maxScroll } = stripScroll(snap.slots, snap.strip_width, 0);
+  const { max: maxScroll } = vertical
+    ? stripScrollVertical(snap.slots, railHeight, 0)
+    : stripScroll(snap.slots, snap.strip_width, 0);
   const scrollValue = Math.min(Math.max(scroll, 0), maxScroll);
   // The + never slides under the caption area: unscrolled it follows the
   // last slot; once the strip scrolls it pins at the right reserve
   // (WINDOW_CONTROLS_W + NEW_TAB_BUTTON_W, shell/layout.rs) and the tabs
-  // slide beneath it, as upstream's scrolled strip does.
+  // slide beneath it, as upstream's scrolled strip does. The rail's + is
+  // a ROW at the stack's end — it never pins (rows scroll, the reserve
+  // rides stripScrollVertical).
+  const railW = 240; // layout::RAIL_WIDTH — the frame's own CSS agrees
   const newTabLeft =
     scrollValue > 0
       ? Math.max(snap.strip_width - 174, 0)
       : Math.min(stripUsedEnd + 4, Math.max(snap.strip_width - 174, 0));
+  const railUsedEnd = snap.slots.length
+    ? Math.max(...snap.slots.map((s) => s.y + s.height))
+    : 0;
+  const newTabTop = railUsedEnd + 4;
 
   // The drag session's live strip (Chromium's animated track): while
   // the pointer stays in the band, the strip renders the layout AS IF
@@ -509,16 +544,25 @@ export function FrameApp() {
   // slots MINUS the dragged tab (the lift-out rule the drop applies),
   // so the verdict can never chase its own gap.
   const dragTabId = dragPointer != null ? (dragRef.current?.tab ?? null) : null;
-  const inStripBand = dragPointer != null && dragPointer.y <= 41 + 15;
+  // The strip band the session lives in: the horizontal band's height
+  // law (41 + 15 DIP) or the rail's width law (240 + 15 DIP).
+  const inStripBand =
+    dragPointer != null &&
+    (vertical ? dragPointer.x <= railW + 15 : dragPointer.y <= 41 + 15);
   let visualSlots = snap.slots;
   if (dragTabId != null && inStripBand) {
     const draggedSlot = snap.slots.find((s) => !s.header && s.id === dragTabId);
     const draggedTab = snap.tabs.find((t) => t.id === dragTabId);
     if (draggedSlot && draggedTab) {
-      const preview = dropIndexFromSlots(
-        snap.slots.filter((s) => s.header || s.id !== dragTabId),
-        dragPointer.x + scrollValue,
-      );
+      const preview = vertical
+        ? dropIndexFromSlotsVertical(
+            snap.slots.filter((s) => s.header || s.id !== dragTabId),
+            dragPointer.y + scrollValue,
+          )
+        : dropIndexFromSlots(
+            snap.slots.filter((s) => s.header || s.id !== dragTabId),
+            dragPointer.x + scrollValue,
+          );
       // The hypothetical arrangement — the dragged tab re-inserted at
       // the preview index under the SAME insertion law the model's
       // move_to applies (the pinned block's edge clamps the index) —
@@ -531,25 +575,39 @@ export function FrameApp() {
         { id: draggedTab.id, pinned: draggedTab.pinned, group: draggedTab.group },
         preview,
       );
-      visualSlots = demoLayoutStrip({
-        strip_width: snap.strip_width,
-        tabs: withDragged,
-        groups: snap.groups,
-        active: snap.active ?? 0,
-      });
+      visualSlots = vertical
+        ? demoLayoutStripVertical(
+            { strip_width: snap.strip_width, tabs: withDragged, groups: snap.groups, active: snap.active ?? 0 },
+            railW,
+          )
+        : demoLayoutStrip({
+            strip_width: snap.strip_width,
+            tabs: withDragged,
+            groups: snap.groups,
+            active: snap.active ?? 0,
+          });
     }
   }
   // The dragged tab follows the pointer, clamped to the window's span
   // (translate is rigid, so local and visual deltas agree). The base is
   // the MODEL slot — the visual layout reshuffles under it every frame,
-  // and a hypothetical base would compound the delta into a drift.
+  // and a hypothetical base would compound the delta into a drift. The
+  // rail's twin clamps on Y against the lane's own height.
   const dragDx = (slotX: number, width: number): number | null => {
-    if (dragTabId == null || dragPointer == null) return null;
+    if (dragTabId == null || dragPointer == null || vertical) return null;
     const visualX = slotX - scrollValue;
     const raw = dragPointer.x - (dragRef.current?.start_x ?? dragPointer.x);
     const min = -(visualX - 6);
     const maxDx = snap.strip_width - visualX - width + 12;
     return Math.min(Math.max(raw, min), Math.max(min, maxDx));
+  };
+  const dragDy = (slotY: number, height: number): number | null => {
+    if (dragTabId == null || dragPointer == null || !vertical) return null;
+    const visualY = slotY - scrollValue;
+    const raw = dragPointer.y - (dragRef.current?.start_y ?? dragPointer.y);
+    const min = -(visualY - 6);
+    const maxDy = railHeight - visualY - height + 12;
+    return Math.min(Math.max(raw, min), Math.max(min, maxDy));
   };
 
   const commitOmnibox = async () => {
@@ -577,13 +635,18 @@ export function FrameApp() {
   };
 
   return (
-    <div className="frame" style={{ height: snap.header_height }}>
-      {/* Tab strip row — Chromium's 35+6 band; drag region on the bare
-          strip, tabs above it. */}
+    <div
+      className={vertical ? "frame vertical" : "frame"}
+      style={vertical ? { width: railW } : { height: snap.header_height }}
+    >
+      {/* Tab strip row / §54 rail — Chromium's 35+6 band horizontal, the
+          stacked rows vertical; drag region on the bare ground either
+          way, tabs above it. */}
       <div
         className="strip"
         ref={stripRef}
         data-tauri-drag-region
+        aria-orientation={vertical ? "vertical" : "horizontal"}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).dataset.tab === undefined) {
             // Windows titlebar law: a bare-strip double click asks about
@@ -599,11 +662,15 @@ export function FrameApp() {
             region and the double-click maximize law keeps working. */}
         <div
           className="strip-lane"
-          style={{ transform: `translateX(${-scrollValue}px)` }}
+          style={{ transform: vertical ? `translateY(${-scrollValue}px)` : `translateX(${-scrollValue}px)` }}
           onWheel={(e) => {
             if (maxScroll === 0) return;
             const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-            setScroll(stripScroll(snap.slots, snap.strip_width, scrollRef.current + delta).value);
+            setScroll(
+              vertical
+                ? stripScrollVertical(snap.slots, railHeight, scrollRef.current + delta).value
+                : stripScroll(snap.slots, snap.strip_width, scrollRef.current + delta).value,
+            );
           }}
         >
           {visualSlots.flatMap((slot, idx) => {
@@ -615,7 +682,9 @@ export function FrameApp() {
             // BETWEEN the tab divs in DOM order so hover of either
             // neighbor hides it through the sibling/:has() rules.
             const prevSlot = idx > 0 ? visualSlots[idx - 1] : undefined;
-            if (prevSlot && !slot.header && !prevSlot.header && !slot.closing && !prevSlot.closing) {
+            // §54: the rail has no separators — rows separate themselves
+            // (the marks are the horizontal chain's boundary law).
+            if (!vertical && prevSlot && !slot.header && !prevSlot.header && !slot.closing && !prevSlot.closing) {
               const prevTab = snap.tabs.find((t) => t.id === prevSlot.id);
               const curTab = snap.tabs.find((t) => t.id === slot.id);
               // Same-group members never carry a separator between them:
@@ -650,6 +719,7 @@ export function FrameApp() {
                   style={{
                     left: slot.x,
                     width: slot.width,
+                    ...(vertical ? { top: slot.y, height: slot.height } : {}),
                     ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
                   }}
                   title={`Group ${group.label}${group.collapsed ? " — collapsed" : ""}`}
@@ -699,6 +769,7 @@ export function FrameApp() {
             const dragging = dragTabId === tab.id;
             const modelSlot = dragging ? snap.slots.find((s) => !s.header && s.id === tab.id) : null;
             const dx = dragging && modelSlot ? dragDx(modelSlot.x, modelSlot.width) : null;
+            const dy = dragging && modelSlot ? dragDy(modelSlot.y, modelSlot.height) : null;
             // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
             // cannot fit beside a glyph — the slot shows its glyph alone,
             // centered in the visible span, the way Chromium's minimum
@@ -723,8 +794,14 @@ export function FrameApp() {
                   // a double offset (tab flung off-window).
                   left: dragging && modelSlot ? modelSlot.x : slot.x,
                   width: slot.width,
+                  // The rail's rows position by their top edge; the band
+                  // pins to the strip's floor (the CSS default).
+                  ...(vertical ? { top: dragging && modelSlot ? modelSlot.y : slot.y, height: slot.height } : {}),
                   ...(dx != null
                     ? { transform: `translateX(${dx}px)`, transition: "none", willChange: "transform" }
+                    : {}),
+                  ...(dy != null
+                    ? { transform: `translateY(${dy}px)`, transition: "none", willChange: "transform" }
                     : {}),
                   ...(group
                     ? {
@@ -788,8 +865,9 @@ export function FrameApp() {
           })}
         </div>
         {/* Scroll chevrons (tab_strip scrolling): only while the layout
-            overflows its minimum run, riding the strip's right reserve. */}
-        {maxScroll > 0 ? (
+            overflows its minimum run, riding the strip's right reserve.
+            The rail scrolls by the wheel — no horizontal chevrons. */}
+        {!vertical && maxScroll > 0 ? (
           <>
             <button
               className="strip-chev"
@@ -817,23 +895,27 @@ export function FrameApp() {
         ) : null}
         <button
           className="new-tab"
-          style={{ left: newTabLeft }}
+          style={vertical ? { left: 6, top: newTabTop } : { left: newTabLeft }}
           aria-label="New tab"
           onClick={() => void shellCommand(CMD.NEW_TAB)}
         >
           <IconPlus />
         </button>
-        <div className="window-controls">
-          <button aria-label="Minimize" onClick={() => void shellCommand(CMD.WINDOW_MINIMIZE)}>
-            <IconMinimize />
-          </button>
-          <button aria-label="Maximize" onClick={() => void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE)}>
-            <IconMaximize />
-          </button>
-          <button aria-label="Close" className="window-close" onClick={() => void shellCommand(CMD.WINDOW_CLOSE)}>
-            <IconWindowClose />
-          </button>
-        </div>
+      </div>
+
+      {/* The caption buttons — hoisted to the frame so both presentations
+          own one instance: the band pins them top-right; the rail pins
+          them over its toolbar row's right end. */}
+      <div className="window-controls">
+        <button aria-label="Minimize" onClick={() => void shellCommand(CMD.WINDOW_MINIMIZE)}>
+          <IconMinimize />
+        </button>
+        <button aria-label="Maximize" onClick={() => void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE)}>
+          <IconMaximize />
+        </button>
+        <button aria-label="Close" className="window-close" onClick={() => void shellCommand(CMD.WINDOW_CLOSE)}>
+          <IconWindowClose />
+        </button>
       </div>
 
       {/* Toolbar row — nav arrows, the omnibox, the star. */}
@@ -1003,6 +1085,9 @@ export function FrameApp() {
             </button>
           )}
           <button onClick={() => { void shellCommand(CMD.NEW_TAB); setMenu(null); }}>New tab</button>
+          <button onClick={() => { void shellCommand(CMD.TOGGLE_VERTICAL_STRIP); setMenu(null); }}>
+            {vertical ? "Use horizontal strip" : "Show tabs vertically"}
+          </button>
         </div>
       ) : null}
 

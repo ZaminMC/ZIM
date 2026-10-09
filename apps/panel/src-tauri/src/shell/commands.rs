@@ -96,3 +96,8 @@ pub const DEV_TOOLS: u32 = 50021;
 /// ⓩ Local: open the application's log folder (the daemon's audit log
 /// and the panel's own state). Upstream owns no IDC for this.
 pub const OPEN_LOGS: u32 = 50022;
+
+/// ⓩ Local: the strip's presentation axis (§54, ADR-0026) — the same
+/// tab objects render as a left rail or the horizontal band. No
+/// upstream IDC (Chromium has no shipped vertical-strip verb).
+pub const TOGGLE_VERTICAL_STRIP: u32 = 50023;

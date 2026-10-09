@@ -259,6 +259,12 @@ pub struct Strip {
     pub next_tab: TabId,
     pub next_group: GroupId,
     pub closed: Vec<ClosedTab>,
+    /// §54 (ADR-0026): the strip's presentation axis. A per-window pref
+    /// persisted with the session; `default` keeps sessions written
+    /// before the field existed horizontal. Nothing but the VIEW reads
+    /// it — no identity rule, no test seam changes shape.
+    #[serde(default)]
+    pub vertical: bool,
 }
 
 pub const MAX_CLOSED: usize = 25;
@@ -279,6 +285,7 @@ impl Strip {
             next_tab: 1,
             next_group: 1,
             closed: Vec::new(),
+            vertical: false,
         };
         strip.append(Destination::New, true);
         strip

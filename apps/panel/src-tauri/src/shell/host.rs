@@ -87,6 +87,9 @@ pub struct Snapshot {
     strip_width: f32,
     header_height: f32,
     bookmarks_bar_visible: bool,
+    /// §54 (ADR-0026): the strip's presentation axis — the frame renders
+    /// a left rail when true, the horizontal band when false.
+    vertical: bool,
     slots: Vec<Slot>,
     tabs: Vec<TabView>,
     groups: Vec<GroupView>,
@@ -317,7 +320,13 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
         .map(|g| (g.id, g.collapsed, g.label.as_str()))
         .collect();
     let active = strip.active.unwrap_or(0);
-    let slots = layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples);
+    // The presentation axis picks the layout law: the horizontal band
+    // runs the Chromium width rules; the rail runs full-width rows.
+    let slots = if strip.vertical {
+        layout::compute_layout_vertical(layout::RAIL_WIDTH, &tab_tuples, &group_tuples)
+    } else {
+        layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
+    };
     let tabs = strip
         .tabs
         .iter()
@@ -363,6 +372,7 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
         strip_width,
         header_height: layout::header_height(inner.bookmarks.bar_visible),
         bookmarks_bar_visible: inner.bookmarks.bar_visible,
+        vertical: strip.vertical,
         slots,
         tabs,
         groups,
@@ -476,9 +486,18 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     let (snap, header, create_tab) = {
         let mut inner = state.lock();
-        inner
-            .strip_widths
-            .insert(window_label.to_owned(), size.width as f32);
+        let vertical = inner.strip(window_label).vertical;
+        inner.strip_widths.insert(
+            window_label.to_owned(),
+            // The rail's layout width IS the rail constant — the frame's
+            // reported size agrees (the rail renders at RAIL_WIDTH), and
+            // reorder's horizontal branch never reads it in vertical mode.
+            if vertical {
+                layout::RAIL_WIDTH
+            } else {
+                size.width as f32
+            },
+        );
         let header = layout::header_height(inner.bookmarks.bar_visible);
         let create_tab = {
             let strip = inner.strip(window_label);
@@ -496,11 +515,37 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         (snap, header, create_tab)
     };
 
-    let content_bounds = Rect {
-        position: LogicalPosition::new(0.0, header as f64).into(),
-        // `size` is already LogicalSize<f64> — the unit was named when
-        // the annotation landed; no cast to restate it.
-        size: LogicalSize::new(size.width, (size.height - header as f64).max(0.0)).into(),
+    // The window's two-pane split (§54): horizontal = the frame band on
+    // top and the content under it; vertical = the rail column on the
+    // left and the content beside it. One law, stated once — every
+    // bounds write below reads it.
+    let (content_pos, content_bounds, frame_bounds) = if snap.vertical {
+        let rail = layout::RAIL_WIDTH as f64;
+        (
+            LogicalPosition::new(rail, 0.0),
+            Rect {
+                position: LogicalPosition::new(rail, 0.0).into(),
+                size: LogicalSize::new((size.width - rail).max(0.0), size.height).into(),
+            },
+            Rect {
+                position: LogicalPosition::new(0.0, 0.0).into(),
+                size: LogicalSize::new(rail, size.height).into(),
+            },
+        )
+    } else {
+        (
+            LogicalPosition::new(0.0, header as f64),
+            Rect {
+                position: LogicalPosition::new(0.0, header as f64).into(),
+                // `size` is already LogicalSize<f64> — the unit was named when
+                // the annotation landed; no cast to restate it.
+                size: LogicalSize::new(size.width, (size.height - header as f64).max(0.0)).into(),
+            },
+            Rect {
+                position: LogicalPosition::new(0.0, 0.0).into(),
+                size: LogicalSize::new(size.width, header as f64).into(),
+            },
+        )
     };
 
     // Show the active tab's webview at its slot; hide the rest. Every
@@ -541,8 +586,8 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         host_window
             .add_child(
                 tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into())),
-                LogicalPosition::new(0.0, header as f64),
-                LogicalSize::new(size.width, (size.height - header as f64).max(0.0)),
+                content_pos,
+                content_bounds.size,
             )
             .map_err(|e| format!("could not create the tab webview: {e}"))?;
         let payload = serde_json::json!({
@@ -552,14 +597,12 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         let _ = app.emit_to(&label, "shell://tab", &payload);
     }
 
-    // The frame webview: the header band. Content webviews are created
-    // later and stack ABOVE the primary, so the frame shrinks itself to
-    // the header and the content owns the rest of the window.
+    // The frame webview: the header band (horizontal) or the rail
+    // column (vertical). Content webviews are created later and stack
+    // ABOVE the primary, so the frame shrinks itself to its pane and
+    // the content owns the rest of the window.
     if let Some(frame) = app.get_webview(&frame_label(window_label)) {
-        let _ = frame.set_bounds(Rect {
-            position: LogicalPosition::new(0.0, 0.0).into(),
-            size: LogicalSize::new(size.width, header as f64).into(),
-        });
+        let _ = frame.set_bounds(frame_bounds);
         let _ = app.emit_to(frame_label(window_label), "shell://snapshot", &snap);
     }
     Ok(())
@@ -915,6 +958,13 @@ pub async fn shell_command(
                             strip.group_toggle_collapsed(group);
                         }
                     }
+                    cmd::TOGGLE_VERTICAL_STRIP => {
+                        // §54 (ADR-0026): the presentation axis flips; the
+                        // model, the identity rules, and the tabs themselves
+                        // do not. The sync reflows the window (the frame
+                        // becomes the rail, the content slides over).
+                        strip.vertical = !strip.vertical;
+                    }
                     cmd::NAV_BACK => {
                         if let Some(a) = strip.active {
                             strip.back(a);
@@ -1244,6 +1294,9 @@ pub fn shell_popup_boot(
     if let Some(tab_id) = tab_id {
         let inner = state.lock();
         if let Some(strip) = inner.strips.get(&window_name) {
+            // The tab menu's presentation verb labels itself from the
+            // strip's current axis (§54).
+            context["vertical"] = serde_json::json!(strip.vertical);
             if let Some(tab) = strip.tabs.iter().find(|t| t.id == tab_id) {
                 context["pinned"] = serde_json::json!(tab.pinned);
                 context["muted"] = serde_json::json!(tab.muted);
@@ -1326,9 +1379,20 @@ pub async fn shell_drag(
         "move" => {
             let mut inner = state.lock();
             if inner.drag.tab == tab_id {
-                if let Some(y) = y {
-                    let strip_h = layout::TAB_HEIGHT + layout::STRIP_PADDING;
-                    if y > strip_h + VERTICAL_DETACH_MAGNETISM || y < -VERTICAL_DETACH_MAGNETISM {
+                // The detach magnetism runs on the strip's OWN axis: the
+                // horizontal band watches the pointer's Y leave the 41px
+                // band; the rail watches the pointer's X leave the rail
+                // column. Either way past ±15 DIP is a tear-off posture.
+                let vertical = inner.strip(&window_name).vertical;
+                if let (Some(x), Some(y)) = (x, y) {
+                    let beyond = if vertical {
+                        let rail = layout::RAIL_WIDTH;
+                        x > rail + VERTICAL_DETACH_MAGNETISM || x < -VERTICAL_DETACH_MAGNETISM
+                    } else {
+                        let strip_h = layout::TAB_HEIGHT + layout::STRIP_PADDING;
+                        y > strip_h + VERTICAL_DETACH_MAGNETISM || y < -VERTICAL_DETACH_MAGNETISM
+                    };
+                    if beyond {
                         inner.drag.beyond_strip = true;
                     }
                 }
@@ -1400,20 +1464,24 @@ pub async fn shell_drag(
 }
 
 /// The in-strip reorder — the drop's shared tail (the plain drop and
-/// the dock-back both land here). The model x runs drop_index over the
-/// slots MINUS the dragged tab (the lift-out rule), the model reorders,
-/// and the sync re-lays the window out.
+/// the dock-back both land here). The model axis runs the axis-matched
+/// drop_index over the slots MINUS the dragged tab (the lift-out rule),
+/// the model reorders, and the sync re-lays the window out. The frame
+/// sends `axis` as the coordinate along the strip's own presentation
+/// axis (pointer X horizontal, pointer Y in the rail), the lane's
+/// scroll shift included.
 fn reorder_in_strip(
     app: &AppHandle,
     state: &ShellState,
     window_name: &str,
     id: TabId,
-    x: Option<f32>,
+    axis: Option<f32>,
 ) -> Result<(), String> {
     {
         let mut inner = state.lock();
         // The width reads before the strip's mutable borrow:
         // the guard can't serve both at once (E0502's law).
+        let vertical = inner.strip(window_name).vertical;
         let strip_width = inner
             .strip_widths
             .get(window_name)
@@ -1432,9 +1500,13 @@ fn reorder_in_strip(
                 .map(|g| (g.id, g.collapsed, g.label.as_str()))
                 .collect();
             let active = strip.active.unwrap_or(0);
-            layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
+            if vertical {
+                layout::compute_layout_vertical(layout::RAIL_WIDTH, &tab_tuples, &group_tuples)
+            } else {
+                layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
+            }
         };
-        if let Some(x) = x {
+        if let Some(axis) = axis {
             // The lift-out rule: the insertion index runs over the
             // REMAINING tabs — the dragged tab's own slot never
             // participates in its own drop verdict.
@@ -1443,7 +1515,11 @@ fn reorder_in_strip(
                 .filter(|s| !s.header && s.id != id)
                 .cloned()
                 .collect();
-            let index = layout::drop_index(&others, x);
+            let index = if vertical {
+                layout::drop_index_vertical(&others, axis)
+            } else {
+                layout::drop_index(&others, axis)
+            };
             inner.strip(window_name).reorder_drop(id, index);
         }
     }
@@ -1475,8 +1551,8 @@ fn window_contains(app: &AppHandle, label: &str, screen_x: f32, screen_y: f32) -
 /// Which OTHER window's strip band does this screen point land on, and
 /// where within it? (The drag-between-windows drop: Chromium tears off
 /// into a NEW window only when the drop lands on no existing strip.)
-/// Returns the target window's label and the pointer's x in that
-/// window's logical coordinates.
+/// Returns the target window's label and the pointer's coordinate along
+/// that strip's OWN presentation axis, in logical units.
 fn window_strip_at(
     app: &AppHandle,
     state: &ShellState,
@@ -1493,7 +1569,6 @@ fn window_strip_at(
             .cloned()
             .collect()
     };
-    let band = layout::header_height(state.lock().bookmarks.bar_visible);
     for name in names {
         let Some(window) = app.get_window(&name) else {
             continue;
@@ -1505,11 +1580,27 @@ fn window_strip_at(
         let Ok(size) = window.outer_size() else {
             continue;
         };
+        let (vertical, band) = {
+            let inner = state.lock();
+            let vertical = inner.strips.get(&name).map(|s| s.vertical).unwrap_or(false);
+            (vertical, layout::header_height(inner.bookmarks.bar_visible))
+        };
         let x = outer.x as f32 / scale as f32;
         let y = outer.y as f32 / scale as f32;
         let w = size.width as f32 / scale as f32;
-        if screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + band {
-            return Some((name, screen_x - x));
+        let h = size.height as f32 / scale as f32;
+        // The drop band is the strip's OWN pane: the horizontal band
+        // spans the window's width for the header's height; the rail
+        // spans the window's height for the rail's width.
+        let over = if vertical {
+            screen_x >= x && screen_x <= x + layout::RAIL_WIDTH && screen_y >= y && screen_y <= y + h
+        } else {
+            screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + band
+        };
+        if over {
+            // The axis coordinate the TARGET's drop law consumes.
+            let axis = if vertical { screen_y - y } else { screen_x - x };
+            return Some((name, axis));
         }
     }
     None
@@ -1526,7 +1617,7 @@ fn move_tab_between_windows(
     source: &str,
     target: &str,
     id: TabId,
-    local_x: f32,
+    local_axis: f32,
 ) -> Result<(), String> {
     let tab = {
         let mut inner = state.lock();
@@ -1538,6 +1629,11 @@ fn move_tab_between_windows(
     };
     {
         let mut inner = state.lock();
+        let vertical = inner
+            .strips
+            .get(target)
+            .map(|s| s.vertical)
+            .unwrap_or(false);
         let strip_width = inner.strip_widths.get(target).copied().unwrap_or(1024.0);
         let drop_index = {
             let strip = inner.strip(target);
@@ -1552,8 +1648,16 @@ fn move_tab_between_windows(
                 .map(|g| (g.id, g.collapsed, g.label.as_str()))
                 .collect();
             let active = strip.active.unwrap_or(0);
-            let slots = layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples);
-            layout::drop_index(&slots, local_x)
+            let slots = if vertical {
+                layout::compute_layout_vertical(layout::RAIL_WIDTH, &tab_tuples, &group_tuples)
+            } else {
+                layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
+            };
+            if vertical {
+                layout::drop_index_vertical(&slots, local_axis)
+            } else {
+                layout::drop_index(&slots, local_axis)
+            }
         };
         let strip = inner.strip(target);
         let at = drop_index.min(strip.tabs.len());

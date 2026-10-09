@@ -54,6 +54,16 @@ pub const TOOLBAR_PAD_Y: f32 = 4.0;
 /// Bookmark bar height (`kBookmarkBarButtonHeight = 24` + padding).
 pub const BOOKMARKS_BAR_H: f32 = 28.0;
 
+/// ⓩ The vertical rail's width (§54, ADR-0026). ZIM-local — upstream
+/// ships no vertical strip constant; the founder's Discord/Edge
+/// reference and the readable-row law agree on ~240 DIP: a row fits a
+/// title, its glyph, and the close button without crowding.
+pub const RAIL_WIDTH: f32 = 240.0;
+/// ⓩ The rail rows' breathing room (ZIM-local; no upstream analogue —
+/// the horizontal strip's separation lives in the 18px overlap, which
+/// rows do not have).
+pub const ROW_GAP: f32 = 4.0;
+
 /// `GetTabOverlap() = 2 × bottom radius − (separator width + margins)` —
 /// tab_style.cc. 2×12 − (2 + 4) = 18.
 pub fn tab_overlap() -> f32 {
@@ -99,6 +109,13 @@ pub struct Slot {
     pub id: u32,
     pub x: f32,
     pub width: f32,
+    /// The slot's TOP edge. The horizontal strip's tabs all share the
+    /// band (y = 0 — the frame pins them to the strip's floor); the
+    /// vertical rail's rows stack by it.
+    pub y: f32,
+    /// The slot's height: TAB_HEIGHT both ways — the rail renders
+    /// full-width rows at the tab's own height (ADR-0026).
+    pub height: f32,
     pub pinned: bool,
     /// A closing tab's slot shrinks to the overlap width and fades
     /// (`TransformForPinnednessAndOpenness`, IsClosed branch).
@@ -310,6 +327,8 @@ fn finish(
                 id: gid,
                 x,
                 width: w,
+                y: 0.0,
+                height: TAB_HEIGHT,
                 pinned: false,
                 closing: false,
                 header: true,
@@ -322,6 +341,8 @@ fn finish(
                 id,
                 x: unit_end,
                 width: widths[k],
+                y: 0.0,
+                height: TAB_HEIGHT,
                 pinned,
                 closing,
                 header: false,
@@ -341,6 +362,99 @@ pub fn drop_index(slots: &[Slot], x: f32) -> usize {
     let mut index = tabs.len();
     for (i, slot) in tabs.iter().enumerate() {
         if x < slot.x + slot.width * 0.5 {
+            index = i;
+            break;
+        }
+    }
+    index
+}
+
+/// §54's vertical presentation (ADR-0026): the SAME tab objects as a
+/// left rail — full-width rows, the pinned head compact at the top,
+/// groups as stacked chips. The model, its identity rules, and the test
+/// seams are untouched; only the presentation turns (the ADR's own
+/// law: "exactly as deep as presentation").
+///
+/// Rows never overlap — the 18px chain is the horizontal strip's
+/// corner-curve law, and rows have no curves to tuck. The width law
+/// collapses for the same reason: every row spans the rail's interior
+/// (`rail_width − 2×STRIP_PADDING`); the shrink law is horizontal-only
+/// (a rail scrolls, it does not squeeze).
+pub fn compute_layout_vertical(
+    rail_width: f32,
+    tabs: &[(u32, bool, bool, Option<u32>)], // (id, pinned, closing, group)
+    groups: &[(u32, bool, &str)],            // (id, collapsed, label)
+) -> Vec<Slot> {
+    if tabs.is_empty() {
+        return Vec::new();
+    }
+    // The group walk, straight from the horizontal law: which group
+    // leads where, and which tabs are visible at all (a collapsed
+    // group's tabs are not laid out — the chip stands for the group).
+    let collapsed_of = |gid: u32| {
+        groups
+            .iter()
+            .find(|g| g.0 == gid)
+            .map(|g| g.1)
+            .unwrap_or(false)
+    };
+    let mut seen: Vec<u32> = Vec::new();
+    let mut y = STRIP_PADDING;
+    let row_w = (rail_width - 2.0 * STRIP_PADDING).max(0.0);
+    let mut slots = Vec::new();
+    for tab in tabs {
+        let group = tab.3;
+        let leads = match group {
+            Some(gid) => {
+                if seen.contains(&gid) {
+                    false
+                } else {
+                    seen.push(gid);
+                    true
+                }
+            }
+            None => false,
+        };
+        if let Some(gid) = leads.then_some(group).flatten() {
+            slots.push(Slot {
+                id: gid,
+                x: STRIP_PADDING,
+                width: row_w,
+                y,
+                height: TAB_HEIGHT,
+                pinned: false,
+                closing: false,
+                header: true,
+            });
+            y += TAB_HEIGHT + ROW_GAP;
+        }
+        if group.map(collapsed_of).unwrap_or(false) {
+            continue;
+        }
+        let (id, pinned, closing, _) = *tab;
+        slots.push(Slot {
+            id,
+            x: STRIP_PADDING,
+            width: row_w,
+            y,
+            height: TAB_HEIGHT,
+            pinned,
+            closing,
+            header: false,
+        });
+        y += TAB_HEIGHT + ROW_GAP;
+    }
+    slots
+}
+
+/// The vertical twin of [`drop_index`]: which tab index a drop at `y`
+/// lands on — the row whose center is past the point. Header chips are
+/// not drop targets; only real tabs count.
+pub fn drop_index_vertical(slots: &[Slot], y: f32) -> usize {
+    let tabs: Vec<&Slot> = slots.iter().filter(|s| !s.header).collect();
+    let mut index = tabs.len();
+    for (i, slot) in tabs.iter().enumerate() {
+        if y < slot.y + slot.height * 0.5 {
             index = i;
             break;
         }
@@ -475,5 +589,65 @@ mod tests {
         assert_eq!(drop_index(&slots, mid_chip), 0);
         let mid_first = first_tab.x + first_tab.width * 0.5 + 1.0;
         assert_eq!(drop_index(&slots, mid_first), 1);
+    }
+
+    // -- The vertical rail (§54, ADR-0026) ----------------------------------
+
+    #[test]
+    fn vertical_rows_stack_from_the_padding_with_gaps() {
+        let tabs = plain(&[(1u32, false, false), (2, false, false), (3, false, false)]);
+        let slots = compute_layout_vertical(RAIL_WIDTH, &tabs, &[]);
+        assert_eq!(slots.len(), 3);
+        for (i, slot) in slots.iter().enumerate() {
+            let want_y = STRIP_PADDING + i as f32 * (TAB_HEIGHT + ROW_GAP);
+            assert!((slot.y - want_y).abs() < 0.01, "row {i} at y {}", slot.y);
+            assert_eq!(slot.height, TAB_HEIGHT);
+            // Every row spans the rail's interior — the width law is
+            // horizontal-only; a rail scrolls, it does not squeeze.
+            assert_eq!(slot.x, STRIP_PADDING);
+            assert_eq!(slot.width, RAIL_WIDTH - 2.0 * STRIP_PADDING);
+        }
+    }
+
+    #[test]
+    fn vertical_drop_follows_row_centers() {
+        let tabs = plain(&[(1u32, false, false), (2, false, false), (3, false, false)]);
+        let slots = compute_layout_vertical(RAIL_WIDTH, &tabs, &[]);
+        assert_eq!(drop_index_vertical(&slots, 10.0), 0);
+        let second_center = slots[1].y + slots[1].height * 0.5 + 1.0;
+        assert_eq!(drop_index_vertical(&slots, second_center), 2);
+        assert_eq!(drop_index_vertical(&slots, 100_000.0), 3);
+    }
+
+    #[test]
+    fn vertical_group_leads_with_a_chip_row_and_collapses_to_it() {
+        let tabs = vec![
+            (1u32, false, false, None),
+            (2, false, false, Some(7)),
+            (3, false, false, Some(7)),
+        ];
+        let open = compute_layout_vertical(RAIL_WIDTH, &tabs, &[(7, false, "survival")]);
+        let chip = open.iter().find(|s| s.header).expect("the chip row");
+        assert_eq!(chip.id, 7);
+        let tab2 = open.iter().find(|s| s.id == 2).unwrap();
+        assert!(
+            chip.y < tab2.y,
+            "the chip row leads its group in the rail too"
+        );
+        // The collapsed rail: the chip stands for the whole group.
+        let collapsed = compute_layout_vertical(RAIL_WIDTH, &tabs, &[(7, true, "survival")]);
+        assert_eq!(collapsed.iter().filter(|s| s.header).count(), 1);
+        assert!(collapsed.iter().all(|s| s.header || s.id == 1));
+    }
+
+    #[test]
+    fn vertical_horizontal_slots_carry_their_own_axis() {
+        // The horizontal strip's tabs all share the band: y = 0, height
+        // = TAB_HEIGHT — the rail's fields exist in both laws so the
+        // frame renders either from the same snapshot type.
+        let tabs = plain(&[(1u32, false, false)]);
+        let slots = compute_layout(1200.0, &tabs, 1, &[]);
+        assert_eq!(slots[0].y, 0.0);
+        assert_eq!(slots[0].height, TAB_HEIGHT);
     }
 }

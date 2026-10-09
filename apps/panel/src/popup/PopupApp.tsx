@@ -29,6 +29,7 @@ import {
   IconGear,
   IconInfo,
   IconLogs,
+  IconDashboard,
   IconMuted,
   IconNewWindow,
   IconPin,
@@ -45,6 +46,9 @@ interface PopupContext {
   muted?: boolean;
   zoom?: number;
   bar_visible?: boolean;
+  /** §54: the strip's presentation axis — the tab menu's layout verb
+   *  labels itself from it. */
+  vertical?: boolean;
 }
 
 const isTauri = (): boolean =>
@@ -270,6 +274,12 @@ export function PopupApp() {
             glyph={<IconDuplicate />}
             label="Duplicate"
             onClick={() => void run(CMD.DUPLICATE_TAB, { tab_id: ctx.tab_id })}
+          />
+          <MenuItem
+            glyph={<IconDashboard />}
+            label={ctx.vertical ? "Use horizontal strip" : "Show tabs vertically"}
+            onClick={() => void run(CMD.TOGGLE_VERTICAL_STRIP)}
+            tick={ctx.vertical}
           />
           <MenuItem
             glyph={<IconChevRight />}

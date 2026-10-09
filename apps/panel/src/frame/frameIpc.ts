@@ -14,6 +14,10 @@ export interface Slot {
   id: number;
   x: number;
   width: number;
+  /** The slot's TOP edge (0 in the horizontal band; rows in the rail). */
+  y: number;
+  /** The slot's height — TAB_HEIGHT both ways. */
+  height: number;
   pinned: boolean;
   closing: boolean;
   /** True for a group's header chip — id is then the GROUP id. */
@@ -52,6 +56,9 @@ export interface Snapshot {
   strip_width: number;
   header_height: number;
   bookmarks_bar_visible: boolean;
+  /** §54 (ADR-0026): the strip's presentation axis — the frame renders
+   *  a left rail when true, the horizontal band when false. */
+  vertical: boolean;
   slots: Slot[];
   tabs: TabView[];
   groups: GroupView[];
@@ -147,7 +154,7 @@ export const shellDrag = (
   }
   if (demoActive() && phase === "drop") {
     const tid = payload.tab_id ?? -1;
-    if (tid >= 0 && payload.x != null) demoDragDrop(tid, payload.x);
+    if (tid >= 0 && (payload.x != null || payload.y != null)) demoDragDrop(tid, payload.x ?? null, payload.y ?? null);
   }
   return Promise.resolve();
 };
@@ -184,16 +191,20 @@ export function insertAtDropIndex<T extends { id: number; pinned: boolean }>(
  *  (the block-edge clamp included). The mutation is worthless without
  *  a push: demoEmit() re-reads the fixture through the same layout law
  *  the host's emit_tab_state rides — without it the reorder happened
- *  invisibly (the harness's own silent-drop disease). */
-function demoDragDrop(tabId: number, x: number): void {
-  const slots = demoLayoutStrip({
+ *  invisibly (the harness's own silent-drop disease). The drop judges
+ *  on the strip's OWN axis: X in the band, Y in the rail. */
+function demoDragDrop(tabId: number, x: number | null, y: number | null): void {
+  const stripArg = {
     strip_width: demo.strip_width,
     tabs: demo.tabs.map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
     groups: demo.groups,
     active: demo.active,
-  });
+  };
+  const slots = demo.vertical ? demoLayoutStripVertical(stripArg, 240) : demoLayoutStrip(stripArg);
   const others = slots.filter((s) => !s.header && s.id !== tabId);
-  const index = dropIndexFromSlots(others, x);
+  const index = demo.vertical
+    ? dropIndexFromSlotsVertical(others, y ?? 0)
+    : dropIndexFromSlots(others, x ?? 0);
   const from = demo.tabs.findIndex((t) => t.id === tabId);
   if (from < 0) return;
   const [gone] = demo.tabs.splice(from, 1);
@@ -240,6 +251,21 @@ export function dropIndexFromSlots(slots: Snapshot["slots"], x: number): number 
   return index;
 }
 
+/** drop_index_vertical's view mirror — the rail's twin: rows judge by
+ *  their centers on Y. */
+export function dropIndexFromSlotsVertical(slots: Snapshot["slots"], y: number): number {
+  const tabs = slots.filter((s) => !s.header);
+  let index = tabs.length;
+  for (let i = 0; i < tabs.length; i++) {
+    const slot = tabs[i];
+    if (slot && y < slot.y + slot.height * 0.5) {
+      index = i;
+      break;
+    }
+  }
+  return index;
+}
+
 /** The strip's scroll state over the model's slots (tab_strip scrolling):
  *  the layout law shrinks tabs first; when even the minimum run exceeds
  *  the budget the strip scrolls. `max` is how far the lane may translate;
@@ -251,6 +277,16 @@ export function stripScroll(slots: Snapshot["slots"], stripWidth: number, wanted
   const overlapTail = 18; // tab_overlap(): the chain's last slot sheds it
   const reserve = 36 + 138;
   const max = Math.max(0, usedEnd - overlapTail + reserve + 4 - stripWidth);
+  return { max, value: Math.min(Math.max(0, wanted), max) };
+}
+
+/** The rail's scroll twin (§54): rows never squeeze, so the rail
+ *  translates as soon as the stack outgrows the lane. The reserve
+ *  mirrors the + row's own zone at the stack's end. */
+export function stripScrollVertical(slots: Snapshot["slots"], railHeight: number, wanted: number): { max: number; value: number } {
+  const usedEnd = slots.reduce((end, s) => Math.max(end, s.y + s.height), 0);
+  const reserve = 36 + 8; // the + row plus its breath
+  const max = Math.max(0, usedEnd + reserve - railHeight);
   return { max, value: Math.min(Math.max(0, wanted), max) };
 }
 
@@ -306,6 +342,8 @@ const demo = {
   next_id: 5,
   active: 2,
   bar_visible: false,
+  // §54's demo axis: ?demo=vertical boots the rail; the menu verb flips it.
+  vertical: new URLSearchParams(window.location.search).get("demo") === "vertical",
   tabs: [
     { id: 1, title: "Set up the docs", address: "zim://settings/", pinned: true, muted: false, group: null, can_back: true, can_forward: false, zoom: 1 },
     { id: 2, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false, zoom: 1 },
@@ -408,6 +446,8 @@ export function demoLayoutStrip(strip: DemoStrip): Snapshot["slots"] {
         id: u.header.gid,
         x,
         width: u.header.w,
+        y: 0,
+        height: 35, // TAB_HEIGHT — the band's tabs share the strip's floor
         pinned: false,
         closing: false,
         header: true,
@@ -416,7 +456,7 @@ export function demoLayoutStrip(strip: DemoStrip): Snapshot["slots"] {
     }
     if (u.tab) {
       const w = widths[i] ?? widthOf(u.tab);
-      slots.push({ id: u.tab.id, x: unitEnd, width: w, pinned: u.tab.pinned, closing: false, header: false });
+      slots.push({ id: u.tab.id, x: unitEnd, width: w, y: 0, height: 35, pinned: u.tab.pinned, closing: false, header: false });
       unitEnd += w;
     }
     x = unitEnd - overlap;
@@ -424,19 +464,52 @@ export function demoLayoutStrip(strip: DemoStrip): Snapshot["slots"] {
   return slots;
 }
 
+/** The rail mirror (§54) — demoLayoutStripVertical at fixture scale:
+ *  full-width rows from the padding, the group chip leading its run, a
+ *  collapsed group reduced to its chip row. Model order rules — the
+ *  rail does not reorder pinned tabs (the model's own invariant). */
+export function demoLayoutStripVertical(strip: DemoStrip, railWidth: number): Snapshot["slots"] {
+  const ROW_H = 35; // TAB_HEIGHT
+  const GAP = 4; // ROW_GAP
+  const LEAD = 6; // STRIP_PADDING
+  const rowW = Math.max(railWidth - 2 * LEAD, 0);
+  const collapsedOf = (gid: number | null): boolean =>
+    gid == null ? false : (strip.groups.find((g) => g.id === gid)?.collapsed ?? false);
+  const seen: number[] = [];
+  const slots: Snapshot["slots"] = [];
+  let y = LEAD;
+  for (const tab of strip.tabs) {
+    let header: number | null = null;
+    if (tab.group != null && !seen.includes(tab.group)) {
+      seen.push(tab.group);
+      header = tab.group;
+    }
+    if (header != null) {
+      slots.push({ id: header, x: LEAD, width: rowW, y, height: ROW_H, pinned: false, closing: false, header: true });
+      y += ROW_H + GAP;
+    }
+    if (collapsedOf(tab.group)) continue;
+    slots.push({ id: tab.id, x: LEAD, width: rowW, y, height: ROW_H, pinned: tab.pinned, closing: false, header: false });
+    y += ROW_H + GAP;
+  }
+  return slots;
+}
+
 function demoSnapshot(): Snapshot {
   const active = demo.tabs.find((t) => t.id === demo.active) ?? null;
-  const slots = demoLayoutStrip({
+  const stripArg = {
     strip_width: demo.strip_width,
     tabs: demo.tabs.map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
     groups: demo.groups,
     active: demo.active,
-  });
+  };
+  const slots = demo.vertical ? demoLayoutStripVertical(stripArg, 240) : demoLayoutStrip(stripArg);
   return {
     window: "main",
     strip_width: demo.strip_width,
     header_height: demo.bar_visible ? 111 : 83,
     bookmarks_bar_visible: demo.bar_visible,
+    vertical: demo.vertical,
     slots,
     tabs: demo.tabs.map((t) => ({
       id: t.id,
@@ -542,6 +615,7 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
       break;
     }
     case 40009: demo.bar_visible = !demo.bar_visible; break; // SHOW_BOOKMARK_BAR
+    case 50023: demo.vertical = !demo.vertical; break; // TOGGLE_VERTICAL_STRIP (§54)
     default: break; // window verbs, navigation, omnibox — nothing to mirror
   }
   demoEmit();
