@@ -282,10 +282,15 @@ pub fn install_from_cache(
             path: staging.to_path_buf(),
             source,
         })?;
-        let file = File::open(&staging).map_err(|source| CoreError::Io {
-            path: staging.to_path_buf(),
-            source,
-        })?;
+        // The fsync needs a WRITE handle: a read-only File::open is
+        // denied sync_all on Windows (access denied, not a nicety).
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&staging)
+            .map_err(|source| CoreError::Io {
+                path: staging.to_path_buf(),
+                source,
+            })?;
         file.sync_all().map_err(|source| CoreError::Io {
             path: staging.to_path_buf(),
             source,

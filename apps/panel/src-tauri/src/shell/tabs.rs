@@ -900,7 +900,8 @@ mod tests {
     fn a_pinned_tab_dropped_beyond_the_block_unpins() {
         let mut strip = Strip::new();
         let a = strip.append(Destination::Servers, true);
-        let b = strip.append(Destination::Jobs, true);
+        // b exists to make the block edge 1 (its id is never read).
+        let _b = strip.append(Destination::Jobs, true);
         strip.set_pinned(a, true);
         // The block edge is 1 (b is the first unpinned tab); dropping a
         // at index 1 among the others lands it after the block → unpin.
@@ -915,7 +916,8 @@ mod tests {
         let mut strip = Strip::new();
         let a = strip.append(Destination::Servers, true);
         let b = strip.append(Destination::Jobs, true);
-        let c = strip.append(Destination::About, true);
+        // c exists to put the block edge at 2 (its id is never read).
+        let _c = strip.append(Destination::About, true);
         strip.set_pinned(a, true);
         strip.set_pinned(b, true);
         // Block [a, b], edge 2. Drop b at 0 among the others → still
