@@ -27,8 +27,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window};
+use tauri::menu::{ContextMenu, Menu, MenuItem, PredefinedMenuItem};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,
+};
 
 use crate::shell::bookmarks::Bookmarks;
 use crate::shell::commands as cmd;
@@ -155,7 +157,9 @@ impl ShellState {
         // v1 restore: the primary window's strip only (divergence
         // documented — tear-off windows keep their strips for their
         // lifetime but are not resurrected).
-        inner.strips.insert("main".into(), session.primary.unwrap_or_else(Strip::new));
+        inner
+            .strips
+            .insert("main".into(), session.primary.unwrap_or_else(Strip::new));
     }
 }
 
@@ -179,7 +183,9 @@ impl ShellInner {
     }
 
     fn strip(&mut self, window: &str) -> &mut Strip {
-        self.strips.entry(window.to_owned()).or_insert_with(Strip::new)
+        self.strips
+            .entry(window.to_owned())
+            .or_insert_with(Strip::new)
     }
 }
 
@@ -314,7 +320,10 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
             let active_id = strip.active;
             active_id
                 .and_then(|id| strip.tabs.iter().find(|t| t.id == id))
-                .filter(|_| app.get_webview(&tab_label(window_label, active_id.unwrap_or(0))).is_none())
+                .filter(|_| {
+                    app.get_webview(&tab_label(window_label, active_id.unwrap_or(0)))
+                        .is_none()
+                })
                 .map(|t| (t.id, t.destination().clone(), t.reload))
         };
         let snap = snapshot(&inner, window_label);
@@ -333,7 +342,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     // Show the active tab's webview at its slot; hide the rest.
     for tab in &snap.tabs {
-        let Some(webview) = app.get_webview(&tab_label(window_label, tab.id)) else { continue };
+        let Some(webview) = app.get_webview(&tab_label(window_label, tab.id)) else {
+            continue;
+        };
         if tab.active {
             let _ = webview.set_bounds(content_bounds.clone());
             let _ = webview.show();
@@ -381,7 +392,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 fn emit_tab_state(app: &AppHandle, state: &ShellState, window_label: &str) {
     let payloads: Vec<(String, serde_json::Value)> = {
         let inner = state.lock();
-        let Some(strip) = inner.strips.get(window_label) else { return };
+        let Some(strip) = inner.strips.get(window_label) else {
+            return;
+        };
         strip
             .tabs
             .iter()
@@ -416,7 +429,8 @@ pub fn relayout_window(app: &AppHandle, state: &ShellState, window_label: &str) 
 // ---------------------------------------------------------------------------
 
 fn window_for(app: &AppHandle, label: &str) -> Result<Window, String> {
-    app.get_window(label).ok_or_else(|| format!("window {label} vanished"))
+    app.get_window(label)
+        .ok_or_else(|| format!("window {label} vanished"))
 }
 
 /// Boot: the frame asks for the world. Async per the re-entrancy law —
@@ -458,7 +472,11 @@ pub fn shell_tab_hello(
     let Some(strip) = inner.strips.get(&window_name) else {
         return Err("strip vanished".into());
     };
-    let tab = strip.tabs.iter().find(|t| t.id == tab_id).ok_or("tab vanished")?;
+    let tab = strip
+        .tabs
+        .iter()
+        .find(|t| t.id == tab_id)
+        .ok_or("tab vanished")?;
     Ok(serde_json::json!({
         "tab_id": tab.id,
         "fallback": false,
@@ -564,9 +582,21 @@ pub async fn shell_command(
     app: AppHandle,
 ) -> Result<(), String> {
     let window_name = window_label_of(&window);
-    let arg_id = arg.as_ref().and_then(|a| a.get("tab_id")).and_then(|v| v.as_u64()).map(|v| v as TabId);
-    let arg_group = arg.as_ref().and_then(|a| a.get("group_id")).and_then(|v| v.as_u64()).map(|v| v as GroupId);
-    let arg_label = arg.as_ref().and_then(|a| a.get("label")).and_then(|v| v.as_str()).map(String::from);
+    let arg_id = arg
+        .as_ref()
+        .and_then(|a| a.get("tab_id"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as TabId);
+    let arg_group = arg
+        .as_ref()
+        .and_then(|a| a.get("group_id"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as GroupId);
+    let arg_label = arg
+        .as_ref()
+        .and_then(|a| a.get("label"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let arg_destination = arg.as_ref().and_then(|a| a.get("destination")).cloned();
 
     let mut window_verb: Option<u32> = None;
@@ -579,9 +609,11 @@ pub async fn shell_command(
                 let info = {
                     let strip = inner.strip(&window_name);
                     strip.active.and_then(|id| {
-                        strip.tabs.iter().find(|t| t.id == id).map(|t| {
-                            (t.destination().clone(), t.destination().label())
-                        })
+                        strip
+                            .tabs
+                            .iter()
+                            .find(|t| t.id == id)
+                            .map(|t| (t.destination().clone(), t.destination().label()))
                     })
                 };
                 if let Some((destination, title)) = info {
@@ -592,8 +624,11 @@ pub async fn shell_command(
                 inner.bookmarks.toggle_bar();
             }
             // Window verbs touch the OS, not the model — deferred below.
-            cmd::WINDOW_MINIMIZE | cmd::WINDOW_TOGGLE_MAXIMIZE | cmd::WINDOW_CLOSE
-            | cmd::FOCUS_LOCATION | cmd::TOGGLE_PALETTE => {
+            cmd::WINDOW_MINIMIZE
+            | cmd::WINDOW_TOGGLE_MAXIMIZE
+            | cmd::WINDOW_CLOSE
+            | cmd::FOCUS_LOCATION
+            | cmd::TOGGLE_PALETTE => {
                 window_verb = Some(id);
             }
             _ => {
@@ -679,7 +714,9 @@ pub async fn shell_command(
                     }
                     cmd::TOGGLE_MUTE => {
                         let target = arg_id.or(strip.active);
-                        if let Some(t) = target.and_then(|id| strip.tabs.iter_mut().find(|t| t.id == id)) {
+                        if let Some(t) =
+                            target.and_then(|id| strip.tabs.iter_mut().find(|t| t.id == id))
+                        {
                             t.muted = !t.muted;
                         }
                     }
@@ -687,7 +724,8 @@ pub async fn shell_command(
                         let Some(destination) = arg_destination else {
                             return Err("NAVIGATE_ACTIVE needs a destination".into());
                         };
-                        let Ok(destination) = serde_json::from_value::<Destination>(destination) else {
+                        let Ok(destination) = serde_json::from_value::<Destination>(destination)
+                        else {
                             return Err("NAVIGATE_ACTIVE: bad destination".into());
                         };
                         // §61 singleton identity through the active tab.
@@ -705,7 +743,9 @@ pub async fn shell_command(
                     }
                     cmd::RELOAD | cmd::RELOAD_BYPASSING_CACHE => {
                         let target = arg_id.or(strip.active);
-                        if let Some(t) = target.and_then(|id| strip.tabs.iter_mut().find(|t| t.id == id)) {
+                        if let Some(t) =
+                            target.and_then(|id| strip.tabs.iter_mut().find(|t| t.id == id))
+                        {
                             t.reload += 1;
                         }
                     }
@@ -716,7 +756,9 @@ pub async fn shell_command(
     }
     match window_verb {
         Some(cmd::WINDOW_MINIMIZE) => {
-            window_for(&app, &window_name)?.minimize().map_err(|e| e.to_string())?;
+            window_for(&app, &window_name)?
+                .minimize()
+                .map_err(|e| e.to_string())?;
         }
         Some(cmd::WINDOW_TOGGLE_MAXIMIZE) => {
             let window = window_for(&app, &window_name)?;
@@ -727,7 +769,9 @@ pub async fn shell_command(
             }
         }
         Some(cmd::WINDOW_CLOSE) => {
-            window_for(&app, &window_name)?.close().map_err(|e| e.to_string())?;
+            window_for(&app, &window_name)?
+                .close()
+                .map_err(|e| e.to_string())?;
         }
         Some(cmd::FOCUS_LOCATION) => {
             let _ = app.emit_to(frame_label(&window_name), "shell://focus-address", ());
@@ -737,7 +781,7 @@ pub async fn shell_command(
             // The palette renders in the active tab's webview; the frame
             // only asks. Frame-local truth, no model change, no sync.
             let active = {
-                let inner = state.lock();
+                let mut inner = state.lock();
                 inner.strip(&window_name).active
             };
             if let Some(tab) = active {
@@ -772,7 +816,9 @@ pub async fn shell_omnibox_commit(
     let outcome = {
         let mut inner = state.lock();
         let strip = inner.strip(&window_name);
-        let Some(active) = strip.active else { return Err("no active tab".into()) };
+        let Some(active) = strip.active else {
+            return Err("no active tab".into());
+        };
         match request {
             AddressRequest::Internal(destination) => {
                 // Singleton identity (§61): a resting tab of the same
@@ -855,7 +901,7 @@ pub async fn shell_tab_menu(
 ) -> Result<(), String> {
     let window_name = window_label_of(&window);
     let (pinned, muted) = {
-        let inner = state.lock();
+        let mut inner = state.lock();
         let strip = inner.strip(&window_name);
         match strip.tabs.iter().find(|t| t.id == tab_id) {
             Some(tab) => (tab.pinned, tab.muted),
@@ -863,23 +909,62 @@ pub async fn shell_tab_menu(
         }
     };
     let base = format!("zamin-tab-menu|{window_name}|{tab_id}");
-    let pin = MenuItem::with_id(&app, format!("{base}|pin"), if pinned { "Unpin tab" } else { "Pin tab" }, true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let mute = MenuItem::with_id(&app, format!("{base}|mute"), if muted { "Unmute tab" } else { "Mute tab" }, true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let duplicate = MenuItem::with_id(&app, format!("{base}|duplicate"), "Duplicate", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let group = MenuItem::with_id(&app, format!("{base}|group"), "Add to new group…", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
+    let pin = MenuItem::with_id(
+        &app,
+        format!("{base}|pin"),
+        if pinned { "Unpin tab" } else { "Pin tab" },
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let mute = MenuItem::with_id(
+        &app,
+        format!("{base}|mute"),
+        if muted { "Unmute tab" } else { "Mute tab" },
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let duplicate = MenuItem::with_id(
+        &app,
+        format!("{base}|duplicate"),
+        "Duplicate",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let group = MenuItem::with_id(
+        &app,
+        format!("{base}|group"),
+        "Add to new group…",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let new_tab = MenuItem::with_id(&app, format!("{base}|new"), "New tab", true, None::<&str>)
         .map_err(|e| e.to_string())?;
-    let close = MenuItem::with_id(&app, format!("{base}|close"), "Close tab", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
+    let close = MenuItem::with_id(
+        &app,
+        format!("{base}|close"),
+        "Close tab",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let before_new = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
     let before_close = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
     let menu = Menu::with_items(
         &app,
-        &[&pin, &mute, &duplicate, &group, &before_new, &new_tab, &before_close, &close],
+        &[
+            &pin,
+            &mute,
+            &duplicate,
+            &group,
+            &before_new,
+            &new_tab,
+            &before_close,
+            &close,
+        ],
     )
     .map_err(|e| e.to_string())?;
     let host = window_for(&app, &window_name)?;
@@ -915,9 +1000,17 @@ pub fn handle_tab_menu_verb(
                     tab.muted = !tab.muted;
                 }
             }
-            "duplicate" => strip.duplicate(tab_id),
-            "close" => strip.close(tab_id),
-            "new" => strip.append(Destination::New, true),
+            "duplicate" => {
+                // The verb's arm must stay unit; duplicate's new-tab id is
+                // the model's own business (the snapshot carries it).
+                let _ = strip.duplicate(tab_id);
+            }
+            "close" => {
+                let _ = strip.close(tab_id);
+            }
+            "new" => {
+                let _ = strip.append(Destination::New, true);
+            }
             // The group needs a label only the operator can type — the
             // frame asks, then lands ADD_NEW_TAB_TO_GROUP itself.
             "group" => {
@@ -966,9 +1059,7 @@ pub async fn shell_drag(
             if inner.drag.tab == tab_id {
                 if let Some(y) = y {
                     let strip_h = layout::TAB_HEIGHT + layout::STRIP_PADDING;
-                    if y > strip_h + VERTICAL_DETACH_MAGNETISM
-                        || y < -VERTICAL_DETACH_MAGNETISM
-                    {
+                    if y > strip_h + VERTICAL_DETACH_MAGNETISM || y < -VERTICAL_DETACH_MAGNETISM {
                         inner.drag.beyond_strip = true;
                     }
                 }
@@ -995,7 +1086,9 @@ pub async fn shell_drag(
             if detached {
                 // DetachIntoNewBrowserAndRunMoveLoop, adapted: the new
                 // window opens where the pointer let go.
-                let Some(id) = id else { return Err("no drag tab".into()) };
+                let Some(id) = id else {
+                    return Err("no drag tab".into());
+                };
                 let tab = {
                     let mut inner = state.lock();
                     let strip = inner.strip(&window_name);
@@ -1006,6 +1099,9 @@ pub async fn shell_drag(
                 let Some(id) = id else { return Ok(()) };
                 {
                     let mut inner = state.lock();
+                    // The width reads before the strip's mutable borrow:
+                    // the guard can't serve both at once (E0502's law).
+                    let strip_width = inner.strip_width;
                     let slots = {
                         let strip = inner.strip(&window_name);
                         let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
@@ -1019,7 +1115,7 @@ pub async fn shell_drag(
                             .map(|g| (g.id, g.collapsed, g.label.as_str()))
                             .collect();
                         let active = strip.active.unwrap_or(0);
-                        layout::compute_layout(inner.strip_width, &tab_tuples, active, &group_tuples)
+                        layout::compute_layout(strip_width, &tab_tuples, active, &group_tuples)
                     };
                     if let Some(x) = x {
                         let index = layout::drop_index(&slots, x);

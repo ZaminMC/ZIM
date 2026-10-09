@@ -63,7 +63,11 @@ impl Bookmarks {
         if let Some(at) = self.items.iter().position(|b| b.destination == destination) {
             self.items.remove(at);
         } else {
-            self.items.push(Bookmark { id: Self::fresh_id(), title, destination });
+            self.items.push(Bookmark {
+                id: Self::fresh_id(),
+                title,
+                destination,
+            });
         }
     }
 
@@ -88,7 +92,9 @@ mod tests {
     #[test]
     fn toggle_bookmarks_unbookmarks() {
         let mut marks = Bookmarks::default();
-        let d = Destination::Server { server_id: "s1".into() };
+        let d = Destination::Server {
+            server_id: "s1".into(),
+        };
         assert!(!marks.is_bookmarked(&d));
         marks.toggle(d.clone(), "Server s1".into());
         assert!(marks.is_bookmarked(&d));

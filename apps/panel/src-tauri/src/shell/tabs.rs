@@ -72,7 +72,9 @@ impl Destination {
     /// Missing destinations (§58), never silent searches.
     pub fn parse(text: &str) -> Destination {
         let Some(rest) = text.strip_prefix("zim://") else {
-            return Destination::Missing { url: text.to_owned() };
+            return Destination::Missing {
+                url: text.to_owned(),
+            };
         };
         let (page, arg) = match rest.split_once('/') {
             Some((page, arg)) => (page, arg.trim_end_matches('/')),
@@ -88,9 +90,15 @@ impl Destination {
             "feedback" => Destination::Feedback,
             "extensions" => Destination::Extensions,
             "downloads" => Destination::Downloads,
-            "server" if !arg.is_empty() => Destination::Server { server_id: arg.into() },
-            "console" if !arg.is_empty() => Destination::Console { server_id: arg.into() },
-            _ => Destination::Missing { url: text.to_owned() },
+            "server" if !arg.is_empty() => Destination::Server {
+                server_id: arg.into(),
+            },
+            "console" if !arg.is_empty() => Destination::Console {
+                server_id: arg.into(),
+            },
+            _ => Destination::Missing {
+                url: text.to_owned(),
+            },
         }
     }
 
@@ -130,7 +138,9 @@ pub struct Tab {
 
 impl Tab {
     pub fn destination(&self) -> &Destination {
-        self.history.get(self.history_index).unwrap_or(&Destination::New)
+        self.history
+            .get(self.history_index)
+            .unwrap_or(&Destination::New)
     }
 
     fn fresh(id: TabId, destination: Destination, opener: Option<TabId>) -> Tab {
@@ -208,9 +218,15 @@ impl Strip {
     /// unpinning at/above it.
     fn block_edge(&self, pinned: bool) -> usize {
         if pinned {
-            self.tabs.iter().position(|t| !t.pinned).unwrap_or(self.tabs.len())
+            self.tabs
+                .iter()
+                .position(|t| !t.pinned)
+                .unwrap_or(self.tabs.len())
         } else {
-            self.tabs.iter().rposition(|t| t.pinned).map_or(0, |i| i + 1)
+            self.tabs
+                .iter()
+                .rposition(|t| t.pinned)
+                .map_or(0, |i| i + 1)
         }
     }
 
@@ -248,9 +264,15 @@ impl Strip {
         // Group membership cannot survive relocation across the block.
         tab.group = None;
         let target = if pinned {
-            self.tabs.iter().position(|t| !t.pinned).unwrap_or(self.tabs.len())
+            self.tabs
+                .iter()
+                .position(|t| !t.pinned)
+                .unwrap_or(self.tabs.len())
         } else {
-            self.tabs.iter().rposition(|t| t.pinned).map_or(0, |i| i + 1)
+            self.tabs
+                .iter()
+                .rposition(|t| t.pinned)
+                .map_or(0, |i| i + 1)
         };
         self.tabs.insert(target, tab);
         Some(target)
@@ -272,7 +294,11 @@ impl Strip {
         let tab = self.tabs.remove(index);
         let mut target = to.min(self.tabs.len());
         let edge = self.block_edge(tab.pinned);
-        target = if tab.pinned { target.min(edge) } else { target.max(edge) };
+        target = if tab.pinned {
+            target.min(edge)
+        } else {
+            target.max(edge)
+        };
         self.tabs.insert(target, tab);
         if let Some(group) = group {
             if !self.group_contiguous(group) {
@@ -312,7 +338,9 @@ impl Strip {
 
     fn select_relative(&mut self, step: isize) {
         let Some(active) = self.active else { return };
-        let Some(index) = self.index_of(active) else { return };
+        let Some(index) = self.index_of(active) else {
+            return;
+        };
         let len = self.tabs.len() as isize;
         if len < 2 {
             return;
@@ -330,7 +358,9 @@ impl Strip {
     /// CloseWebContentsAt — records a ClosedTab and repairs the
     /// selection (the neighbor to the right, else the one to the left).
     pub fn close(&mut self, id: TabId) -> bool {
-        let Some(index) = self.index_of(id) else { return false };
+        let Some(index) = self.index_of(id) else {
+            return false;
+        };
         let tab = self.tabs.remove(index);
         if let Some(group) = tab.group {
             self.ungroup_all(&[group]);
@@ -348,7 +378,10 @@ impl Strip {
             return true;
         }
         if self.active == Some(id) {
-            let next = self.tabs.get(index).or_else(|| self.tabs.get(index.saturating_sub(1)));
+            let next = self
+                .tabs
+                .get(index)
+                .or_else(|| self.tabs.get(index.saturating_sub(1)));
             self.active = next.map(|t| t.id);
         }
         true
@@ -357,22 +390,31 @@ impl Strip {
     /// IDC_RESTORE_TAB — pop the newest closed tab back to its remembered
     /// position, pinned-ness intact; select it.
     pub fn reopen_closed(&mut self) -> bool {
-        let Some(entry) = self.closed.pop() else { return false };
+        let Some(entry) = self.closed.pop() else {
+            return false;
+        };
         let id = self.next_tab;
         self.next_tab += 1;
         let index = entry.index.min(self.tabs.len());
         let edge = self.block_edge(entry.pinned);
-        let index = if entry.pinned { index.min(edge) } else { index.max(edge) };
-        self.tabs.insert(index, Tab {
-            id,
-            history: entry.history,
-            history_index: entry.history_index,
-            pinned: entry.pinned,
-            group: None,
-            opener: None,
-            muted: false,
-            reload: 0,
-        });
+        let index = if entry.pinned {
+            index.min(edge)
+        } else {
+            index.max(edge)
+        };
+        self.tabs.insert(
+            index,
+            Tab {
+                id,
+                history: entry.history,
+                history_index: entry.history_index,
+                pinned: entry.pinned,
+                group: None,
+                opener: None,
+                muted: false,
+                reload: 0,
+            },
+        );
         self.active = Some(id);
         true
     }
@@ -384,16 +426,19 @@ impl Strip {
         let source = self.tabs[index].clone();
         let new_id = self.next_tab;
         self.next_tab += 1;
-        self.tabs.insert(index + 1, Tab {
-            id: new_id,
-            history: source.history.clone(),
-            history_index: source.history_index,
-            pinned: source.pinned,
-            group: None,
-            opener: source.opener,
-            muted: source.muted,
-            reload: 0,
-        });
+        self.tabs.insert(
+            index + 1,
+            Tab {
+                id: new_id,
+                history: source.history.clone(),
+                history_index: source.history_index,
+                pinned: source.pinned,
+                group: None,
+                opener: source.opener,
+                muted: source.muted,
+                reload: 0,
+            },
+        );
         self.active = Some(new_id);
         Some(new_id)
     }
@@ -407,7 +452,10 @@ impl Strip {
             self.ungroup_all(&[group]);
         }
         if self.active == Some(id) {
-            let next = self.tabs.get(index).or_else(|| self.tabs.get(index.saturating_sub(1)));
+            let next = self
+                .tabs
+                .get(index)
+                .or_else(|| self.tabs.get(index.saturating_sub(1)));
             self.active = next.map(|t| t.id);
         }
         if self.tabs.is_empty() {
@@ -432,12 +480,15 @@ impl Strip {
         let group_id = self.next_group;
         self.next_group += 1;
         let color = (group_id % GROUP_COLORS) as u8;
-        self.groups.insert(group_id, Group {
-            id: group_id,
-            label: label.to_owned(),
-            color,
-            collapsed: false,
-        });
+        self.groups.insert(
+            group_id,
+            Group {
+                id: group_id,
+                label: label.to_owned(),
+                color,
+                collapsed: false,
+            },
+        );
         let mut target = self.block_edge(false).min(self.tabs.len());
         for mut member in members {
             member.group = Some(group_id);
@@ -520,7 +571,9 @@ impl Strip {
     /// Navigate the tab: truncate the forward history, push the
     /// destination (§59 per-tab history).
     pub fn navigate(&mut self, id: TabId, destination: Destination) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return false };
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else {
+            return false;
+        };
         tab.history.truncate(tab.history_index + 1);
         tab.history.push(destination);
         tab.history_index = tab.history.len() - 1;
@@ -528,7 +581,9 @@ impl Strip {
     }
 
     pub fn back(&mut self, id: TabId) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return false };
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else {
+            return false;
+        };
         if tab.history_index == 0 {
             return false;
         }
@@ -537,7 +592,9 @@ impl Strip {
     }
 
     pub fn forward(&mut self, id: TabId) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return false };
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else {
+            return false;
+        };
         if tab.history_index + 1 >= tab.history.len() {
             return false;
         }
@@ -620,17 +677,35 @@ mod tests {
         let before = strip.tabs.len();
         assert!(strip.reopen_closed());
         assert_eq!(strip.tabs.len(), before + 1);
-        assert_eq!(strip.active, Some(strip.tabs[before.min(strip.tabs.len() - 1)].id));
+        assert_eq!(
+            strip.active,
+            Some(strip.tabs[before.min(strip.tabs.len() - 1)].id)
+        );
     }
 
     #[test]
     fn duplicate_clones_the_view_never_the_process() {
         let mut strip = Strip::new();
-        let a = strip.append(Destination::Server { server_id: "s1".into() }, true);
-        strip.navigate(a, Destination::Console { server_id: "s1".into() });
+        let a = strip.append(
+            Destination::Server {
+                server_id: "s1".into(),
+            },
+            true,
+        );
+        strip.navigate(
+            a,
+            Destination::Console {
+                server_id: "s1".into(),
+            },
+        );
         let dup = strip.duplicate(a).unwrap();
         let tab = strip.tabs.iter().find(|t| t.id == dup).unwrap();
-        assert_eq!(tab.destination(), &Destination::Console { server_id: "s1".into() });
+        assert_eq!(
+            tab.destination(),
+            &Destination::Console {
+                server_id: "s1".into()
+            }
+        );
         assert_eq!(tab.history.len(), 2);
     }
 
@@ -672,15 +747,21 @@ mod tests {
 
     #[test]
     fn url_roundtrip() {
-        let d = Destination::Server { server_id: "abc".into() };
+        let d = Destination::Server {
+            server_id: "abc".into(),
+        };
         assert_eq!(Destination::parse(&d.url()), d);
         assert_eq!(
             Destination::parse("zim://nonsense/x"),
-            Destination::Missing { url: "zim://nonsense/x".into() }
+            Destination::Missing {
+                url: "zim://nonsense/x".into()
+            }
         );
         assert_eq!(
             Destination::parse("zim://console/s1"),
-            Destination::Console { server_id: "s1".into() }
+            Destination::Console {
+                server_id: "s1".into()
+            }
         );
     }
 }

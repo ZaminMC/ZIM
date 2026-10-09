@@ -38,3 +38,62 @@ jobs:
         run: cargo build --workspace
       - name: Tests
         run: cargo test --workspace
+
+  shell:
+    # The Tauri host lives OUTSIDE the workspace (root Cargo.toml
+    # excludes it), so the workspace jobs above never compile it — that
+    # gap let the shell rot through several green CIs while every
+    # release build failed. This job is the shell's own gate: fmt,
+    # clippy, and a full check of the host crate, with the same
+    # sidecar/frontend staging the release build uses.
+    name: Shell compile gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/panel/src-tauri
+      - name: System dependencies (Tauri on Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - name: Build the sidecar binaries
+        run: cargo build -p zamind -p zamin-cli
+      - name: Stage the sidecars (the context macro embeds their paths)
+        run: |
+          mkdir -p apps/panel/src-tauri/binaries
+          cp "target/release/zamind${{ matrix.ext }}" \
+             "apps/panel/src-tauri/binaries/zamind-${{ matrix.triple }}${{ matrix.ext }}"
+          cp "target/release/zamin${{ matrix.ext }}" \
+             "apps/panel/src-tauri/binaries/zamin-${{ matrix.triple }}${{ matrix.ext }}"
+      - name: Panel frontend build (also feeds the host's context macro)
+        run: npm ci && npm run build
+        working-directory: apps/panel
+      - name: Format (the shell crate)
+        working-directory: apps/panel/src-tauri
+        run: cargo fmt --all -- --check
+      - name: Clippy (the shell crate)
+        working-directory: apps/panel/src-tauri
+        run: cargo clippy --all-targets -- -D warnings

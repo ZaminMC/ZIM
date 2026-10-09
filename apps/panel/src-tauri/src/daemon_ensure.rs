@@ -43,7 +43,11 @@ fn daemon_binary_name() -> &'static str {
 pub fn resolve_daemon_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
     let search_path = std::env::var_os("PATH");
-    resolve_daemon_binary_in(exe.as_deref(), search_path.as_deref(), &daemon_binary_name())
+    resolve_daemon_binary_in(
+        exe.as_deref(),
+        search_path.as_deref(),
+        &daemon_binary_name(),
+    )
 }
 
 /// Pure core of [`resolve_daemon_binary`], testable without process state.
@@ -115,11 +119,9 @@ pub async fn ensure_daemon() -> Result<String, String> {
     if endpoint_ready(&endpoint).await {
         return Ok("already-running".to_owned());
     }
-    let binary = resolve_daemon_binary().ok_or_else(|| {
-        "the zamind daemon was not found next to the panel or on PATH".to_owned()
-    })?;
-    spawn_daemon(&binary)
-        .map_err(|error| format!("could not start the daemon: {error}"))?;
+    let binary = resolve_daemon_binary()
+        .ok_or_else(|| "the zamind daemon was not found next to the panel or on PATH".to_owned())?;
+    spawn_daemon(&binary).map_err(|error| format!("could not start the daemon: {error}"))?;
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
         if endpoint_ready(&endpoint).await {
@@ -143,10 +145,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!(
-            "zim-host-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("zim-host-{tag}-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).expect("temp dir builds");
         dir
     }

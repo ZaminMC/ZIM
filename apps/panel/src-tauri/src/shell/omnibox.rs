@@ -19,8 +19,15 @@ pub enum AddressRequest {
 }
 
 const INTERNAL_PAGES: &[&str] = &[
-    "new", "servers", "settings", "jobs", "audit", "about", "feedback",
-    "extensions", "downloads",
+    "new",
+    "servers",
+    "settings",
+    "jobs",
+    "audit",
+    "about",
+    "feedback",
+    "extensions",
+    "downloads",
 ];
 
 fn normalize_host(host: &str) -> String {
@@ -53,17 +60,23 @@ pub fn classify(text: &str) -> AddressRequest {
             None => (rest, ""),
         };
         if page == "server" && !arg.is_empty() {
-            return AddressRequest::Internal(Destination::Server { server_id: arg.into() });
+            return AddressRequest::Internal(Destination::Server {
+                server_id: arg.into(),
+            });
         }
         if page == "console" && !arg.is_empty() {
-            return AddressRequest::Internal(Destination::Console { server_id: arg.into() });
+            return AddressRequest::Internal(Destination::Console {
+                server_id: arg.into(),
+            });
         }
         if INTERNAL_PAGES.contains(&page) {
             return AddressRequest::Internal(Destination::parse(trimmed));
         }
         // An unknown internal page is a real destination request the
         // shell answers honestly (§58) — never silently a search.
-        return AddressRequest::Internal(Destination::Missing { url: trimmed.to_owned() });
+        return AddressRequest::Internal(Destination::Missing {
+            url: trimmed.to_owned(),
+        });
     }
 
     // host:port | port-only | bare host.
@@ -83,7 +96,10 @@ pub fn classify(text: &str) -> AddressRequest {
             }
         }
     } else if is_host_charset(trimmed) {
-        return AddressRequest::Join { host: Some(normalize_host(trimmed)), port: 0 };
+        return AddressRequest::Join {
+            host: Some(normalize_host(trimmed)),
+            port: 0,
+        };
     }
 
     AddressRequest::Query(trimmed.to_owned())
@@ -101,11 +117,15 @@ mod tests {
         );
         assert_eq!(
             classify("zim://server/abc"),
-            AddressRequest::Internal(Destination::Server { server_id: "abc".into() })
+            AddressRequest::Internal(Destination::Server {
+                server_id: "abc".into()
+            })
         );
         assert_eq!(
             classify("zim://nonsense/"),
-            AddressRequest::Internal(Destination::Missing { url: "zim://nonsense/".into() })
+            AddressRequest::Internal(Destination::Missing {
+                url: "zim://nonsense/".into()
+            })
         );
     }
 
@@ -113,20 +133,38 @@ mod tests {
     fn join_dialects() {
         assert_eq!(
             classify("localhost:25565"),
-            AddressRequest::Join { host: Some("localhost".into()), port: 25565 }
+            AddressRequest::Join {
+                host: Some("localhost".into()),
+                port: 25565
+            }
         );
         // The founder's 0:25565 bind-all shorthand.
         assert_eq!(
             classify("0:25565"),
-            AddressRequest::Join { host: Some("localhost".into()), port: 25565 }
+            AddressRequest::Join {
+                host: Some("localhost".into()),
+                port: 25565
+            }
         );
-        assert_eq!(classify("25565"), AddressRequest::Join { host: None, port: 25565 });
+        assert_eq!(
+            classify("25565"),
+            AddressRequest::Join {
+                host: None,
+                port: 25565
+            }
+        );
         assert_eq!(
             classify("box.example.com"),
-            AddressRequest::Join { host: Some("box.example.com".into()), port: 0 }
+            AddressRequest::Join {
+                host: Some("box.example.com".into()),
+                port: 0
+            }
         );
         // Out-of-range ports fall back to queries.
-        assert_eq!(classify("host:99999"), AddressRequest::Query("host:99999".into()));
+        assert_eq!(
+            classify("host:99999"),
+            AddressRequest::Query("host:99999".into())
+        );
     }
 
     #[test]

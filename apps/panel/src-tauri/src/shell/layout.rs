@@ -80,7 +80,11 @@ pub fn min_inactive_width() -> f32 {
 pub fn header_height(bookmarks_bar_visible: bool) -> f32 {
     let strip = TAB_HEIGHT + STRIP_PADDING;
     let toolbar = LOCATION_BAR_H + 2.0 * TOOLBAR_PAD_Y;
-    let bookmarks = if bookmarks_bar_visible { BOOKMARKS_BAR_H } else { 0.0 };
+    let bookmarks = if bookmarks_bar_visible {
+        BOOKMARKS_BAR_H
+    } else {
+        0.0
+    };
     strip + toolbar + bookmarks
 }
 
@@ -136,13 +140,18 @@ pub fn compute_layout(
     // The strip's usable budget: the leading inset (kTabStripPadding
     // doubles as the horizontal strip inset, as it does for the height),
     // the new-tab button, and the caption area carved off the right end.
-    let budget =
-        (strip_width - STRIP_PADDING - NEW_TAB_BUTTON_W - WINDOW_CONTROLS_W).max(0.0);
+    let budget = (strip_width - STRIP_PADDING - NEW_TAB_BUTTON_W - WINDOW_CONTROLS_W).max(0.0);
 
     // The group walk: which group leads where, and which tabs are
     // visible at all (a collapsed group's tabs are not laid out — the
     // chip stands for the whole group).
-    let collapsed_of = |gid: u32| groups.iter().find(|g| g.0 == gid).map(|g| g.1).unwrap_or(false);
+    let collapsed_of = |gid: u32| {
+        groups
+            .iter()
+            .find(|g| g.0 == gid)
+            .map(|g| g.1)
+            .unwrap_or(false)
+    };
     let label_of = |gid: u32| {
         groups
             .iter()
@@ -183,8 +192,16 @@ pub fn compute_layout(
         if closing {
             return overlap;
         }
-        let floor = if id == active { min_active_width() } else { min_inactive_width() };
-        if pinned { pinned_width().max(floor) } else { standard_width().max(floor) }
+        let floor = if id == active {
+            min_active_width()
+        } else {
+            min_inactive_width()
+        };
+        if pinned {
+            pinned_width().max(floor)
+        } else {
+            standard_width().max(floor)
+        }
     };
 
     let preferred: f32 = laid_out
@@ -196,7 +213,7 @@ pub fn compute_layout(
                 + if visible[*i] { width_of(*i) } else { 0.0 }
         })
         .sum::<f32>()
-        - overlap * (laid_out.len().max(1) as f32 - 1) as f32;
+        - overlap * (laid_out.len().max(1) as f32 - 1.0);
 
     let mut widths: Vec<f32> = laid_out
         .iter()
@@ -223,7 +240,7 @@ pub fn compute_layout(
                 .zip(header_w)
                 .map(|(w, h)| w + h.unwrap_or(0.0))
                 .sum::<f32>()
-                - overlap * (widths.len().max(1) as f32 - 1) as f32
+                - overlap * (widths.len().max(1) as f32 - 1.0)
         };
         let mut total = sum_units(&widths, &header_w);
         if total > budget {
@@ -237,7 +254,9 @@ pub fn compute_layout(
             total = sum_units(&widths, &header_w);
             if total > budget {
                 // Clamped overflow: upstream would scroll (reserved).
-                return finish(tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap);
+                return finish(
+                    tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap,
+                );
             }
         }
         // Distribute the leftover to the active tab first, then evenly to
@@ -250,13 +269,19 @@ pub fn compute_layout(
             let (id, pinned, closing, _) = tabs[*i];
             if !pinned && !closing && visible[*i] {
                 let room = standard_width() - widths[k];
-                let give = if id == active { room.min(free) } else { room.min(free * 0.5) };
+                let give = if id == active {
+                    room.min(free)
+                } else {
+                    room.min(free * 0.5)
+                };
                 widths[k] += give;
                 free -= give;
             }
         }
     }
-    finish(tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap)
+    finish(
+        tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap,
+    )
 }
 
 /// Emit the laid-out units: each unit is [header chip?] + [tab?], the
@@ -277,12 +302,26 @@ fn finish(
     for (k, i) in laid_out.iter().enumerate() {
         let mut unit_end = x;
         if let (Some(gid), Some(w)) = (headers[*i], header_w[k]) {
-            slots.push(Slot { id: gid, x, width: w, pinned: false, closing: false, header: true });
+            slots.push(Slot {
+                id: gid,
+                x,
+                width: w,
+                pinned: false,
+                closing: false,
+                header: true,
+            });
             unit_end = x + w;
         }
         if visible[*i] {
             let (id, pinned, closing, _) = tabs[*i];
-            slots.push(Slot { id, x: unit_end, width: widths[k], pinned, closing, header: false });
+            slots.push(Slot {
+                id,
+                x: unit_end,
+                width: widths[k],
+                pinned,
+                closing,
+                header: false,
+            });
             unit_end += widths[k];
         }
         x = unit_end - overlap;
@@ -416,7 +455,10 @@ mod tests {
         ];
         let slots = compute_layout(1200.0, &tabs, 1, &[(7, true, "survival")]);
         assert_eq!(slots.iter().filter(|s| s.header).count(), 1);
-        assert!(slots.iter().all(|s| s.header || s.id == 1), "group tabs hide");
+        assert!(
+            slots.iter().all(|s| s.header || s.id == 1),
+            "group tabs hide"
+        );
     }
 
     #[test]

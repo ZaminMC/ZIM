@@ -133,7 +133,10 @@ async fn daemon_connect(
     // Webview → daemon: one frame per message, forwarded verbatim.
     let write_pump = tauri::async_runtime::spawn(async move {
         while let Some(frame) = outgoing_rx.recv().await {
-            if zamin_bridge::send_frame(&mut write_half, &frame).await.is_err() {
+            if zamin_bridge::send_frame(&mut write_half, &frame)
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -221,12 +224,18 @@ fn main() {
             // law sends it to the async runtime, exactly like Resized.
             handle.on_menu_event(|app, event| {
                 let id = event.id().0.clone();
-                let Some(rest) = id.strip_prefix("zamin-tab-menu|") else { return };
-                let mut parts = rest.splitn(3, '|');
-                let (Some(window_label), Some(tab), Some(verb)) = (parts.next(), parts.next(), parts.next()) else {
+                let Some(rest) = id.strip_prefix("zamin-tab-menu|") else {
                     return;
                 };
-                let Ok(tab_id) = tab.parse::<u32>() else { return };
+                let mut parts = rest.splitn(3, '|');
+                let (Some(window_label), Some(tab), Some(verb)) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
+                    return;
+                };
+                let Ok(tab_id) = tab.parse::<u32>() else {
+                    return;
+                };
                 let window_label = window_label.to_owned();
                 let verb = verb.to_owned();
                 tauri::async_runtime::spawn(async move {
