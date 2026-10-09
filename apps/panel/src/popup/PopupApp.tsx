@@ -353,8 +353,9 @@ export function PopupApp() {
           <MenuItem
             glyph={<IconDevTools />}
             label="Developer tools"
-            hint="Ctrl+Shift+I"
-            onClick={() => void run(CMD.DEV_TOOLS)}
+            onClick={() =>
+              void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "devtools" } })
+            }
           />
           <MenuItem
             glyph={<IconLogs />}

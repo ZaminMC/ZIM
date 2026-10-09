@@ -1,0 +1,172 @@
+/* The developer tools — the same visual language as the rest of the
+   panel: quiet surfaces, one accent, no glass, no glow. Dense where the
+   work is dense. */
+
+.page {
+  height: 100%;
+  overflow: hidden auto;
+  padding: var(--space-6);
+  box-sizing: border-box;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.head { margin: 0; }
+
+.title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xl);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.subtitle {
+  margin: 0;
+  font-size: var(--text-m);
+  color: var(--text-faint);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-m);
+  padding: 8px 14px;
+  cursor: default;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tabActive {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* Console */
+.console {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.consoleLines {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  line-height: 1.55;
+}
+
+.line { white-space: pre-wrap; word-break: break-word; }
+.info { color: var(--text-faint); }
+.in { color: var(--text); }
+.out { color: var(--text-muted); }
+.error { color: var(--danger); }
+
+.consoleInput {
+  flex: none;
+  height: 36px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  padding: 0 var(--space-4);
+  outline: none;
+}
+.consoleInput:focus { box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* Sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--text-faint);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+
+.rowName {
+  font-size: var(--text-m);
+  color: var(--text);
+  min-width: 120px;
+}
+
+.rowMeta {
+  flex: 1;
+  font-size: var(--text-s);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.rowVerb {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-s);
+  padding: 4px 12px;
+  cursor: default;
+}
+.rowVerb:hover { color: var(--text); border-color: var(--border-strong); }
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  max-width: 640px;
+}
+
+.facts dt {
+  font-size: var(--text-s);
+  color: var(--text-faint);
+}
+
+.facts dd {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--text);
+}
+
+.eventLine {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  color: var(--text-muted);
+  padding: 2px 0;
+  word-break: break-all;
+}

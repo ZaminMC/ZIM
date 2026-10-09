@@ -76,6 +76,33 @@ pub fn java_install_roots() -> Vec<PathBuf> {
 impl ProcessOps for UnixProcessOps {
     fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, PlatformError> {
         let mut command = tokio::process::Command::new(&spec.program);
+
+        // The rlimit layer: core dumps off, and a per-process file-size
+        // cap when the policy states one. RLIMIT_AS is deliberately not
+        // set (the JVM's address-space reservations would break); memory
+        // on Unix is bounded by the JVM's own -Xmx, a documented
+        // JVM-enforced bound.
+        let file_size = spec.limits.file_size_bytes;
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(move || {
+                // RLIMIT_CORE = 0: no core dumps, ever.
+                let core = libc::rlimit {
+                    rlim_cur: 0,
+                    rlim_max: 0,
+                };
+                unsafe { libc::setrlimit(libc::RLIMIT_CORE, &core) };
+                if let Some(bytes) = file_size {
+                    let fsize = libc::rlimit {
+                        rlim_cur: bytes,
+                        rlim_max: bytes,
+                    };
+                    unsafe { libc::setrlimit(libc::RLIMIT_FSIZE, &fsize) };
+                }
+                Ok(())
+            });
+        }
         command
             .args(&spec.args)
             .current_dir(&spec.working_dir)

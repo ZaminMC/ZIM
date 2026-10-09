@@ -10,6 +10,7 @@
 
 pub mod backup;
 pub mod cache;
+pub mod sandbox;
 pub mod config;
 pub mod discovery;
 pub mod error;

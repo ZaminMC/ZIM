@@ -66,6 +66,12 @@ export interface ExtensionsDestination {
 export interface DownloadsDestination {
   kind: "downloads";
 }
+/** The developer tools (Part 2): the control center over the protocol —
+ *  console, servers, inspector, events. It uses the SAME client and
+ *  stores as the rest of the UI, never a parallel implementation. */
+export interface DevToolsDestination {
+  kind: "devtools";
+}
 /** §7's join destination: a typed address the operator asked the shell
  *  to reach. The Join page (not a webview navigation) consults the
  *  daemon and speaks the verdict with its recovery paths. */
@@ -86,6 +92,7 @@ export interface MissingPageDestination {
 }
 /** The closed set of places a tab can show (§58: typed, never web pages). */
 export type Destination =
+  | DevToolsDestination
   | ServersDestination
   | NewTabDestination
   | ServerDestination
@@ -104,6 +111,7 @@ export type Destination =
  *  tab per server, one fleet page, one new-tab page (§6). */
 export type TabKey = string;
 
+export const DEVTOOLS_TAB: TabKey = "devtools";
 export const SERVERS_TAB: TabKey = "servers";
 export const NEW_TAB: TabKey = "new";
 export const SETTINGS_TAB: TabKey = "settings";
@@ -118,6 +126,8 @@ export const consoleTab = (serverId: string): TabKey => `console:${serverId}`;
 
 export function tabKey(destination: Destination): TabKey {
   switch (destination.kind) {
+    case "devtools":
+      return DEVTOOLS_TAB;
     case "servers":
       return SERVERS_TAB;
     case "new":
@@ -150,6 +160,8 @@ export function tabKey(destination: Destination): TabKey {
 /** The canonical internal URL a destination is addressed by (§58). */
 export function destinationUrl(destination: Destination): string {
   switch (destination.kind) {
+    case "devtools":
+      return "zim://devtools/";
     case "servers":
       return "zim://servers/";
     case "new":
@@ -212,6 +224,9 @@ export function restingAddress(
   }
   if (destination.kind === "join") {
     // The join tab rests at the address the operator typed (§7).
+    return destinationUrl(destination);
+  }
+  if (destination.kind === "devtools") {
     return destinationUrl(destination);
   }
   const entry = entries.find((e) => e.serverId === destination.serverId);
@@ -372,6 +387,8 @@ export function destinationLabel(destination: Destination, entries: ServerEntry[
       return `${name(destination.serverId)} console`;
     case "join":
       return `${destination.host ?? "port"}:${destination.port}`;
+    case "devtools":
+      return "Developer tools";
     case "servers":
       return "Servers";
     case "settings":

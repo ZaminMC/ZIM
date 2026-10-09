@@ -346,10 +346,27 @@ impl Actor {
         args.push(jar);
         args.push("nogui".to_owned());
 
+        // The hard caps ride the spawn, not the dashboard: the job
+        // object's memory limit is the heap PLUS native headroom (the
+        // JVM's metaspace, code cache, and stacks live outside -Xmx —
+        // capping at the heap alone would strangle a healthy server).
+        // The process ceiling bounds fork bombs (plugins that exec);
+        // children inherit the job and can never exceed it.
+        let memory_bytes = settings
+            .max_memory_mb
+            .map(|mb| ((mb as u64) + 512) * 1024 * 1024);
+        let limits = zamin_core::platform::SpawnLimits {
+            memory_bytes,
+            cpu_percent: None,  // no per-server CPU config surface yet (P2)
+            process_count: Some(64),
+            file_size_bytes: None,
+        };
+
         let spec = zamin_core::platform::SpawnSpec {
             program: java,
             args,
             working_dir: self.root.clone(),
+            limits,
         };
         let mut spawned = tokio::task::spawn_blocking({
             let spec = spec.clone();

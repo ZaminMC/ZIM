@@ -12,7 +12,10 @@ use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
+    IoCounters, JOBOBJECT_BASIC_LIMIT_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JobObjectCpuRateControlInformation,
+    JobObjectExtendedLimitInformation,
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
@@ -22,11 +25,102 @@ use windows_sys::Win32::System::Threading::{
 
 use crate::error::PlatformError;
 use crate::platform::{
-    ProcessIdentity, ProcessOps, ProcessSample, SpawnHandle, SpawnSpec, Spawned,
+    ProcessIdentity, ProcessOps, ProcessSample, SpawnHandle, SpawnLimits, SpawnSpec, Spawned,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0200;
+
+/// Job limit flag bits (winbase.h / JOB_OBJECT_LIMIT_*).
+const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
+const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
+const JOB_OBJECT_LIMIT_JOB_MEMORY: u32 = 0x0000_0200;
+/// CPU rate control flags (winbase.h / JOB_OBJECT_CPU_RATE_CONTROL_*).
+const JOB_OBJECT_CPU_RATE_CONTROL_ENABLE: u32 = 0x0000_0001;
+const JOB_OBJECT_CPU_RATE_CONTROL_HARD_ENABLE: u32 = 0x0000_0002;
+
+/// The enforcement step: write the spec's limits into a FRESH job object
+/// BEFORE any process is assigned, so the server's first instruction
+/// already runs bounded. Every limit set here is OS-enforced: a plugin
+/// that allocates past the memory cap gets its allocation refused; a
+/// tree that wants more CPU than its rate gets throttled by the
+/// scheduler; the active-process cap bounds child-process bombs.
+fn configure_job_limits(job: HANDLE, limits: &SpawnLimits) -> Result<(), PlatformError> {
+    // Memory + process count ride the extended limit structure.
+    let mut extended = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
+            PerProcessUserTimeLimit: 0,
+            PerJobUserTimeLimit: 0,
+            LimitFlags: 0,
+            MinimumWorkingSetSize: 0,
+            MaximumWorkingSetSize: 0,
+            ActiveProcessLimit: 0,
+            Affinity: 0,
+            PriorityClass: 0,
+            SchedulingClass: 0,
+        },
+        IoInfo: IoCounters {
+            ReadOperationCount: 0,
+            WriteOperationCount: 0,
+            OtherOperationCount: 0,
+            ReadTransferCount: 0,
+            WriteTransferCount: 0,
+            OtherTransferCount: 0,
+        },
+        ProcessMemoryLimit: 0,
+        JobMemoryLimit: 0,
+        PeakProcessMemoryUsed: 0,
+        PeakJobMemoryUsed: 0,
+    };
+    if let Some(memory) = limits.memory_bytes {
+        extended.BasicLimitInformation.LimitFlags |=
+            JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY;
+        extended.ProcessMemoryLimit = memory;
+        // The job-wide cap matches the per-process cap: the tree's total
+        // commit may not exceed what one process may, so N children
+        // cannot multiply their way past the budget.
+        extended.JobMemoryLimit = memory;
+    }
+    if let Some(count) = limits.process_count {
+        extended.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        extended.BasicLimitInformation.ActiveProcessLimit = count;
+    }
+    let ok = unsafe {
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &extended as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    // CPU rate control lives in its own information class. CpuRate is
+    // Windows' own 1..=10000 scale where 10000 = the WHOLE machine; the
+    // limit carries that scale verbatim (documented on SpawnLimits), so
+    // the translation is the identity and the honesty is the unit.
+    if let Some(percent) = limits.cpu_percent {
+        let cpu_rate = (percent.clamp(1, 100)) * 100;
+        let control = JOBOBJECT_CPU_RATE_CONTROL_INFORMATION {
+            ControlFlags: JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_ENABLE,
+            CpuRate: cpu_rate,
+        };
+        let ok = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectCpuRateControlInformation,
+                &control as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+    }
+    Ok(())
+}
 
 /// Owns the job handle; closing it on drop is safe because kill-on-close is
 /// NOT set — a dropped job never terminates processes. A HANDLE is an
@@ -129,12 +223,18 @@ impl ProcessOps for WindowsProcessOps {
         let child = command.spawn()?;
         let pid = child.id().ok_or(PlatformError::ProcessGone { pid: 0 })?;
 
-        // The job object is the tree-kill mechanism. Without kill-on-close,
-        // the job outlives the daemon and adoption (ADR-0005) still sees a
-        // live process.
+        // The job object is the tree-kill mechanism AND the enforcement
+        // boundary. Without kill-on-close, the job outlives the daemon
+        // and adoption (ADR-0005) still sees a live process. Limits are
+        // configured BEFORE the process is assigned; a limit failure
+        // fails the spawn rather than silently running unbounded.
         let job: Option<JobHandle> = child.raw_handle().and_then(|process_handle| unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if job.is_null() {
+                return None;
+            }
+            if configure_job_limits(job, &spec.limits).is_err() {
+                CloseHandle(job);
                 return None;
             }
             if AssignProcessToJobObject(job, process_handle) == 0 {

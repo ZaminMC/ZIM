@@ -37,6 +37,9 @@ const NewServerModal = lazy(() =>
 );
 const Palette = lazy(() => import("./Palette").then((m) => ({ default: m.Palette })));
 const JobsPage = lazy(() => import("./JobsPage").then((m) => ({ default: m.JobsPage })));
+const DevToolsPage = lazy(() =>
+  import("./browser/DevToolsPage").then((m) => ({ default: m.DevToolsPage })),
+);
 const JoinPage = lazy(() =>
   import("./browser/JoinPage").then((m) => ({ default: m.JoinPage })),
 );
@@ -60,6 +63,8 @@ function DestinationView({ destination, reloadToken }: { destination: Destinatio
   const serverMap = useServers((s) => s.servers);
   const key = `${JSON.stringify(destination)}:${reloadToken}`;
   switch (destination.kind) {
+    case "devtools":
+      return <DevToolsPage />;
     case "servers":
       return (
         <FleetPage
@@ -102,6 +107,7 @@ function destinationFromQuery(): Destination | null {
   if (!url) return null;
   const page = url.replace(/^zim:\/\//, "").split("/")[0];
   switch (page) {
+    case "devtools": return { kind: "devtools" };
     case "servers": return { kind: "servers" };
     case "new": return { kind: "new" };
     case "settings": return { kind: "settings" };

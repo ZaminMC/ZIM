@@ -36,6 +36,45 @@ pub struct ProcessSample {
     pub rss_bytes: Option<u64>,
 }
 
+/// Hard resource limits for a server's process TREE, enforced by the
+/// operating system — not displayed, ENFORCED:
+///
+/// - Windows: the server's Job Object carries the limits. Process and
+///   job memory limits commit-cap the whole tree (a runaway plugin
+///   cannot allocate past them), CPU rate control hard-throttles the
+///   tree to its percentage, and the active-process limit bounds
+///   fork-bombs (children inherit the job; breakaway is never granted).
+/// - Unix: the child's rlimits (RLIMIT_CORE zeroed; RLIMIT_FSIZE caps
+///   each file a process may grow). RLIMIT_AS is deliberately NOT set —
+///   the JVM reserves multiples of its heap in address space and an AS
+///   cap kills it spuriously; memory on Unix is bounded by the JVM's
+///   own -Xmx (a documented JVM-enforced bound, not an OS one).
+///
+/// `None` fields mean "no cap configured" — an honest absence, never a
+/// silent zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SpawnLimits {
+    /// The tree's committed-memory cap in bytes (Windows job limit).
+    pub memory_bytes: Option<u64>,
+    /// The tree's CPU rate in percent of one full machine (Windows CPU
+    /// rate control; 100 = one core, 400 = four).
+    pub cpu_percent: Option<u32>,
+    /// The tree's maximum simultaneous processes (Windows active-process
+    /// job limit).
+    pub process_count: Option<u32>,
+    /// Per-process maximum file size in bytes (Unix RLIMIT_FSIZE only).
+    pub file_size_bytes: Option<u64>,
+}
+
+impl SpawnLimits {
+    pub fn is_empty(&self) -> bool {
+        self.memory_bytes.is_none()
+            && self.cpu_percent.is_none()
+            && self.process_count.is_none()
+            && self.file_size_bytes.is_none()
+    }
+}
+
 /// Everything needed to spawn a server process. stdin/stdout/stderr are
 /// always piped; the log pipeline owns them.
 #[derive(Debug, Clone)]
@@ -43,6 +82,9 @@ pub struct SpawnSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub working_dir: PathBuf,
+    /// The OS-enforced tree limits, applied at spawn (before the
+    /// process can run a single instruction of plugin code).
+    pub limits: SpawnLimits,
 }
 
 /// A spawned process and its platform-specific kill handle.

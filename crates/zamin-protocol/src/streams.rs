@@ -142,6 +142,41 @@ pub enum CoreEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<ProtocolError>,
     },
+    /// The security taxonomy (Part 2): every entry states what was
+    /// observed, what boundary the daemon holds, and what it did. These
+    /// ride the same events stream as lifecycle state — the UI, the logs,
+    /// and the developer tools all see them.
+    SecurityNotice {
+        server_id: Option<String>,
+        kind: SecurityNoticeKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+}
+
+/// The security notices a daemon can raise. Deliberately narrow: each
+/// one names a boundary the daemon actually holds, never a guess about
+/// intent (this is monitoring + accounting, not an antivirus product).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityNoticeKind {
+    /// A daemon file-API request refused at the containment choke
+    /// point (traversal, symlink escape, sibling-prefix).
+    SandboxViolation,
+    /// The storage accountant measured a server past its budget; new
+    /// daemon-mediated writes are refused until it is under again.
+    StorageLimitReached,
+    /// The storage accountant measured a server past its warning
+    /// threshold (default 90% of budget).
+    StorageWarning,
+    /// The OS enforcement layer (job object limits) could not be
+    /// applied at spawn: the server refused to start rather than run
+    /// unbounded.
+    LimitsNotEnforced,
+    /// Sustained unusual resource shape (memory growth or CPU saturation
+    /// far beyond the server's own baseline) — a warning to inspect, not
+    /// a verdict about intent.
+    SuspiciousResourceUsage,
 }
 
 /// Payload of a stream notification. Tagged, so unknown payload kinds are
