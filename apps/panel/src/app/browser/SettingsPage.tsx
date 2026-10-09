@@ -90,9 +90,19 @@ function DiscoveryRootsSection() {
   const [error, setError] = useState<DescribedError | null>(null);
 
   useEffect(() => {
+    // The mount fetch can settle after the page is gone (a slow daemon
+    // answering an unmounted tab) — a stale answer must not touch state.
+    let alive = true;
     discoveryRoots()
-      .then((result: RootsGetResult) => setRoots(result.roots))
-      .catch((cause: unknown) => setError(describeError(cause)));
+      .then((result: RootsGetResult) => {
+        if (alive) setRoots(result.roots);
+      })
+      .catch((cause: unknown) => {
+        if (alive) setError(describeError(cause));
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const apply = (next: Promise<RootsGetResult>) => {

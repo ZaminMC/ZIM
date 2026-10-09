@@ -4,8 +4,8 @@
 // death. The strip itself is the frame webview's business — there is no
 // React tab strip in the execution path anymore.
 
-import { render } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import { useUi } from "../state/ui";
 
@@ -13,6 +13,11 @@ describe("<App /> (content layer)", () => {
   beforeEach(() => {
     useUi.setState({ paletteOpen: false, newServerOpen: false });
   });
+
+  // Vitest globals are off, so RTL's auto-cleanup never registers —
+  // without this, the settings page's mount fetch can settle after the
+  // environment is gone and React commits into a dead window.
+  afterEach(cleanup);
 
   it("renders the dev bridge's ?d= destination", () => {
     window.history.replaceState(null, "", "/?d=zim://settings/");
