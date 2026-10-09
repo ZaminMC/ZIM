@@ -492,7 +492,7 @@ impl Strip {
         let start = self.block_edge(false).min(self.tabs.len());
         // The insert position walks the members — the zip carries the
         // counter instead of a mutable shadow (clippy's counter law).
-        for (target, mut member) in (start..).zip(members.into_iter()) {
+        for (target, mut member) in (start..).zip(members) {
             member.group = Some(group_id);
             self.tabs.insert(target.min(self.tabs.len()), member);
         }
