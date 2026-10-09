@@ -228,6 +228,11 @@ export function App() {
         toggleBookmarksBar: () => void invokeHost("shell_command", { id: 40009, arg: null }),
         togglePalette: () => setPaletteOpen(!useUi.getState().paletteOpen),
         paletteOpen: () => useUi.getState().paletteOpen,
+        openDevTools: () =>
+          void invokeHost("shell_command", {
+            id: 50004,
+            arg: { destination: { kind: "devtools" } },
+          }),
       };
       const verdict = handleBrowserKey(
         event,

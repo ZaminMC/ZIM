@@ -24,6 +24,7 @@ export interface BrowserKeyApi {
   toggleBookmarksBar(): void;
   togglePalette(): void;
   paletteOpen(): boolean;
+  openDevTools(): void;
 }
 
 export type BrowserKeyVerdict =
@@ -124,6 +125,14 @@ export function handleBrowserKey(
   if (mod && !event.shiftKey && !event.altKey && lower === "d" && !target.tagIsInput) {
     // IDC_BOOKMARK_PAGE (Ctrl+D) — bookmark the active destination.
     api.bookmarkActive();
+    return { handled: true };
+  }
+  if ((mod && event.shiftKey && !event.altKey && lower === "i") || key === "F12") {
+    // IDC_DEV_TOOLS (Ctrl+Shift+I, F12) — the shell's own developer
+    // tools page, the same destination the three-dot menu's item opens
+    // (the host singleton-dedupes it). Function keys never type, so no
+    // field guard: Chromium keeps F12 the browser's everywhere.
+    api.openDevTools();
     return { handled: true };
   }
   if (event.key === "Escape" && !mod && !event.altKey) {

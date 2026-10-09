@@ -408,6 +408,10 @@ export function FrameApp() {
           void shellCommand(CMD.TOGGLE_PALETTE);
         },
         paletteOpen: () => false,
+        openDevTools: () =>
+          void shellCommand(CMD.NAVIGATE_ACTIVE, {
+            destination: { kind: "devtools" },
+          }),
       };
       const verdict = handleBrowserKey(
         event,

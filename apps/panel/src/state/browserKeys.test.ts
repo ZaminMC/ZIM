@@ -26,6 +26,7 @@ function api(): BrowserKeyApi & { calls: string[] } {
     toggleBookmarksBar: record("toggleBookmarksBar"),
     togglePalette: record("togglePalette"),
     paletteOpen: () => false,
+    openDevTools: record("openDevTools"),
   };
 }
 
@@ -122,6 +123,16 @@ describe("the browser keyboard contract (ADR-0032, Chromium IDC table)", () => {
     const a = api();
     handleBrowserKey(keyEvent({ key: "B", ctrlKey: true, shiftKey: true }), notAnInput, a);
     expect(a.calls).toEqual(["toggleBookmarksBar"]);
+  });
+
+  it("IDC_DEV_TOOLS — F12 and Ctrl+Shift+I, even inside a field; plain I stays the editor's", () => {
+    const a = api();
+    handleBrowserKey(keyEvent({ key: "F12" }), notAnInput, a);
+    handleBrowserKey(keyEvent({ key: "I", ctrlKey: true, shiftKey: true }), anInput, a);
+    expect(a.calls).toEqual(["openDevTools", "openDevTools"]);
+    const b = api();
+    expect(handleBrowserKey(keyEvent({ key: "i" }), anInput, b).handled).toBe(false);
+    expect(b.calls).toEqual([]);
   });
 
   it("IDC_STOP — Escape closes the palette only when the palette owns the key", () => {
