@@ -198,6 +198,21 @@ async fn autostart_set(enabled: bool) -> Result<(), String> {
     autostart::set(enabled)
 }
 
+/// The one window that parks in the tray: closing it hides it, and
+/// quitting happens only through the tray menu's explicit Quit. Runtime
+/// windows (tab tear-offs, popups) keep their normal close semantics.
+const TRAY_WINDOW: &str = "main";
+
+/// Show/raise the tray window. Left-clicking the tray icon and the menu's
+/// Open item both land here.
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(TRAY_WINDOW) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -218,6 +233,44 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             app.state::<ShellState>().restore(&handle);
+
+            // The tray (§12.1 seam): closing the window parks ZIM here
+            // instead of leaving a taskbar ghost, and the menu's Quit is
+            // the one action that ends the process. The daemon and its
+            // servers are deliberately detached (daemon_ensure.rs) —
+            // quitting the panel does not stop servers; that is the
+            // product's own topology, not an accident.
+            use tauri::menu::{Menu, MenuItem};
+            let open = MenuItem::with_id(app, "tray-open", "Open ZIM", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "tray-quit", "Quit ZIM", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let mut tray = tauri::tray::TrayIconBuilder::with_id("zim-tray")
+                .menu(&menu)
+                // Left click opens the window; the menu belongs to the
+                // right click, like every Windows tray icon.
+                .show_menu_on_left_click(false)
+                .tooltip("ZIM — servers keep running in the background")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "tray-open" => show_main_window(app),
+                    // The one full shutdown: the run loop ends, the tray
+                    // icon goes with the process, nothing lingers.
+                    "tray-quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
             Ok(())
         })
         // Geometry is model-visible: every window resize re-runs the
@@ -234,6 +287,18 @@ fn main() {
                         let state = app.state::<ShellState>();
                         shell::host::relayout_window(&app, &state, &label);
                     });
+                }
+                // Closing the primary window parks ZIM in the tray: the
+                // close is prevented, the window hides, the session (and
+                // every tab's webview) stays alive. Quitting happens only
+                // through the tray menu. Tear-offs and popups close for
+                // real — the tray is the primary window's parking spot,
+                // not every window's.
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label() == TRAY_WINDOW {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
                 // A runtime window's death drops its strip (shell
                 // hygiene); the primary window's strip IS the session
@@ -273,6 +338,19 @@ fn main() {
             shell::host::shell_popup_close,
             shell::host::shell_popup_dismiss
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the ZIM host");
+        // The run loop owns one more tray law: with the window hidden the
+        // OS never sees a "last window closed" moment, but a hidden window
+        // plus a stray runtime close would still ask to exit — with no
+        // exit code (i.e. not an explicit `app.exit`) the tray keeps the
+        // process alive. Only the tray menu's Quit (exit code Some) ends
+        // it. The restart exit code is honored by the runtime itself.
+        .build(tauri::generate_context!())
+        .expect("error while building the ZIM host")
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }

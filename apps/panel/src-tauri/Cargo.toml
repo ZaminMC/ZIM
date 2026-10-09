@@ -14,7 +14,9 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["unstable", "devtools"] }
+# `tray-icon`: closing the window parks ZIM in the system tray; quitting
+# from the tray menu is the one path that ends the process (§12.1 seam).
+tauri = { version = "2", features = ["unstable", "devtools", "tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
