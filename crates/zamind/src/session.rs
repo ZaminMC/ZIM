@@ -92,7 +92,10 @@ async fn session_loop(
     // The hello's ClientInfo: the audit's honest actor field (ADR-0011 —
     // the agent gates remote identities before the daemon sees them).
     let mut client_info: Option<(String, String)> = None;
-    let cache = RequestCache::default();
+    // Shared with the per-request tasks: the dedupe cache outlives the
+    // loop's own turn (a task may remember its result after later
+    // requests have been dispatched).
+    let cache = std::sync::Arc::new(RequestCache::default());
     let mut live_subscriptions: Vec<String> = Vec::new();
 
     let result = loop {
@@ -193,34 +196,57 @@ async fn session_loop(
             }
         }
 
-        let response = dispatch(&request, engine, audit).await;
-        if AUDITED_METHODS.contains(&request.method.as_str()) {
-            let outcome = match &response.error {
-                Some(error) => error.code.as_str(),
-                None => "ok",
-            };
-            let params = request.parse_params::<serde_json::Value>().ok();
-            let server_id = params
-                .as_ref()
-                .and_then(|v| v["serverId"].as_str())
-                .map(str::to_owned);
-            let detail = params
-                .as_ref()
-                .and_then(|v| v["jobId"].as_str())
-                .map(str::to_owned);
-            audit.record(
-                &request.method,
-                server_id.as_deref().or(detail.as_deref()),
-                outcome,
-                client_info
+        // Parallel dispatch (the starvation fix): the loop READS and
+        // answers, it never works. A slow request — a discovery scan, a
+        // backup walk — used to be awaited inline here, and every request
+        // queued behind it starved until the client's timeout expired
+        // ("the daemon did not answer catalog.list within 10000 ms" was
+        // this line, not a slow catalog). Replies correlate by id, so
+        // out-of-order answers are protocol-legal; the single writer
+        // task keeps the wire framing serial. The cheap paths (ping,
+        // cached retries) stay inline.
+        if request.method == methods::DAEMON_PING {
+            outbound
+                .reply(Response::ok(request.id, serde_json::json!({ "pong": true })))
+                .await;
+            continue;
+        }
+
+        let engine = engine.clone();
+        let audit = audit.clone();
+        let outbound_task = outbound.clone();
+        let client_info_task = client_info.clone();
+        let cache_task = cache.clone();
+        tokio::spawn(async move {
+            let response = dispatch(&request, &engine, &audit).await;
+            if AUDITED_METHODS.contains(&request.method.as_str()) {
+                let outcome = match &response.error {
+                    Some(error) => error.code.as_str(),
+                    None => "ok",
+                };
+                let params = request.parse_params::<serde_json::Value>().ok();
+                let server_id = params
                     .as_ref()
-                    .map(|(name, version)| (name.as_str(), version.as_str())),
-            );
-        }
-        if let (Some(key), Some(result)) = (request_key, response.result.clone()) {
-            cache.remember(key, result);
-        }
-        outbound.reply(response).await;
+                    .and_then(|v| v["serverId"].as_str())
+                    .map(str::to_owned);
+                let detail = params
+                    .as_ref()
+                    .and_then(|v| v["jobId"].as_str())
+                    .map(str::to_owned);
+                audit.record(
+                    &request.method,
+                    server_id.as_deref().or(detail.as_deref()),
+                    outcome,
+                    client_info_task
+                        .as_ref()
+                        .map(|(name, version)| (name.as_str(), version.as_str())),
+                );
+            }
+            if let (Some(key), Some(result)) = (request_key, response.result.clone()) {
+                cache_task.remember(key, result);
+            }
+            outbound_task.reply(response).await;
+        });
     };
 
     for id in live_subscriptions {

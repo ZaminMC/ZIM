@@ -2,6 +2,11 @@
 
 pub const DAEMON_HELLO: &str = "daemon.hello";
 pub const DAEMON_STATUS: &str = "daemon.status";
+/// The heartbeat: a cheap loop-liveness probe. The panel pings it on a
+/// timer — a wire that is silently dead, or a session loop that stopped
+/// reading, surfaces as a ping timeout instead of a 10 s reply silence.
+/// The session loop answers inline (never spawned): THAT is the test.
+pub const DAEMON_PING: &str = "daemon.ping";
 
 pub const SERVER_LIST: &str = "server.list";
 pub const SERVER_GET: &str = "server.get";

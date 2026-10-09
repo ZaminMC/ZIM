@@ -440,6 +440,66 @@ describe("ProtocolClient", () => {
     expect(first.stopped).toBe(1);
     await client.dispose();
   });
+
+  it("pings the daemon on the heartbeat interval while ready", async () => {
+    const client = makeClient({ heartbeatIntervalMs: 100 });
+    const connecting = client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = transports[0]!;
+    first.push(rpcResult(first.sentRequest("daemon.hello").id, helloResult));
+    await connecting;
+
+    await vi.advanceTimersByTimeAsync(100);
+    // The heartbeat rode the SAME transport: one unanswered ping, no
+    // failure (the budget has not elapsed).
+    expect(first.sentRequest("daemon.ping")).toBeTruthy();
+    expect(first.stopped).toBe(0);
+    await client.dispose();
+  });
+
+  it("a missed ping forces the wire down instead of a silent stall", async () => {
+    const client = makeClient({ heartbeatIntervalMs: 100, heartbeatTimeoutMs: 50 });
+    const connecting = client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = transports[0]!;
+    first.push(rpcResult(first.sentRequest("daemon.hello").id, helloResult));
+    await connecting;
+
+    const statuses: string[] = [];
+    client.onStatus((status) => statuses.push(status));
+    await vi.advanceTimersByTimeAsync(100); // ping goes out
+    await vi.advanceTimersByTimeAsync(50); // the ping's budget dies
+    await vi.advanceTimersByTimeAsync(5); // the down path + backoff fire
+    expect(statuses).toContain("offline");
+    expect(first.stopped).toBeGreaterThan(0);
+    // The retry schedule takes over (a fresh transport on its way).
+    await vi.advanceTimersByTimeAsync(5);
+    expect(transports.length).toBe(2);
+    await client.dispose();
+  });
+
+  it("heavy methods ride their own budgets, not the global default", async () => {
+    const client = makeClient({ requestTimeoutMs: 1_000, heartbeatIntervalMs: 0 });
+    const connecting = client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = transports[0]!;
+    first.push(rpcResult(first.sentRequest("daemon.hello").id, helloResult));
+    await connecting;
+
+    // A scan may take a minute; a ping must never linger. (The heartbeat
+    // is off: its own missed-ping path would close the wire mid-test —
+    // that behavior has its own test above.)
+    const scan = client.request("server.discover");
+    const scanExpectation = expect(scan).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const ping = client.request("daemon.ping");
+    const pingExpectation = expect(ping).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pingExpectation; // 15s after issue, not 1s — its own budget
+    await vi.advanceTimersByTimeAsync(45_000);
+    await scanExpectation; // 60s after issue, not 10s
+    await client.dispose();
+  });
 });
 
 describe("ProtocolRequestError", () => {

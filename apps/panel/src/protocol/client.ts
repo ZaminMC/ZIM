@@ -31,7 +31,10 @@ export class ProtocolRequestError extends Error {
 }
 
 export class RequestTimeoutError extends Error {
-  constructor(method: string, ms: number) {
+  constructor(
+    public readonly method: string,
+    public readonly ms: number,
+  ) {
     super(`the daemon did not answer ${method} within ${ms} ms`);
     this.name = "RequestTimeoutError";
   }
@@ -88,17 +91,54 @@ interface PendingRequest {
 }
 
 export interface ClientOptions {
-  /** Per-request timeout. Default: 10 s (mirrors the CLI). */
+  /** Per-request timeout. Default: 10 s (mirrors the CLI); heavy methods
+   *  carry their own larger budgets (methodTimeouts / the built-in
+   *  policy table). */
   requestTimeoutMs?: number;
   /** Reconnect backoff. Default: 250 ms base, doubling to a 5 s cap,
    *  plus jitter. */
   backoffBaseMs?: number;
   backoffMaxMs?: number;
+  /** How often the heartbeat pings (default 15 s). A miss — a silently
+   *  dead wire or a session loop that stopped reading — forces the
+   *  standard down path instead of leaving requests to time out. */
+  heartbeatIntervalMs?: number;
+  /** The heartbeat's own reply budget (default 5 s). */
+  heartbeatTimeoutMs?: number;
+  /** Per-method timeout overrides for tests/embedders; the built-in
+   *  policy table runs when absent. */
+  methodTimeouts?: Record<string, number>;
 }
 
 const defaultTimeoutMs = 10_000;
 const defaultBackoffBaseMs = 250;
 const defaultBackoffMaxMs = 5_000;
+const defaultHeartbeatIntervalMs = 15_000;
+const defaultHeartbeatTimeoutMs = 5_000;
+
+/** Operation-specific budgets: heavy work (scans, backups, installs,
+ *  catalog fetches) carries its own daemon-side accounting and must not
+ *  die at the default reply budget — while a ping must never linger.
+ *  One arbitrary global timeout was the disease; per-operation budgets
+ *  are the cure. */
+const METHOD_TIMEOUTS: Record<string, number> = {
+  "daemon.ping": 5_000,
+  "server.discover": 60_000,
+  "discovery.roots.set": 15_000,
+  "backup.create": 180_000,
+  "backup.restore": 180_000,
+  "backups.list": 20_000,
+  "plugins.search": 20_000,
+  "plugins.install": 180_000,
+  "plugins.versions": 20_000,
+  "catalog.versions": 20_000,
+  "catalog.builds": 20_000,
+  "java.install": 300_000,
+  "java.list": 15_000,
+  "server.create": 300_000,
+  "logs.range": 15_000,
+  "metrics.range": 15_000,
+};
 
 export class ProtocolClient {
   private nextRequestId = 1;
@@ -116,6 +156,8 @@ export class ProtocolClient {
   private status: ClientStatus = "offline";
   /** Credential for the next handshake (remote transport, ADR-0011). */
   private auth: string | undefined;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatEpoch = 0;
 
   constructor(
     private readonly createTransport: () => Promise<Transport>,
@@ -124,6 +166,48 @@ export class ProtocolClient {
 
   private get timeoutMs(): number {
     return this.options.requestTimeoutMs ?? defaultTimeoutMs;
+  }
+
+  private budgetFor(method: string): number {
+    return (
+      this.options.methodTimeouts?.[method] ??
+      METHOD_TIMEOUTS[method] ??
+      this.timeoutMs
+    );
+  }
+
+  // --- heartbeat ---
+
+  /** The liveness loop: a cheap daemon.ping on a timer. The daemon's
+   *  session loop answers it inline (never spawned) — a missed ping
+   *  therefore proves the WIRE or the LOOP died, not that some heavy
+   *  request is slow, and the standard down path takes over without
+   *  waiting for a request to time out. */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const interval = this.options.heartbeatIntervalMs ?? defaultHeartbeatIntervalMs;
+    if (interval <= 0) return; // 0 = no heartbeat (tests, embedders)
+    const budget = this.options.heartbeatTimeoutMs ?? defaultHeartbeatTimeoutMs;
+    const epoch = ++this.heartbeatEpoch;
+    this.heartbeatTimer = setInterval(() => {
+      if (epoch !== this.heartbeatEpoch || !this.transport) return;
+      void this.request("daemon.ping", undefined, budget).catch((error: unknown) => {
+        if (epoch !== this.heartbeatEpoch) return;
+        this.stopHeartbeat();
+        this.lastFailure = error;
+        const transport = this.transport;
+        if (transport) void transport.stop().catch(() => {});
+        this.handleDown(this.generation);
+      });
+    }, interval);
+  }
+
+  private stopHeartbeat(): void {
+    this.heartbeatEpoch += 1;
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   // --- lifecycle ---
@@ -140,6 +224,7 @@ export class ProtocolClient {
    *  handshake picks up the credential set via `setAuth`. */
   async reconnect(): Promise<void> {
     if (this.disposed) return;
+    this.stopHeartbeat();
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -164,6 +249,7 @@ export class ProtocolClient {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.generation += 1;
+    this.stopHeartbeat();
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -232,6 +318,7 @@ export class ProtocolClient {
       if (this.isStale(generation)) return;
       this.retryAttempt = 0;
       this.setStatus("ready");
+      this.startHeartbeat();
       await this.resubscribeAll(generation);
     } catch (error) {
       if (this.isStale(generation)) return;
@@ -275,7 +362,11 @@ export class ProtocolClient {
 
   // --- requests ---
 
-  async request<R = unknown>(method: string, params?: unknown): Promise<R> {
+  async request<R = unknown>(
+    method: string,
+    params?: unknown,
+    timeoutMs?: number,
+  ): Promise<R> {
     // Guard on the live transport, not on `ready`: the handshake itself is
     // a request issued between transport-start and ready.
     if (!this.transport) {
@@ -290,17 +381,18 @@ export class ProtocolClient {
       ...(params === undefined ? {} : { params }),
     };
 
-    const reply = this.waitForReply(id, method);
+    const budget = timeoutMs ?? this.budgetFor(method);
+    const reply = this.waitForReply(id, method, budget);
     this.transport.send(JSON.stringify(frame));
     return (await reply) as R;
   }
 
-  private waitForReply(id: number, method: string): Promise<unknown> {
+  private waitForReply(id: number, method: string, budget: number): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new RequestTimeoutError(method, this.timeoutMs));
-      }, this.timeoutMs);
+        reject(new RequestTimeoutError(method, budget));
+      }, budget);
       this.pending.set(id, { resolve, reject, timer });
     });
   }

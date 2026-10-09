@@ -17,6 +17,7 @@ import { navigateHost } from "../state/shellLane";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
 import { useUi } from "../state/ui";
 import { startWire } from "../state/wire";
+import { useConnection } from "../state/connection";
 import { sortedServers, useServers } from "../state/servers";
 import { ServerView } from "./ServerView";
 import { ConsoleView } from "./ConsoleView";
@@ -129,6 +130,10 @@ export function App() {
   const newServerOpen = useUi((s) => s.newServerOpen);
   const paletteOpen = useUi((s) => s.paletteOpen);
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
+  // The wire's posture, mirrored for the banner: the panel must never
+  // look alive while its daemon is unreachable, and the operator must
+  // never stare at a broken view without the words for it.
+  const wireStatus = useConnection((s) => s.status);
 
   useEffect(() => {
     // The palette lane attaches FIRST: the wire's absence (no daemon in
@@ -219,8 +224,27 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [setPaletteOpen]);
 
+  useEffect(() => {
+    // Any pointerdown here is an interaction a popup overlay must yield
+    // to (cheap no-op when none is open).
+    if (!onHost()) return;
+    const onDown = () => void invoke("shell_popup_dismiss").catch(() => {});
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, []);
+
   return (
     <div className={styles.content}>
+      {wireStatus !== "ready" ? (
+        <div className={styles.wireBanner} role="status" data-state={wireStatus}>
+          <span className={styles.wireDot} aria-hidden />
+          <span className={styles.wireText}>
+            {wireStatus === "connecting"
+              ? "Connecting to the daemon…"
+              : "Reconnecting — the daemon is not answering"}
+          </span>
+        </div>
+      ) : null}
       <TabBoundary>
         <Suspense fallback={<div className={styles.lazyFallback} />}>
           <DestinationView destination={destination} reloadToken={reloadToken} />

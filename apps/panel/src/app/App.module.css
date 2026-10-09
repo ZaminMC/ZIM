@@ -32,3 +32,42 @@
   flex: 1;
   background: var(--bg);
 }
+
+/* The wire banner: the honest strip between the shell and a working
+   daemon. Fixed-height flex:none — the destination views keep their
+   flex:1 band. The dot breathes while connecting, holds while offline;
+   reduced-motion freezes it (ADR-0030's floor). */
+.wireBanner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--warning, #fdd663) 12%, var(--bg));
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-s);
+  color: var(--text-muted);
+}
+
+.wireDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning, #fdd663);
+}
+.wireBanner[data-state="connecting"] .wireDot {
+  animation: wireBreathe 1.2s ease-in-out infinite alternate;
+}
+.wireBanner[data-state="offline"] .wireDot {
+  background: var(--danger, #f28b82);
+}
+
+@keyframes wireBreathe {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wireBanner .wireDot { animation: none; }
+}
