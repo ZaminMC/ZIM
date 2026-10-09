@@ -106,6 +106,40 @@
 
   /* terminal (xterm surface) */
   --term-bg: #0b0f15;
+
+  /* -- The browser shell's band (ADR-0033) ---------------------------------
+     The frame (strip, toolbar, omnibox, bookmarks) and the popup overlay
+     speak THIS palette, and it is defined here — the theme-token layer's
+     whole point: a theme change reaches the band without touching
+     frame.css or popup.css. The ladder: strip < surface (the active tab
+     melts into the toolbar through the shared surface), fields sit
+     between. */
+  --frame-bg: var(--bg);
+  --frame-surface: var(--surface-2);
+  --frame-field: #0d1219;
+  --frame-field-hover: #11171f;
+  --frame-fg: var(--text);
+  --frame-fg-dim: var(--text-muted);
+  --frame-hover: rgba(233, 238, 246, 0.07);
+  --frame-hover-strong: rgba(233, 238, 246, 0.11);
+  --frame-line: rgba(233, 238, 246, 0.14);
+  --frame-accent: var(--accent);
+  --frame-accent-soft: var(--accent-soft);
+  --frame-accent-contrast: var(--accent-contrast);
+
+  /* The popup overlay (menus, the group form): one step darker than the
+     surface so a floating menu reads above the toolbar it covers. */
+  --popup-bg: #10161f;
+  --popup-line: rgba(233, 238, 246, 0.1);
+
+  /* Tab groups' six-color palette (tab_group_visual_data.h's spirit):
+     tinted at 20-30% over the strip's ground, never at full strength. */
+  --group-sky: #8ab4f8;
+  --group-grass: #81c995;
+  --group-amber: #fdd663;
+  --group-rose: #f28b82;
+  --group-violet: #c58af9;
+  --group-slate: #9aa0a6;
 }
 
 /* -- Document reset (ADR-0033): the tab-content document owns the whole

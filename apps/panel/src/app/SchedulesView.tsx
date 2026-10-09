@@ -126,7 +126,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
     setBusy(true);
     void createSchedule(serverId, built)
       .then(() => {
-        setNotice("Schedule added — the daemon picks it up on its next tick.");
+        setNotice("Schedule added — it runs on its next tick.");
         setAdding(false);
         setName("");
       })

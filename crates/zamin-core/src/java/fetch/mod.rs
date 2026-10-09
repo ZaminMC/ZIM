@@ -192,6 +192,7 @@ pub fn install_jdk(
     asset: &JdkAsset,
     cancel: Arc<AtomicBool>,
     progress: Arc<dyn Fn(InstallProgress) + Send + Sync>,
+    cache: Option<&crate::cache::Cache>,
 ) -> Result<InstallOutcome, CoreError> {
     let runtime_dir = managed_root.join(validate_release_name(&asset.release_name)?);
     let existing = crate::java::managed_candidates(managed_root)
@@ -216,41 +217,65 @@ pub fn install_jdk(
         source,
     })?;
 
-    // Download next to the managed root so extraction is a plain read.
-    let archive_path = managed_root.join(format!(".jdk-download-{}.part", std::process::id()));
-    let progress_for_download = Arc::clone(&progress);
-    let download = crate::software::download_to_dir(
-        &asset.url,
-        managed_root,
-        archive_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(".jdk-download.part"),
-        Some(&asset.sha256),
-        &crate::software::DownloadOptions {
-            cancel: Arc::clone(&cancel),
-            progress: Some(Arc::new(move |p: crate::software::DownloadProgress| {
-                progress_for_download(InstallProgress::Download {
+    // The archive: cache-first (a hit is re-hashed before use), download
+    // on miss, and the cached copy SURVIVES the install — the next
+    // install of the same JDK works offline.
+    let options = crate::software::DownloadOptions {
+        cancel: Arc::clone(&cancel),
+        progress: {
+            let progress = Arc::clone(&progress);
+            Some(Arc::new(move |p: crate::software::DownloadProgress| {
+                progress(InstallProgress::Download {
                     bytes_done: p.bytes_done,
                     total: p.total,
                 });
             })),
-            // The JDK fetch keeps the downloader's original discipline:
-            // a fresh runtime directory, never an overwrite.
-            replace: false,
         },
-    );
-    let download = match download {
-        Ok(d) => d,
-        Err(e) => {
-            let _ = std::fs::remove_file(&archive_path);
-            return Err(e);
+        // The JDK fetch keeps the downloader's original discipline: a
+        // fresh runtime directory, never an overwrite.
+        replace: false,
+    };
+    let (archive_path, from_cache) = match cache {
+        Some(cache) => {
+            let artifact = cache.fetch(
+                &asset.url,
+                Some(crate::software::Verified::Sha256(&asset.sha256)),
+                &format!("jdk-{}.archive", validate_release_name(&asset.release_name)?),
+                &options,
+            )?;
+            (artifact.path, true)
+        }
+        None => {
+            // Download next to the managed root so extraction is a plain
+            // read (the no-cache path keeps its old shape).
+            let archive_path = managed_root.join(format!(".jdk-download-{}.part", std::process::id()));
+            let download = crate::software::download_to_dir(
+                &asset.url,
+                managed_root,
+                archive_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(".jdk-download.part"),
+                Some(&asset.sha256),
+                &options,
+            );
+            let download = match download {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&archive_path);
+                    return Err(e);
+                }
+            };
+            (download.path, false)
         }
     };
 
-    let result = extract_and_inspect(&download.path, managed_root, &cancel, &progress);
-    // The archive has served its purpose either way.
-    let _ = std::fs::remove_file(&download.path);
+    let result = extract_and_inspect(&archive_path, managed_root, &cancel, &progress);
+    // The uncached archive has served its purpose either way; the cached
+    // copy stays for the next install.
+    if !from_cache {
+        let _ = std::fs::remove_file(&archive_path);
+    }
     result
 }
 

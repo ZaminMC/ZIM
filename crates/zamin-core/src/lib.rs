@@ -9,6 +9,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod backup;
+pub mod cache;
 pub mod config;
 pub mod discovery;
 pub mod error;

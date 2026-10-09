@@ -2005,6 +2005,12 @@ impl Engine {
                 let url = resolved.url.clone();
                 let size = resolved.size;
                 let download_root = root.clone();
+                // The runtime cache lives under the daemon's data dir and
+                // is keyed by URL: a second server on the same jar (or a
+                // re-create after a failed attempt) installs from disk —
+                // offline included. A hit is re-hashed before use; a
+                // corrupted artifact is dropped, never served.
+                let cache_root = data_dir.join("cache");
                 ctl.progress(0, size, Some("bytes"), Some(&format!("downloading {name}")));
                 let options = zamin_core::software::DownloadOptions {
                     cancel: cancel_flag,
@@ -2017,11 +2023,18 @@ impl Engine {
                     replace: false,
                 };
                 let outcome = tokio::task::spawn_blocking(move || {
-                    zamin_core::software::download_to_dir(
+                    let cache = zamin_core::cache::Cache::new(cache_root);
+                    let artifact = cache.fetch(
                         &url,
+                        sha.as_deref().map(zamin_core::software::Verified::Sha256),
+                        "server.jar",
+                        &options,
+                    )?;
+                    zamin_core::cache::install_from_cache(
+                        &artifact.path,
+                        &artifact.digest,
                         &download_root,
                         "server.jar",
-                        sha.as_deref(),
                         &options,
                     )
                 })
@@ -2200,6 +2213,7 @@ impl Engine {
     ) -> Result<zamin_protocol::jobs::Job, EngineError> {
         let adoptium = zamin_core::java::fetch::AdoptiumClient::new(&self.inner.adoptium_url);
         let managed_root = self.managed_java_dir();
+        let cache_root = self.inner.data_dir.join("cache");
 
         // Resolve the asset up front: an unreachable Adoptium API or an
         // absent platform build is a typed rejection now.
@@ -2230,6 +2244,7 @@ impl Engine {
                 let progress_ctl = ctl.clone();
                 let install_ctl = ctl.clone();
                 let outcome = tokio::task::spawn_blocking(move || {
+                    let cache = zamin_core::cache::Cache::new(cache_root);
                     zamin_core::java::fetch::install_jdk(
                         &managed_root,
                         &asset,
@@ -2260,6 +2275,10 @@ impl Engine {
                                 );
                             }
                         }),
+                        // Cache-first: the archive outlives the install,
+                        // so the next install of the same JDK works
+                        // offline (validated by digest on every hit).
+                        Some(&cache),
                     )
                 })
                 .await

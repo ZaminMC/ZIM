@@ -16,8 +16,8 @@ mod fill;
 mod templates;
 
 pub use download::{
-    download_to_dir, download_verified, DownloadOptions, DownloadOutcome, DownloadProgress,
-    Verified,
+    download_to_dir, download_to_staging, download_verified, DownloadOptions, DownloadOutcome,
+    DownloadProgress, Verified,
 };
 pub use fabric::{FabricMetaClient, FabricServerJar, MetaVersion};
 pub use fill::FillClient;

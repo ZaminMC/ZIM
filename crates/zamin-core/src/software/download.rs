@@ -103,6 +103,19 @@ pub fn download_to_dir(
     download_streamed(url, dir, file_name, expected, options)
 }
 
+/// Download `url` into an explicit staging path, publishing NOTHING —
+/// the caller owns the publication (the runtime cache stages into its
+/// own entry, then stores with its meta record). Same verification
+/// discipline: the stream is always hashed.
+pub fn download_to_staging(
+    url: &str,
+    staging: &Path,
+    expected: Option<Verified<'_>>,
+    options: &DownloadOptions,
+) -> Result<DownloadOutcome, CoreError> {
+    stream_to(url, staging, expected, options)
+}
+
 /// Same discipline, with the checksum algorithm chosen by the caller
 /// (sha512 for Modrinth publishes). Still refuses an existing target.
 pub fn download_verified(

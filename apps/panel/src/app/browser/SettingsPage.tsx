@@ -367,7 +367,7 @@ export function SettingsPage() {
           <div className={styles.row}>
             <div className={styles.rowMain}>
               <span className={styles.rowName}>
-                {daemon ? `${daemon.name} v${daemon.version}` : "zamind"}
+                {daemon ? `${daemon.name} v${daemon.version}` : "The daemon"}
               </span>
               <span className={styles.rowDetail} title={lastError ?? undefined}>
                 {statusLabel}

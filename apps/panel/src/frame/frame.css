@@ -10,27 +10,9 @@
    step below it, and the omnibox is a quiet field that lights on
    focus. */
 
-:root {
-  --group-sky: #8ab4f8;
-  --group-grass: #81c995;
-  --group-amber: #fdd663;
-  --group-rose: #f28b82;
-  --group-violet: #c58af9;
-  --group-slate: #9aa0a6;
-
-  /* frame surface ladder — strip < surface (active tab + toolbar melt),
-     fields sit between; all inside the token palette's family. */
-  --frame-bg: #0b0f16;
-  --frame-surface: #151c25;
-  --frame-field: #0d1219;
-  --frame-field-hover: #11171f;
-  --frame-fg: #e9eef6;
-  --frame-fg-dim: #9aa7b9;
-  --frame-hover: rgba(233, 238, 246, 0.07);
-  --frame-hover-strong: rgba(233, 238, 246, 0.11);
-  --frame-line: rgba(233, 238, 246, 0.14);
-  --frame-accent: #5c9df4;
-}
+/* The band's palette is NOT here: every frame, popup, and group-color
+   token lives in tokens.css (the theme-token layer) — restyling the
+   band means restyling tokens, never this sheet. */
 
 html, body, #root {
   margin: 0;

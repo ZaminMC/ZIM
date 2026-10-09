@@ -4,10 +4,8 @@
    this shell nor carry its keyboard contract, which is exactly why the
    native menu is gone. */
 
-:root {
-  --popup-bg: #10161f;
-  --popup-line: rgba(233, 238, 246, 0.1);
-}
+/* The overlay's palette lives in tokens.css (--popup-bg, --popup-line):
+   the theme-token layer owns the colors, this sheet owns the shapes. */
 
 html, body, #root {
   margin: 0;

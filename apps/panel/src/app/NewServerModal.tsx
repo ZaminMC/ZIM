@@ -474,7 +474,7 @@ export function NewServerModal() {
                 value={javaPath}
                 onChange={(event) => setJavaPath(event.target.value)}
               >
-                <option value="auto">Let the daemon pick</option>
+                <option value="auto">Select automatically</option>
                 {(runtimes ?? []).map((runtime) => (
                   <option key={runtime.path} value={runtime.path}>
                     Java {runtime.major} — {runtime.vendor || "unknown vendor"}

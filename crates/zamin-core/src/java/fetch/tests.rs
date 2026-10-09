@@ -361,6 +361,7 @@ fn full_install_downloads_extracts_and_inspects() {
         &jdk,
         Arc::new(AtomicBool::new(false)),
         Arc::new(|_| {}),
+        None,
     )
     .expect("install");
     assert!(!outcome.already_installed);
@@ -383,6 +384,7 @@ fn full_install_downloads_extracts_and_inspects() {
         &jdk,
         Arc::new(AtomicBool::new(false)),
         Arc::new(|_| {}),
+        None,
     )
     .expect("reinstall");
     assert!(again.already_installed);
@@ -408,10 +410,96 @@ fn checksum_mismatch_refuses_to_extract() {
         &jdk,
         Arc::new(AtomicBool::new(false)),
         Arc::new(|_| {}),
+        None,
     );
     assert!(matches!(result, Err(CoreError::ChecksumMismatch { .. })));
     assert!(
         !managed.path.join("jdk-21-test+1").exists(),
         "a failed install extracts nothing"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cached_jdk_installs_offline() {
+    // The cache story end to end: the first install (network up) stores
+    // the archive; the server then DIES; the second install of the same
+    // URL still works — the cache's validated hit answers before any
+    // network is touched.
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let bytes = build_tar_gz_gzipped("jdk-21-test+1", fake_java_script());
+    let sha = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+    };
+
+    // A controllable one-file server: flipping `down` closes the socket.
+    let down = Arc::new(AtomicBool::new(false));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let down_thread = Arc::downgrade(&down);
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || loop {
+        if down_thread.upgrade().map(|d| d.load(Ordering::Relaxed)) == Some(true) {
+            return;
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut buf = [0u8; 4096];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                let request = String::from_utf8_lossy(&buf);
+                let (ctype, body) = if request.contains(".sha256") {
+                    ("text/plain", format!("{sha}  OpenJDK21.tar.gz\n").into_bytes())
+                } else {
+                    ("application/gzip", bytes.clone())
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(_) => return,
+        }
+    });
+    let base = format!("http://{addr}");
+
+    let managed = tempdir::scoped("jdk-offline-root");
+    let cache_dir = tempdir::scoped("jdk-offline-cache");
+    let cache = crate::cache::Cache::new(cache_dir.path.to_path_buf());
+    let jdk = asset(format!("{base}/files/jdk.tar.gz"), "OpenJDK21.tar.gz", sha);
+
+    let first = install_jdk(
+        &managed.path,
+        &jdk,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| {}),
+        Some(&cache),
+    )
+    .expect("online install");
+    assert!(!first.already_installed);
+    assert!(cache.lookup(&jdk.url).is_some(), "the archive is cached");
+
+    // The network dies; the extracted runtime goes too (a re-install).
+    down.store(true, Ordering::Relaxed);
+    server.join().unwrap();
+    std::fs::remove_dir_all(&first.runtime_dir).unwrap();
+
+    let second = install_jdk(
+        &managed.path,
+        &jdk,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| {}),
+        Some(&cache),
+    )
+    .expect("offline install from the cache");
+    assert!(!second.already_installed);
+    assert!(second.java_path.is_file());
 }
