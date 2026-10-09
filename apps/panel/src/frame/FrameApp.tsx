@@ -60,7 +60,7 @@ import {
   IconChevLeft,
   IconChevRight,
   IconDots,
-} from "./icons";
+} from "../ui/icons";
 import "./frame.css";
 
 const GROUP_COLOR_VARS = [

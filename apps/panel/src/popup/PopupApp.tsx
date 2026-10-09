@@ -31,11 +31,12 @@ import {
   IconLogs,
   IconMuted,
   IconNewWindow,
+  IconPin,
   IconPlus,
   IconZoomIn,
   IconZoomOut,
   IconZoomReset,
-} from "../frame/icons";
+} from "../ui/icons";
 
 interface PopupContext {
   kind: string;
@@ -256,7 +257,7 @@ export function PopupApp() {
             onClick={() => void run(CMD.NEW_TAB)}
           />
           <MenuItem
-            glyph={<IconGear />}
+            glyph={<IconPin />}
             label={ctx.pinned ? "Unpin tab" : "Pin tab"}
             onClick={() => void run(CMD.TOGGLE_PINNED, { tab_id: ctx.tab_id })}
           />
