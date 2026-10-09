@@ -26,7 +26,8 @@ pub const RESTORE_TAB: u32 = 34028;
 pub const MOVE_TAB_NEXT: u32 = 34032;
 /// IDC_MOVE_TAB_PREVIOUS 34033.
 pub const MOVE_TAB_PREVIOUS: u32 = 34033;
-/// IDC_MOVE_TAB_TO_NEW_WINDOW 34056.
+/// IDC_MOVE_TAB_TO_NEW_WINDOW 34056 (reserved — not wired this phase).
+#[allow(dead_code)]
 pub const MOVE_TAB_TO_NEW_WINDOW: u32 = 34056;
 /// IDC_ADD_NEW_TAB_TO_GROUP 34100.
 pub const ADD_NEW_TAB_TO_GROUP: u32 = 34100;
@@ -35,6 +36,7 @@ pub const CLOSE_TAB_GROUP: u32 = 34104;
 /// IDC_BOOKMARK_THIS_TAB 35000.
 pub const BOOKMARK_THIS_TAB: u32 = 35000;
 /// IDC_BOOKMARK_ALL_TABS 35001 (reserved — not wired this phase).
+#[allow(dead_code)]
 pub const BOOKMARK_ALL_TABS: u32 = 35001;
 /// IDC_FOCUS_LOCATION 39001.
 pub const FOCUS_LOCATION: u32 = 39001;

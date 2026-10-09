@@ -159,7 +159,7 @@ impl ShellState {
         // lifetime but are not resurrected).
         inner
             .strips
-            .insert("main".into(), session.primary.unwrap_or_else(Strip::new));
+            .insert("main".into(), session.primary.unwrap_or_default());
     }
 }
 
@@ -183,9 +183,7 @@ impl ShellInner {
     }
 
     fn strip(&mut self, window: &str) -> &mut Strip {
-        self.strips
-            .entry(window.to_owned())
-            .or_insert_with(Strip::new)
+        self.strips.entry(window.to_owned()).or_default()
     }
 }
 
@@ -333,11 +331,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     let content_bounds = Rect {
         position: LogicalPosition::new(0.0, header as f64).into(),
-        size: LogicalSize::new(
-            size.width as f64,
-            (size.height as f64 - header as f64).max(0.0),
-        )
-        .into(),
+        // `size` is already LogicalSize<f64> — the unit was named when
+        // the annotation landed; no cast to restate it.
+        size: LogicalSize::new(size.width, (size.height - header as f64).max(0.0)).into(),
     };
 
     // Show the active tab's webview at its slot; hide the rest.
@@ -346,7 +342,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
             continue;
         };
         if tab.active {
-            let _ = webview.set_bounds(content_bounds.clone());
+            let _ = webview.set_bounds(content_bounds);
             let _ = webview.show();
         } else {
             let _ = webview.hide();
@@ -357,14 +353,11 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     // first focus — a restored session's inactive tabs stay cold).
     if let Some((id, destination, reload)) = create_tab {
         let label = tab_label(window_label, id);
-        let webview = host_window
+        host_window
             .add_child(
                 tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into())),
                 LogicalPosition::new(0.0, header as f64),
-                LogicalSize::new(
-                    size.width as f64,
-                    (size.height as f64 - header as f64).max(0.0),
-                ),
+                LogicalSize::new(size.width, (size.height - header as f64).max(0.0)),
             )
             .map_err(|e| format!("could not create the tab webview: {e}"))?;
         let payload = serde_json::json!({
@@ -380,7 +373,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     if let Some(frame) = app.get_webview(&frame_label(window_label)) {
         let _ = frame.set_bounds(Rect {
             position: LogicalPosition::new(0.0, 0.0).into(),
-            size: LogicalSize::new(size.width as f64, header as f64).into(),
+            size: LogicalSize::new(size.width, header as f64).into(),
         });
         let _ = app.emit_to(frame_label(window_label), "shell://snapshot", &snap);
     }
@@ -1033,6 +1026,7 @@ pub fn handle_tab_menu_verb(
 /// Async per the re-entrancy law: a detached drop spawns a whole WINDOW
 /// (plus its frame webview) from the tear-off path.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // the command surface is contractual
 pub async fn shell_drag(
     window: tauri::Webview,
     phase: String,

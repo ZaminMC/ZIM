@@ -43,11 +43,7 @@ fn daemon_binary_name() -> &'static str {
 pub fn resolve_daemon_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
     let search_path = std::env::var_os("PATH");
-    resolve_daemon_binary_in(
-        exe.as_deref(),
-        search_path.as_deref(),
-        &daemon_binary_name(),
-    )
+    resolve_daemon_binary_in(exe.as_deref(), search_path.as_deref(), daemon_binary_name())
 }
 
 /// Pure core of [`resolve_daemon_binary`], testable without process state.
@@ -77,7 +73,7 @@ pub fn resolve_daemon_binary_in(
 /// immediately — this says nothing about protocol state, only about the
 /// endpoint's existence.
 pub async fn endpoint_ready(endpoint: &Endpoint) -> bool {
-    matches!(zamin_ipc::connect(endpoint.clone()).await, Ok(_))
+    zamin_ipc::connect(endpoint.clone()).await.is_ok()
 }
 
 /// Spawn the daemon without arguments — defaults are already correct

@@ -9,7 +9,9 @@
 /// tab's CONTENT width; the full slot adds the two bottom corner
 /// extensions (`GetStandardWidth` = 232 + 2×12).
 pub const TAB_WIDTH: f32 = 232.0;
-/// `GetTopCornerRadius() = 10` — tab_style.cc.
+/// `GetTopCornerRadius() = 10` — tab_style.cc. Lives in the frame's CSS
+/// (border-radius) — the model keeps the documented constant.
+#[allow(dead_code)]
 pub const CORNER_TOP: f32 = 10.0;
 /// `GetBottomCornerRadius() = 12` — tab_style.cc.
 pub const CORNER_BOTTOM: f32 = 12.0;
@@ -23,7 +25,9 @@ pub const PINNED_CONTENT: f32 = 24.0;
 pub const MIN_INACTIVE_INTERIOR: f32 = 16.0;
 /// `kSeparatorThickness = 2` — tab_style.cc.
 pub const SEPARATOR_W: f32 = 2.0;
-/// `kSeparatorHeight = 20` (touch_ui false) — layout_constants.cc.
+/// `kSeparatorHeight = 20` (touch_ui false) — layout_constants.cc. The
+/// view sizes separators in CSS; the model keeps the documented constant.
+#[allow(dead_code)]
 pub const SEPARATOR_H: f32 = 20.0;
 /// Separator horizontal margin — `kSeparatorHorizontalMargin = 2` (both
 /// sides), tab_style.cc.

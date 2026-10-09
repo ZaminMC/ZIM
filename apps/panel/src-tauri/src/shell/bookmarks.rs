@@ -71,7 +71,9 @@ impl Bookmarks {
         }
     }
 
-    /// isBookmarked — the star's resting state.
+    /// isBookmarked — the star's resting state. Wired with the omnibox
+    /// star's filled posture (a later phase); the ported API keeps it.
+    #[allow(dead_code)]
     pub fn is_bookmarked(&self, destination: &Destination) -> bool {
         self.items.iter().any(|b| &b.destination == destination)
     }
@@ -104,8 +106,10 @@ mod tests {
 
     #[test]
     fn bar_visibility_persists_through_the_codec() {
-        let mut marks = Bookmarks::default();
-        marks.bar_visible = true;
+        let mut marks = Bookmarks {
+            bar_visible: true,
+            ..Bookmarks::default()
+        };
         marks.toggle(Destination::Jobs, "Jobs".into());
         let path = std::env::temp_dir().join(format!("zamin-bm-{}.json", std::process::id()));
         marks.save(&path);

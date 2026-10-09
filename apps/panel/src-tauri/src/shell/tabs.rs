@@ -489,15 +489,19 @@ impl Strip {
                 collapsed: false,
             },
         );
-        let mut target = self.block_edge(false).min(self.tabs.len());
-        for mut member in members {
+        let start = self.block_edge(false).min(self.tabs.len());
+        // The insert position walks the members — the zip carries the
+        // counter instead of a mutable shadow (clippy's counter law).
+        for (target, mut member) in (start..).zip(members.into_iter()) {
             member.group = Some(group_id);
             self.tabs.insert(target.min(self.tabs.len()), member);
-            target += 1;
         }
         Some(group_id)
     }
 
+    // The group-membership API for the menu verbs (a later phase wires
+    // group_add to the "move to group" verb; group_remove to ungroup).
+    #[allow(dead_code)]
     pub fn group_add(&mut self, group: GroupId, id: TabId) {
         let anchor = self.tabs.iter().position(|t| t.group == Some(group));
         let Some(anchor) = anchor else { return };
@@ -508,6 +512,7 @@ impl Strip {
         }
     }
 
+    #[allow(dead_code)]
     pub fn group_remove(&mut self, id: TabId) {
         if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
             t.group = None;
@@ -541,7 +546,7 @@ impl Strip {
 
     fn ungroup_all(&mut self, groups: &[GroupId]) {
         for t in self.tabs.iter_mut() {
-            if t.group.map_or(false, |g| groups.contains(&g)) {
+            if t.group.is_some_and(|g| groups.contains(&g)) {
                 t.group = None;
             }
         }

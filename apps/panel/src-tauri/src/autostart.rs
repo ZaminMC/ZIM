@@ -10,6 +10,7 @@
 //!   — no root, honored by GNOME and KDE, trivially removable.
 //! - Windows: the per-user `HKCU\...\CurrentVersion\Run` key — no admin,
 //!   visible in Task Manager's startup list.
+//!
 //! The systemd user unit / Task Scheduler task variants belong to Phase 8
 //! (services), where the daemon gets a service story of its own.
 //!
