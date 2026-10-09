@@ -29,8 +29,7 @@ mod tests {
         // Unique tag per test: the two tests here share one process id,
         // and cargo runs them in parallel — a shared dir meant one test's
         // cleanup deleted the other's floor mid-run (the ubuntu flake).
-        let dir =
-            std::env::temp_dir().join(format!("zamin-private-file-private-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zim-pf-private-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("secret.token");
@@ -44,8 +43,7 @@ mod tests {
 
     #[test]
     fn the_contents_land_everywhere() {
-        let dir =
-            std::env::temp_dir().join(format!("zamin-private-file-contents-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zim-pf-contents-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("secret.token");
