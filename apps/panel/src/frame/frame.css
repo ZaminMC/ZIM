@@ -72,7 +72,13 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px; /* CONTENT_INSET_X + a breath */
+  /* Content law for the flat overlap: each neighbor slot starts 18px
+     inside this tab's span (tab_overlap()), so BOTH insets clear that
+     zone with a 6px breath — the glyph, the title, and the close button
+     never straddle the boundary where a neighbor's background ends.
+     Upstream the same zone is absorbed by the tab's curved corners
+     (tab_width_constraints.cc). */
+  padding: 0 24px;
   box-sizing: border-box;
   cursor: default;
   font-size: 12px;
@@ -91,10 +97,12 @@ body {
 }
 
 /* The active tab melts into the toolbar: bottom corner extensions,
-   radius 12 (CORNER_BOTTOM). */
+   radius 12 (CORNER_BOTTOM). Each side only renders over a see-through
+   neighbor — the view gates them with .flare-* (a flare over a chip or
+   another active tab would paint on top of it). */
 .tab-active::before,
 .tab-active::after {
-  content: "";
+  content: none;
   position: absolute;
   bottom: 0;
   width: 12px;
@@ -102,8 +110,17 @@ body {
   background: inherit;
   pointer-events: none;
 }
-.tab-active::before { left: -12px; border-bottom-right-radius: 12px; }
-.tab-active::after { right: -12px; border-bottom-left-radius: 12px; }
+.tab-active.flare-left::before { content: ""; left: -12px; border-bottom-right-radius: 12px; }
+.tab-active.flare-right::after { content: ""; right: -12px; border-bottom-left-radius: 12px; }
+
+.tab-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--frame-fg-dim);
+  transition: color 120ms ease-out;
+}
+.tab-active .tab-glyph { color: var(--frame-fg); }
 
 .tab-title {
   flex: 1;
@@ -113,24 +130,24 @@ body {
   white-space: nowrap;
 }
 
+/* A pinned tab is its favicon: the glyph alone, centered in the VISIBLE
+   span of the slot (width − overlap — the next slot paints over the
+   right 18px), the way Chromium centers pinned content (pinned_width). */
 .tab-pinned {
   justify-content: center;
-  padding: 0;
+  padding: 0 18px 0 0;
 }
+.tab-pinned .tab-glyph { color: var(--frame-fg); }
 
-/* Pinned tabs carry no title text — until favicons land, the first
-   letter rides in a deliberate chip instead of an orphan glyph. */
-.tab-pinned .tab-title {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  background: var(--frame-hover-strong);
-  font-size: 11px;
-  font-weight: 600;
+/* Minimum-width tabs (the shrink law's 32 DIP floor): the glyph alone
+   fits — title, mute state, and close give way. */
+.tab-tight {
+  justify-content: center;
+  padding: 0 18px 0 0;
 }
+.tab-tight .tab-title,
+.tab-tight .tab-muted,
+.tab-tight .tab-close { display: none; }
 
 .tab-muted {
   flex: none;
@@ -184,23 +201,25 @@ body {
 }
 
 /* The group's header chip (tab_group_header.h): every group leads with
-   it, a collapsed group IS it. Quiet color fill, the group's own hue
-   for the label; click toggles collapse. */
+   it, a collapsed group IS it. Upstream it is a TAB-SHAPED element, not
+   a floating pill — the slot's overlap paints over the previous tab's
+   curve zone, and a translucent pill would bleed that tab through. So:
+   full tab height, tab radius, opaque tint over the strip's ground. */
 .group-chip {
   position: absolute;
-  bottom: 7px;
-  height: 20px;
-  display: grid;
-  place-items: center;
+  bottom: 0;
+  height: 35px;
+  display: flex;
+  align-items: center;
   border: none;
-  padding: 0 8px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 26%, transparent);
+  padding: 0 12px;
+  border-radius: 10px 10px 0 0; /* CORNER_TOP */
+  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 20%, var(--frame-bg));
   cursor: default;
   transition: background 120ms ease-out;
 }
 .group-chip:hover {
-  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 40%, transparent);
+  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 30%, var(--frame-bg));
 }
 .group-chip-label {
   max-width: 100%;
@@ -320,6 +339,7 @@ body {
   height: 100%;
   color: var(--frame-fg-dim);
 }
+.omnibox-wrap:focus-within .omnibox-icon { color: var(--frame-fg); }
 
 .omnibox {
   flex: 1;

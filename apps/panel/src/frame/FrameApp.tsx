@@ -38,11 +38,21 @@ import {
   IconStar,
   IconPlus,
   IconClose,
-  IconSearch,
   IconMuted,
   IconMinimize,
   IconMaximize,
   IconWindowClose,
+  IconZim,
+  IconServer,
+  IconTerminal,
+  IconGear,
+  IconClock,
+  IconShield,
+  IconInfo,
+  IconChat,
+  IconApps,
+  IconDownload,
+  IconGlobe,
 } from "./icons";
 import "./frame.css";
 
@@ -81,6 +91,35 @@ const GROUP_COLOR_VARS = [
   "var(--group-violet)",
   "var(--group-slate)",
 ];
+
+// The favicon lane: the frame knows each destination's kind from its
+// zim:// URL, so a glyph stands where the site's icon will ride later.
+// Pure view mapping — the model stays unaware of pictures.
+type IconComponent = (props: React.SVGProps<SVGSVGElement>) => React.JSX.Element;
+
+const DEST_GLYPHS: Record<string, IconComponent> = {
+  servers: IconServer,
+  server: IconServer,
+  console: IconTerminal,
+  settings: IconGear,
+  jobs: IconClock,
+  audit: IconShield,
+  about: IconInfo,
+  feedback: IconChat,
+  extensions: IconApps,
+  downloads: IconDownload,
+};
+
+function destinationGlyph(url: string): IconComponent {
+  if (url === "" || url === "zim://new") return IconZim;
+  const kind = /^zim:\/\/([^/?#]+)/.exec(url)?.[1];
+  return (kind && DEST_GLYPHS[kind]) || IconGlobe;
+}
+
+function Glyph({ url }: { url: string }) {
+  const Icon = destinationGlyph(url);
+  return <Icon />;
+}
 
 export function FrameApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -403,7 +442,7 @@ export function FrameApp() {
           }
         }}
       >
-        {snap.slots.map((slot) => {
+        {snap.slots.map((slot, idx) => {
           // A header slot is the group's chip — not a tab. Clicking it
           // toggles the group's collapse (the chip IS the collapsed
           // group, tab_group_views.cc).
@@ -434,6 +473,23 @@ export function FrameApp() {
           if (!tab) return null;
           const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
           const dragging = dragRef.current?.tab === tab.id && dragRef.current.moved;
+          // The active tab's melt corners only tell the truth over a
+          // transparent neighbor (bare strip or an inactive tab's ghost
+          // body) — over an opaque neighbor (a chip, the active tab) the
+          // flare would paint on top of it, so it stays off.
+          const seeThrough = (s: (typeof snap.slots)[number] | undefined): boolean => {
+            if (!s) return true;
+            if (s.header) return false;
+            const neighbor = snap.tabs.find((t) => t.id === s.id);
+            return !!neighbor && !neighbor.active;
+          };
+          const flareLeft = seeThrough(snap.slots[idx - 1]);
+          const flareRight = seeThrough(snap.slots[idx + 1]);
+          // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
+          // cannot fit beside a glyph — the slot shows its glyph alone,
+          // centered in the visible span, the way Chromium's minimum
+          // tabs render (min_inactive_width, interior 16).
+          const tight = slot.width < 64;
           return (
             <div
               key={tab.id}
@@ -442,8 +498,11 @@ export function FrameApp() {
                 "tab",
                 tab.active ? "tab-active" : "tab-inactive",
                 slot.pinned ? "tab-pinned" : "",
+                tight ? "tab-tight" : "",
                 dragging ? "tab-dragging" : "",
                 slot.closing ? "tab-closing" : "",
+                flareLeft ? "flare-left" : "",
+                flareRight ? "flare-right" : "",
               ].join(" ")}
               style={{
                 left: slot.x,
@@ -472,7 +531,10 @@ export function FrameApp() {
                 void shellDrag("start", { tab_id: tab.id, screen_x: e.screenX, screen_y: e.screenY });
               }}
             >
-              <span className="tab-title">{slot.pinned ? tab.title.slice(0, 1) : tab.title}</span>
+              <span className="tab-glyph" aria-hidden>
+                <Glyph url={tab.url} />
+              </span>
+              {!slot.pinned ? <span className="tab-title">{tab.title}</span> : null}
               {tab.muted ? (
                 <span className="tab-muted" aria-label="muted">
                   <IconMuted />
@@ -538,7 +600,7 @@ export function FrameApp() {
         </button>
         <div className="omnibox-wrap">
           <span className="omnibox-icon">
-            <IconSearch />
+            <Glyph url={snap.address} />
           </span>
           <input
             ref={omniboxRef}

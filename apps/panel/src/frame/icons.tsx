@@ -123,3 +123,115 @@ export function IconWindowClose(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+// -- Destination glyphs -------------------------------------------------------
+// The favicon lane (upstream: every tab leads with its site's icon until
+// favicons exist — the frame knows each destination's kind from its zim://
+// URL, so the glyph stands in). Same 16-box stroke voice as the tools.
+
+export function IconZim(props: SVGProps<SVGSVGElement>) {
+  // The house mark: the Z bolt, the new-tab page's own glyph.
+  return (
+    <svg {...base(props)}>
+      <path d="M4.2 3.5h7.6L4.2 12.5h7.6" />
+    </svg>
+  );
+}
+
+export function IconServer(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.5" y="2.8" width="11" height="4.4" rx="1.2" />
+      <rect x="2.5" y="8.8" width="11" height="4.4" rx="1.2" />
+      <path d="M5 5h.01M5 11h.01" />
+    </svg>
+  );
+}
+
+export function IconTerminal(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="m5 6.2 2.2 2.2L5 10.6M9.6 10.6h1.8" />
+    </svg>
+  );
+}
+
+export function IconGear(props: SVGProps<SVGSVGElement>) {
+  // Settings as sliders: a gear's teeth die at 16px (they read as an
+  // asterisk); three tracks with staggered knobs read as "adjust" at
+  // any size.
+  return (
+    <svg {...base(props)}>
+      <path d="M2.8 4.4h10.4M2.8 11.6h10.4" opacity={0.55} />
+      <circle cx="10.4" cy="4.4" r="1.7" />
+      <circle cx="5.6" cy="11.6" r="1.7" />
+      <path d="M8 8h5.2M2.8 8h1.4" opacity={0.55} />
+      <circle cx="6.9" cy="8" r="1.7" />
+    </svg>
+  );
+}
+
+export function IconClock(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.4" />
+      <path d="M8 5.2V8l2 1.4" />
+    </svg>
+  );
+}
+
+export function IconShield(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 2.4l4.6 1.8v3.3c0 2.9-1.9 4.9-4.6 6.1-2.7-1.2-4.6-3.2-4.6-6.1V4.2L8 2.4Z" />
+    </svg>
+  );
+}
+
+export function IconInfo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.4" />
+      <path d="M8 7.4v3.2M8 5.1v.01" />
+    </svg>
+  );
+}
+
+export function IconChat(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 3.2h9a1.1 1.1 0 0 1 1.1 1.1v5a1.1 1.1 0 0 1-1.1 1.1H8.3L5 13.2v-2.8H3.5a1.1 1.1 0 0 1-1.1-1.1v-5a1.1 1.1 0 0 1 1.1-1.1Z" />
+    </svg>
+  );
+}
+
+export function IconApps(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.8" y="2.8" width="4.6" height="4.6" rx="1" />
+      <rect x="8.6" y="2.8" width="4.6" height="4.6" rx="1" />
+      <rect x="2.8" y="8.6" width="4.6" height="4.6" rx="1" />
+      <rect x="8.6" y="8.6" width="4.6" height="4.6" rx="1" />
+    </svg>
+  );
+}
+
+export function IconDownload(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 2.6v6.6M5.2 6.4 8 9.2l2.8-2.8" />
+      <path d="M3 11.2v1.2a1.2 1.2 0 0 0 1.2 1.2h7.6a1.2 1.2 0 0 0 1.2-1.2v-1.2" />
+    </svg>
+  );
+}
+
+export function IconGlobe(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="8" cy="8" r="5.4" />
+      <path d="M2.6 8h10.8" />
+      <path d="M8 2.6c-1.9 1.6-1.9 9.2 0 10.8M8 2.6c1.9 1.6 1.9 9.2 0 10.8" />
+    </svg>
+  );
+}

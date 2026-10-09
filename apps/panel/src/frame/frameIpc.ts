@@ -186,10 +186,10 @@ const demo = {
   active: 2,
   bar_visible: false,
   tabs: [
-    { id: 1, title: "Set up the docs", address: "zaminpanel://settings/", pinned: true, muted: false, group: null, can_back: true, can_forward: false },
-    { id: 2, title: "New tab", address: "zaminpanel://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false },
-    { id: 3, title: "Server survival", address: "zaminpanel://server/survival", pinned: false, muted: false, group: 1, can_back: true, can_forward: false },
-    { id: 4, title: "Console hub", address: "zaminpanel://console/hub", pinned: false, muted: false, group: 1, can_back: false, can_forward: true },
+    { id: 1, title: "Set up the docs", address: "zim://settings/", pinned: true, muted: false, group: null, can_back: true, can_forward: false },
+    { id: 2, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false },
+    { id: 3, title: "Server survival", address: "zim://server/survival", pinned: false, muted: false, group: 1, can_back: true, can_forward: false },
+    { id: 4, title: "Console hub", address: "zim://console/hub", pinned: false, muted: false, group: 1, can_back: false, can_forward: true },
   ] as DemoTab[],
   groups: [{ id: 1, label: "survival", color: 1, collapsed: false }],
   bookmarks: [
@@ -216,7 +216,7 @@ function demoSnapshot(): Snapshot {
   const MIN_INACTIVE = 32; // min_inactive_width()
   const MIN_ACTIVE = 32; // min_active_width()
   const headerWidth = (label: string): number =>
-    Math.min(Math.max(14 + 7 * label.length, 28), 140);
+    Math.min(Math.max(22 + 7 * label.length, 28), 140);
 
   const ordered = [...demo.tabs].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   const collapsedOf = (gid: number | null): boolean =>
@@ -314,7 +314,7 @@ function demoSnapshot(): Snapshot {
     groups: demo.groups,
     active: demo.active,
     // The NTP law: a new tab carries no address at all.
-    address: active ? (active.address === "zaminpanel://new" ? "" : active.address) : "",
+    address: active ? (active.address === "zim://new" ? "" : active.address) : "",
     can_reopen_closed: demo.closed.length > 0,
     bookmarks: demo.bookmarks,
   };
@@ -338,7 +338,7 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
   const indexOfActive = () => demo.tabs.findIndex((t) => t.id === demo.active);
   switch (id) {
     case 34014: { // NEW_TAB
-      const tab: DemoTab = { id: demo.next_id++, title: "New tab", address: "zaminpanel://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false };
+      const tab: DemoTab = { id: demo.next_id++, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false };
       demo.tabs.splice(indexOfActive() + 1, 0, tab);
       demo.active = tab.id;
       break;

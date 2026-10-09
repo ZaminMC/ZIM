@@ -104,9 +104,10 @@ pub struct Slot {
 /// The group header chip's width. Upstream measures the label with the
 /// real font (tab_group_header.cc lays out its title); without text
 /// shaping here the width approximates at ~7 DIP per label character
-/// inside fixed padding — a documented divergence, porting-spec §1.
+/// inside fixed padding — a documented divergence, porting-spec §1. The
+/// padding covers the chip's 2 × 12 inset plus a breath.
 fn group_header_width(label: &str) -> f32 {
-    const PAD: f32 = 14.0;
+    const PAD: f32 = 22.0;
     const PER_CHAR: f32 = 7.0;
     const MIN: f32 = 28.0;
     const MAX: f32 = 140.0;
