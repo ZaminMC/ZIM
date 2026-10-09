@@ -18,6 +18,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::error::CoreError;
+use crate::http::idempotent_get;
 
 use super::USER_AGENT;
 
@@ -76,12 +77,14 @@ impl FillClient {
 
     fn get_json(&self, path: &str) -> Result<serde_json::Value, CoreError> {
         let url = format!("{}{path}", self.base);
-        let response = self
-            .agent
-            .get(&url)
-            .set("Accept", "application/json")
-            .call()
-            .map_err(|e| http_error(&url, e))?;
+        let response = idempotent_get(|| {
+            self.agent
+                .get(&url)
+                .set("Accept", "application/json")
+                .call()
+                .map_err(Box::new)
+        })
+        .map_err(|e| http_error(&url, *e))?;
         let body = response
             .into_string()
             .map_err(|e| CoreError::HttpTransport {
@@ -142,12 +145,14 @@ impl FillClient {
     /// a `server:default` download (the one this project knows how to run).
     pub fn builds(&self, project: &str, version: &str) -> Result<Vec<BuildInfo>, CoreError> {
         let url = format!("{}/projects/{project}/versions/{version}/builds", self.base);
-        let response = self
-            .agent
-            .get(&url)
-            .set("Accept", "application/json")
-            .call()
-            .map_err(|e| http_error(&url, e))?;
+        let response = idempotent_get(|| {
+            self.agent
+                .get(&url)
+                .set("Accept", "application/json")
+                .call()
+                .map_err(Box::new)
+        })
+        .map_err(|e| http_error(&url, *e))?;
         let body = response
             .into_string()
             .map_err(|e| CoreError::HttpTransport {

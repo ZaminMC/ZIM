@@ -25,6 +25,7 @@
 use serde::Deserialize;
 
 use crate::error::CoreError;
+use crate::http::idempotent_get;
 
 use super::fill::http_error;
 use super::USER_AGENT;
@@ -78,12 +79,14 @@ impl FabricMetaClient {
 
     fn get_json(&self, path: &str) -> Result<serde_json::Value, CoreError> {
         let url = format!("{}{path}", self.base);
-        let response = self
-            .agent
-            .get(&url)
-            .set("Accept", "application/json")
-            .call()
-            .map_err(|e| http_error(&url, e))?;
+        let response = idempotent_get(|| {
+            self.agent
+                .get(&url)
+                .set("Accept", "application/json")
+                .call()
+                .map_err(Box::new)
+        })
+        .map_err(|e| http_error(&url, *e))?;
         let body = response
             .into_string()
             .map_err(|e| CoreError::HttpTransport {

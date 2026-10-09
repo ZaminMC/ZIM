@@ -15,6 +15,7 @@ pub mod discovery;
 pub mod error;
 pub mod extensions;
 pub mod fsops;
+pub mod http;
 pub mod java;
 pub mod logparse;
 pub mod net;

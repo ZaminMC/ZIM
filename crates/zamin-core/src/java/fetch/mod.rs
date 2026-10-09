@@ -19,6 +19,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::error::CoreError;
+use crate::http::idempotent_get;
 use crate::software::USER_AGENT;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -66,17 +67,19 @@ impl AdoptiumClient {
             "{base}/assets/latest/{major}/hotspot?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse",
             base = self.base,
         );
-        let response = self.agent.get(&url).call().map_err(|e| match e {
-            ureq::Error::Status(status, resp) => CoreError::Http {
-                url: url.clone(),
-                status,
-                reason: resp.status_text().to_owned(),
+        let response = idempotent_get(|| self.agent.get(&url).call().map_err(Box::new)).map_err(
+            |e| match *e {
+                ureq::Error::Status(status, resp) => CoreError::Http {
+                    url: url.clone(),
+                    status,
+                    reason: resp.status_text().to_owned(),
+                },
+                ureq::Error::Transport(t) => CoreError::HttpTransport {
+                    url: url.clone(),
+                    message: t.to_string(),
+                },
             },
-            ureq::Error::Transport(t) => CoreError::HttpTransport {
-                url: url.clone(),
-                message: t.to_string(),
-            },
-        })?;
+        )?;
         let body = response
             .into_string()
             .map_err(|e| CoreError::HttpTransport {
@@ -106,17 +109,19 @@ impl AdoptiumClient {
     /// The checksum link answers `<sha256>  <filename>` (two spaces, like
     /// `sha256sum` output); anything else is refused.
     fn fetch_checksum(&self, link: &str) -> Result<String, CoreError> {
-        let response = self.agent.get(link).call().map_err(|e| match e {
-            ureq::Error::Status(status, resp) => CoreError::Http {
-                url: link.to_owned(),
-                status,
-                reason: resp.status_text().to_owned(),
+        let response = idempotent_get(|| self.agent.get(link).call().map_err(Box::new)).map_err(
+            |e| match *e {
+                ureq::Error::Status(status, resp) => CoreError::Http {
+                    url: link.to_owned(),
+                    status,
+                    reason: resp.status_text().to_owned(),
+                },
+                ureq::Error::Transport(t) => CoreError::HttpTransport {
+                    url: link.to_owned(),
+                    message: t.to_string(),
+                },
             },
-            ureq::Error::Transport(t) => CoreError::HttpTransport {
-                url: link.to_owned(),
-                message: t.to_string(),
-            },
-        })?;
+        )?;
         let body = response
             .into_string()
             .map_err(|e| CoreError::HttpTransport {

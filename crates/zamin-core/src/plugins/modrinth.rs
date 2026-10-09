@@ -21,6 +21,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::error::CoreError;
+use crate::http::idempotent_get;
 use crate::software::USER_AGENT;
 
 /// Metadata timeout for the JSON endpoints. Downloads own no overall
@@ -182,7 +183,7 @@ impl ModrinthClient {
             self.base,
             urlencode(sha512)
         );
-        match self.agent.get(&url).call() {
+        match idempotent_get(|| self.agent.get(&url).call().map_err(Box::new)) {
             Ok(response) => {
                 let body = response
                     .into_string()
@@ -199,20 +200,22 @@ impl ModrinthClient {
                     })?;
                 Ok(Some(raw_to_version(parsed)))
             }
-            Err(ureq::Error::Status(404, _)) => Ok(None),
-            Err(error) => Err(http_error(&url, error)),
+            Err(error) => match *error {
+                ureq::Error::Status(404, _) => Ok(None),
+                error => Err(http_error(&url, error)),
+            },
         }
     }
 
     fn get_json(&self, url: &str) -> Result<String, CoreError> {
-        match self.agent.get(url).call() {
+        match idempotent_get(|| self.agent.get(url).call().map_err(Box::new)) {
             Ok(response) => response
                 .into_string()
                 .map_err(|e| CoreError::HttpTransport {
                     url: url.to_owned(),
                     message: e.to_string(),
                 }),
-            Err(error) => Err(http_error(url, error)),
+            Err(error) => Err(http_error(url, *error)),
         }
     }
 }
