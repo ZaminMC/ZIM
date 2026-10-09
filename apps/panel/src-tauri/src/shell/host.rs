@@ -359,11 +359,7 @@ fn popup_rect(
     };
     let (win_w, win_h) = window_size;
     let px = x.max(8.0).min((win_w - w - 8.0).max(8.0));
-    let py = if y + h > win_h && y >= h {
-        y - h
-    } else {
-        y
-    };
+    let py = if y + h > win_h && y >= h { y - h } else { y };
     (
         LogicalPosition::new(px, py.max(0.0)),
         LogicalSize::new(w, h),
@@ -388,7 +384,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     let (snap, header, create_tab) = {
         let mut inner = state.lock();
-        inner.strip_widths.insert(window_label.to_owned(), size.width as f32);
+        inner
+            .strip_widths
+            .insert(window_label.to_owned(), size.width as f32);
         let header = layout::header_height(inner.bookmarks.bar_visible);
         let create_tab = {
             let strip = inner.strip(window_label);
@@ -1122,13 +1120,10 @@ pub async fn shell_popup(
         "shell://popup-boot",
         serde_json::json!({ "kind": kind, "tab_id": tab_id }),
     );
-    state.lock().popups.insert(
-        window_name,
-        PopupState {
-            kind,
-            tab: tab_id,
-        },
-    );
+    state
+        .lock()
+        .popups
+        .insert(window_name, PopupState { kind, tab: tab_id });
     // Focus follows the popup: Escape and the arrow keys work from the
     // first keystroke, exactly like a freshly opened OS menu.
     if let Some(popup) = app.get_webview(&label) {
@@ -1173,9 +1168,10 @@ pub fn shell_popup_boot(
         context["bar_visible"] = serde_json::json!(inner.bookmarks.bar_visible);
         // The app menu's zoom row reads the ACTIVE tab's factor.
         if let Some(strip) = inner.strips.get(&window_name) {
-            if let Some(active) = strip.active.and_then(|id| {
-                strip.tabs.iter().find(|t| t.id == id)
-            }) {
+            if let Some(active) = strip
+                .active
+                .and_then(|id| strip.tabs.iter().find(|t| t.id == id))
+            {
                 context["zoom"] = serde_json::json!(active.zoom);
             }
         }
@@ -1277,7 +1273,14 @@ pub async fn shell_drag(
                 // tears off into a new window at the pointer.
                 if let Some((target, local_x)) = window_strip_at(&app, state, &window_name, sx, sy)
                 {
-                    return move_tab_between_windows(&app, state, &window_name, &target, id, local_x);
+                    return move_tab_between_windows(
+                        &app,
+                        state,
+                        &window_name,
+                        &target,
+                        id,
+                        local_x,
+                    );
                 }
                 let tab = {
                     let mut inner = state.lock();
@@ -1290,7 +1293,11 @@ pub async fn shell_drag(
                     let mut inner = state.lock();
                     // The width reads before the strip's mutable borrow:
                     // the guard can't serve both at once (E0502's law).
-                    let strip_width = inner.strip_widths.get(&window_name).copied().unwrap_or(1024.0);
+                    let strip_width = inner
+                        .strip_widths
+                        .get(&window_name)
+                        .copied()
+                        .unwrap_or(1024.0);
                     let slots = {
                         let strip = inner.strip(&window_name);
                         let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
@@ -1391,7 +1398,10 @@ fn move_tab_between_windows(
 ) -> Result<(), String> {
     let tab = {
         let mut inner = state.lock();
-        let strip = inner.strips.get_mut(source).ok_or("source strip vanished")?;
+        let strip = inner
+            .strips
+            .get_mut(source)
+            .ok_or("source strip vanished")?;
         strip.detach(id).ok_or("tab vanished")?.0
     };
     {
@@ -1399,8 +1409,11 @@ fn move_tab_between_windows(
         let strip_width = inner.strip_widths.get(target).copied().unwrap_or(1024.0);
         let drop_index = {
             let strip = inner.strip(target);
-            let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> =
-                strip.tabs.iter().map(|t| (t.id, t.pinned, false, t.group)).collect();
+            let tab_tuples: Vec<(u32, bool, bool, Option<u32>)> = strip
+                .tabs
+                .iter()
+                .map(|t| (t.id, t.pinned, false, t.group))
+                .collect();
             let group_tuples: Vec<(u32, bool, &str)> = strip
                 .groups
                 .values()
@@ -1487,9 +1500,7 @@ pub async fn shell_window_resized(
     let label = window.label().to_owned();
     {
         let mut inner = state.lock();
-        inner
-            .strip_widths
-            .insert(label.clone(), width as f32);
+        inner.strip_widths.insert(label.clone(), width as f32);
         let _ = height;
     }
     sync(&app, &state, &label)

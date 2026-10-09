@@ -243,6 +243,7 @@ fn proc_start_marker(pid: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::SpawnLimits;
 
     #[test]
     fn identity_of_self_is_stable() {

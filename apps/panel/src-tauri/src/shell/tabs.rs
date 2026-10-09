@@ -37,13 +37,20 @@ pub enum Destination {
     New,
     DevTools,
     Servers,
-    Server { server_id: String },
-    Console { server_id: String },
+    Server {
+        server_id: String,
+    },
+    Console {
+        server_id: String,
+    },
     /// A join address the operator typed (§7): the shell lands it on its
     /// own destination and the Join page consults the daemon — the
     /// registry and a server-list ping — for the verdict. Never a raw
     /// webview navigation; this is a Minecraft server browser.
-    Join { host: Option<String>, port: u16 },
+    Join {
+        host: Option<String>,
+        port: u16,
+    },
     Settings,
     Jobs,
     Audit,
@@ -51,7 +58,9 @@ pub enum Destination {
     Feedback,
     Extensions,
     Downloads,
-    Missing { url: String },
+    Missing {
+        url: String,
+    },
 }
 
 impl Destination {
@@ -121,8 +130,12 @@ impl Destination {
                         },
                         port,
                     })
-                    .unwrap_or_else(|| Destination::Missing { url: text.to_owned() }),
-                None => Destination::Missing { url: text.to_owned() },
+                    .unwrap_or_else(|| Destination::Missing {
+                        url: text.to_owned(),
+                    }),
+                None => Destination::Missing {
+                    url: text.to_owned(),
+                },
             },
             _ => Destination::Missing {
                 url: text.to_owned(),
@@ -637,7 +650,12 @@ impl Strip {
         if self.index_of(id).is_none() {
             return false;
         }
-        let victims: Vec<TabId> = self.tabs.iter().map(|t| t.id).filter(|t| *t != id).collect();
+        let victims: Vec<TabId> = self
+            .tabs
+            .iter()
+            .map(|t| t.id)
+            .filter(|t| *t != id)
+            .collect();
         for victim in victims {
             self.close(victim);
         }

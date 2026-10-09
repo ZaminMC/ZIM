@@ -35,8 +35,11 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0200;
 const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
 const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
 const JOB_OBJECT_LIMIT_JOB_MEMORY: u32 = 0x0000_0200;
-/// CPU rate control flags (winbase.h / JOB_OBJECT_CPU_RATE_CONTROL_*).
+/// CPU rate control flags (winnt.h / JOB_OBJECT_CPU_RATE_CONTROL_*).
 const JOB_OBJECT_CPU_RATE_CONTROL_ENABLE: u32 = 0x0000_0001;
+/// windows-sys 0.59 exports no HARD_ENABLE bit (its HARD_CAP=4 is the
+/// weight-based flag's value in current winnt.h), so the hard-enable
+/// bit carries its winnt.h value with the citation here.
 const JOB_OBJECT_CPU_RATE_CONTROL_HARD_ENABLE: u32 = 0x0000_0002;
 
 /// The enforcement step: write the spec's limits into a FRESH job object
@@ -59,7 +62,7 @@ fn configure_job_limits(job: HANDLE, limits: &SpawnLimits) -> Result<(), Platfor
             PriorityClass: 0,
             SchedulingClass: 0,
         },
-        IoInfo: IoCounters {
+        IoInfo: IO_COUNTERS {
             ReadOperationCount: 0,
             WriteOperationCount: 0,
             OtherOperationCount: 0,
@@ -75,11 +78,14 @@ fn configure_job_limits(job: HANDLE, limits: &SpawnLimits) -> Result<(), Platfor
     if let Some(memory) = limits.memory_bytes {
         extended.BasicLimitInformation.LimitFlags |=
             JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY;
-        extended.ProcessMemoryLimit = memory;
+        // The limit fields are usize (pointer-width) in windows-sys; a
+        // byte budget fits both 64-bit and 32-bit windows targets
+        // scaled down, and this build targets 64-bit.
+        extended.ProcessMemoryLimit = memory as usize;
         // The job-wide cap matches the per-process cap: the tree's total
         // commit may not exceed what one process may, so N children
         // cannot multiply their way past the budget.
-        extended.JobMemoryLimit = memory;
+        extended.JobMemoryLimit = memory as usize;
     }
     if let Some(count) = limits.process_count {
         extended.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
