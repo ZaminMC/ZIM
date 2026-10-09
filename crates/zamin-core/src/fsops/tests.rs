@@ -61,6 +61,39 @@ fn traversal_is_rejected_textually() {
     }
 }
 
+/// The Windows-spelled escape vectors the first traversal law names only
+/// by implication. UNC paths would leave the machine; NTFS alternate data
+/// streams would hang hidden data off an in-jail file (`plugin.jar:hider`,
+/// read by naming the stream even when the daemon's read returned the
+/// base file); the drive-relative form (`C:file`) resolves against a
+/// per-drive CWD the jail never owns. Every one of them is refused by the
+/// same textual law — `:`, `\`, and a leading `/` never reach the
+/// resolver — and this test pins each spelling so trimming one check
+/// cannot come back quietly.
+#[test]
+fn unc_ads_and_drive_relative_spellings_are_rejected() {
+    let (fs, _guard) = fixture("spellings");
+    for rel in [
+        "//server/share/world",  // UNC, forward-spelled
+        r"\\server\share\world", // UNC, the spelling Windows itself prints
+        "world/../../..//?/device", // dot-dot riding toward a device namespace
+        "plugin.jar:stream",     // NTFS alternate data stream
+        "plugins/x:important",   // a colon anywhere, not just the tail
+        "C:escape",              // drive-relative (no slash) — CWD of that drive
+        "zamin-stats:$DATA",     // the stream attribute's own name
+    ] {
+        let err = fs.resolve(rel).unwrap_err();
+        assert!(
+            matches!(err, CoreError::PathEscapesRoot { .. }),
+            "{rel:?} must be rejected"
+        );
+        // The same spellings must fail on the mutating verbs too —
+        // resolve is the choke point, but the contract is per-verb.
+        assert!(fs.write(rel, b"x").is_err(), "write {rel:?} refused");
+        assert!(fs.read(rel, 16).is_err(), "read {rel:?} refused");
+    }
+}
+
 #[test]
 fn dot_segments_and_double_slashes_normalize() {
     let (fs, _guard) = fixture("dots");
