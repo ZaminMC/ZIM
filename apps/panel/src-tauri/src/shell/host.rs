@@ -1593,7 +1593,10 @@ fn window_strip_at(
         // spans the window's width for the header's height; the rail
         // spans the window's height for the rail's width.
         let over = if vertical {
-            screen_x >= x && screen_x <= x + layout::RAIL_WIDTH && screen_y >= y && screen_y <= y + h
+            screen_x >= x
+                && screen_x <= x + layout::RAIL_WIDTH
+                && screen_y >= y
+                && screen_y <= y + h
         } else {
             screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + band
         };

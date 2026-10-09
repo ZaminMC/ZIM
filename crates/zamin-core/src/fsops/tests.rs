@@ -74,13 +74,13 @@ fn traversal_is_rejected_textually() {
 fn unc_ads_and_drive_relative_spellings_are_rejected() {
     let (fs, _guard) = fixture("spellings");
     for rel in [
-        "//server/share/world",  // UNC, forward-spelled
-        r"\\server\share\world", // UNC, the spelling Windows itself prints
+        "//server/share/world",     // UNC, forward-spelled
+        r"\\server\share\world",    // UNC, the spelling Windows itself prints
         "world/../../..//?/device", // dot-dot riding toward a device namespace
-        "plugin.jar:stream",     // NTFS alternate data stream
-        "plugins/x:important",   // a colon anywhere, not just the tail
-        "C:escape",              // drive-relative (no slash) — CWD of that drive
-        "zamin-stats:$DATA",     // the stream attribute's own name
+        "plugin.jar:stream",        // NTFS alternate data stream
+        "plugins/x:important",      // a colon anywhere, not just the tail
+        "C:escape",                 // drive-relative (no slash) — CWD of that drive
+        "zamin-stats:$DATA",        // the stream attribute's own name
     ] {
         let err = fs.resolve(rel).unwrap_err();
         assert!(
