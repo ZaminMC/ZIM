@@ -8,7 +8,11 @@
   padding: var(--space-6) var(--space-5);
   overflow-y: auto;
   height: 100%;
-  max-width: 720px;
+  /* The shared shell's body: max-width alone left the column glued to
+     the window's left edge — centered like the rest of the family
+     (internalPage.module.css, 2026-10-09). */
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .head {

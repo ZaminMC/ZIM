@@ -200,13 +200,19 @@ const demo = {
   closed: [] as DemoTab[],
 };
 
-function demoSnapshot(): Snapshot {
-  // The layout law's demo echo — Chromium widths, the strip's leading
-  // inset (kTabStripPadding), the caption area reserved, the shrink law
-  // (inactive to minimum, then the active, then clamped), and the group
-  // law: every group leads with its header chip; a collapsed group is
-  // only the chip. A faithful mirror of shell/layout.rs at fixture
-  // scale.
+export interface DemoStrip {
+  strip_width: number;
+  tabs: { id: number; pinned: boolean; group: number | null }[];
+  groups: { id: number; label: string; collapsed: boolean }[];
+  active: number;
+}
+
+/** The layout law's demo echo — a faithful mirror of shell/layout.rs's
+ *  compute_layout at fixture scale (Chromium widths, the strip's leading
+ *  inset, the caption reserve, the shrink law, the group law). Pure so
+ *  the regression tests can hold it to the model: every slot must end
+ *  before the caption area, chips included. */
+export function demoLayoutStrip(strip: DemoStrip): Snapshot["slots"] {
   const overlap = 18;
   const LEADING = 6; // STRIP_PADDING
   const NEW_TAB_W = 36; // NEW_TAB_BUTTON_W
@@ -218,55 +224,56 @@ function demoSnapshot(): Snapshot {
   const headerWidth = (label: string): number =>
     Math.min(Math.max(22 + 7 * label.length, 28), 140);
 
-  const ordered = [...demo.tabs].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  const ordered = [...strip.tabs].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   const collapsedOf = (gid: number | null): boolean =>
-    gid == null ? false : (demo.groups.find((g) => g.id === gid)?.collapsed ?? false);
+    gid == null ? false : (strip.groups.find((g) => g.id === gid)?.collapsed ?? false);
   // The group walk: a header chip before each group's first tab; a
   // collapsed group's tabs disappear (the chip stands for the group).
   const seen: number[] = [];
-  const units: { header: { gid: number; w: number } | null; tab: DemoTab | null }[] = [];
+  const units: { header: { gid: number; w: number } | null; tab: DemoStrip["tabs"][number] | null }[] = [];
   for (const tab of ordered) {
     let header: { gid: number; w: number } | null = null;
     if (tab.group != null && !seen.includes(tab.group)) {
       seen.push(tab.group);
-      const label = demo.groups.find((g) => g.id === tab.group)?.label ?? "";
+      const label = strip.groups.find((g) => g.id === tab.group)?.label ?? "";
       header = { gid: tab.group, w: headerWidth(label) };
     }
     units.push({ header, tab: collapsedOf(tab.group) ? null : tab });
   }
 
   const laidOut = units.filter((u) => u.tab != null || u.header != null);
-  const budget = Math.max(demo.strip_width - LEADING - NEW_TAB_W - CONTROLS_W, 0);
-  const widthOf = (t: DemoTab): number => (t.pinned ? PINNED_W : STANDARD);
-  const preferred =
-    laidOut.reduce((a, u) => a + (u.header?.w ?? 0) + (u.tab ? widthOf(u.tab) : 0), 0) -
+  const budget = Math.max(strip.strip_width - LEADING - NEW_TAB_W - CONTROLS_W, 0);
+  const widthOf = (t: DemoStrip["tabs"][number]): number => (t.pinned ? PINNED_W : STANDARD);
+  const widths: number[] = laidOut.map((u) => (u.tab ? widthOf(u.tab) : 0));
+  const headerWs: (number | null)[] = laidOut.map((u) => u.header?.w ?? null);
+  // layout.rs's sum_units: chips count toward the strip's span — a law
+  // the mirror once dropped, sliding tabs under the + and the caption
+  // (2026-10-09 review).
+  const sumUnits = (): number =>
+    laidOut.reduce((a, _u, i) => a + (widths[i] ?? 0) + (headerWs[i] ?? 0), 0) -
     overlap * Math.max(laidOut.length - 1, 0);
 
-  const widths: number[] = laidOut.map((u) => (u.tab ? widthOf(u.tab) : 0));
+  const preferred = sumUnits();
+  const activeIndex = laidOut.findIndex((u) => u.tab?.id === strip.active);
+
   if (preferred > budget && laidOut.length > 0) {
-    const activeIndex = laidOut.findIndex((u) => u.tab?.id === demo.active);
-    const widthAt = (i: number): number => widths[i] ?? STANDARD;
     // Inactive tabs down to their minimum first…
     for (let i = 0; i < laidOut.length; i++) {
       const tab = laidOut[i]?.tab;
       if (tab && !tab.pinned && i !== activeIndex) widths[i] = MIN_INACTIVE;
     }
-    let total =
-      widths.reduce((a, b) => a + b, 0) - overlap * Math.max(laidOut.length - 1, 0);
     // …then the active tab, if even that is not enough.
-    if (total > budget && activeIndex >= 0) {
+    if (sumUnits() > budget && activeIndex >= 0 && !laidOut[activeIndex]?.tab?.pinned) {
       widths[activeIndex] = MIN_ACTIVE;
-      total =
-        widths.reduce((a, b) => a + b, 0) - overlap * Math.max(laidOut.length - 1, 0);
     }
     // Leftover: the active tab first, then evenly, up to standard width.
-    let free = budget - total;
+    let free = budget - sumUnits();
     for (let i = 0; i < laidOut.length && free > 0; i++) {
       const tab = laidOut[i]?.tab;
       if (!tab || tab.pinned) continue;
-      const room = STANDARD - widthAt(i);
+      const room = STANDARD - (widths[i] ?? 0);
       const give = i === activeIndex ? Math.min(room, free) : Math.min(room, free * 0.5);
-      widths[i] = widthAt(i) + give;
+      widths[i] = (widths[i] ?? 0) + give;
       free -= give;
     }
   }
@@ -293,7 +300,17 @@ function demoSnapshot(): Snapshot {
     }
     x = unitEnd - overlap;
   });
+  return slots;
+}
+
+function demoSnapshot(): Snapshot {
   const active = demo.tabs.find((t) => t.id === demo.active) ?? null;
+  const slots = demoLayoutStrip({
+    strip_width: demo.strip_width,
+    tabs: demo.tabs.map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
+    groups: demo.groups,
+    active: demo.active,
+  });
   return {
     window: "main",
     strip_width: demo.strip_width,

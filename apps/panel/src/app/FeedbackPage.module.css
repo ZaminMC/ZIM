@@ -9,7 +9,10 @@
   padding: var(--space-6) var(--space-5);
   overflow-y: auto;
   height: 100%;
-  max-width: 720px;
+  /* Same shell fix as the about page: the column centers with the
+     family, it does not hug the left edge (2026-10-09). */
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .head {

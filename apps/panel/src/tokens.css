@@ -59,6 +59,11 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
+  /* The ladder's top step. It went missing in the 2026-10 rename, and
+     every var(--space-8) became an invalid declaration whose whole
+     padding line silently dropped (the settings page hugged its top
+     edge). Defined here so the ladder is contiguous 4..64. */
+  --space-8: 64px;
 
   /* elevation */
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.4);
