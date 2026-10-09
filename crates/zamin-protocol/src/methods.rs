@@ -43,6 +43,9 @@ pub const BACKUPS_LIST: &str = "backups.list";
 
 // Specified in v0 as catalog.*; implemented with the software catalog
 // (protocol spec §7b).
+/// The join check (§7): classify a typed join address from the daemon
+/// (registry knowledge + the server-list ping), never a webview error.
+pub const JOIN_CHECK: &str = "join.check";
 pub const CATALOG_LIST: &str = "catalog.list";
 pub const CATALOG_VERSIONS: &str = "catalog.versions";
 pub const CATALOG_BUILDS: &str = "catalog.builds";

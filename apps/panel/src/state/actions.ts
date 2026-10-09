@@ -58,6 +58,8 @@ import type {
   ConfigSetResult,
   NetworkStatusResult,
   DiscoverResult,
+  JoinCheckParams,
+  JoinCheckResult,
   ExtensionsListResult,
   RootsGetResult,
   RootsSetParams,
@@ -74,6 +76,14 @@ export async function listServers(): Promise<ServerListResult> {
 
 export async function discoverServers(query?: string): Promise<DiscoverResult> {
   return client.request<DiscoverResult>("server.discover", query ? { query } : {});
+}
+
+/** The join check (§7): the daemon classifies the address (registry +
+ *  server-list ping). The Join page renders the verdict and its recovery
+ *  paths; the shell never navigates a webview at a raw address. */
+export async function checkJoin(host: string | undefined, port: number): Promise<JoinCheckResult> {
+  const params: JoinCheckParams = { port, ...(host === undefined ? {} : { host }) };
+  return client.request<JoinCheckResult>("join.check", params);
 }
 
 export async function discoveryRoots(): Promise<RootsGetResult> {

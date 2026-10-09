@@ -99,6 +99,25 @@ export interface DiscoverResult {
   truncated: boolean;
 }
 
+/** The join check (§7's completion): the daemon's classified verdict on a
+ *  typed join address. `alive` carries the server-list ping's facts; the
+ *  failure states name WHY the join could not land, each with its own
+ *  recovery path in the Join page. */
+export type JoinState = "alive" | "refused" | "timeout" | "unreachable" | "invalid";
+
+export interface JoinCheckParams {
+  host?: string;
+  port: number;
+}
+
+export interface JoinCheckResult {
+  state: JoinState;
+  motd?: string;
+  playersOnline?: number;
+  playersMax?: number;
+  version?: string;
+}
+
 export interface RootsGetResult {
   roots: string[];
 }

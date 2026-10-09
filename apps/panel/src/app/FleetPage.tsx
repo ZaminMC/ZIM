@@ -2,7 +2,13 @@
 // cards, honest counts, the daemon identity. The empty state keeps the
 // original nudge sentence (it is the documented §53 journey copy) and
 // gives it the space it deserves.
+//
+// Live: the cards' states ride the events stream (ADR-0006) — this page
+// renders the authoritative store, never a snapshot copy. The filter is
+// instant and matches both the Server ID and the display name (the
+// operator's alias).
 
+import { useMemo, useState } from "react";
 import { useConnection } from "../state/connection";
 import type { ServerEntry } from "../state/servers";
 import { Button } from "../ui/Button";
@@ -21,6 +27,19 @@ export function FleetPage({
 }) {
   const status = useConnection((s) => s.status);
   const daemon = useConnection((s) => s.daemon);
+  const [filter, setFilter] = useState("");
+  // Instant filtering by Server ID and alias: a lowercase substring over
+  // both fields, applied per keystroke — no daemon round-trip, the cards
+  // themselves are the live state.
+  const filtered = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    if (needle === "") return servers;
+    return servers.filter(
+      (server) =>
+        server.serverId.toLowerCase().includes(needle) ||
+        server.displayName.toLowerCase().includes(needle),
+    );
+  }, [servers, filter]);
   const running = servers.filter((s) => s.state === "running").length;
   const live = servers.filter((s) =>
     ["starting", "stopping", "adopting"].includes(s.state),
@@ -78,8 +97,37 @@ export function FleetPage({
           </div>
 
           <h2 className={styles.sectionTitle}>Fleet</h2>
-          <div className={styles.grid}>
-            {servers.map((server) => (
+          {servers.length > 3 ? (
+            <div className={styles.filterRow}>
+              <span className={styles.filterIcon}>
+                <IconSearch size={14} />
+              </span>
+              <input
+                className={styles.filterInput}
+                value={filter}
+                placeholder="Filter by server ID or name"
+                aria-label="Filter servers by ID or name"
+                spellCheck={false}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+              {filter !== "" ? (
+                <button
+                  className={styles.filterClear}
+                  aria-label="Clear filter"
+                  onClick={() => setFilter("")}
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {filtered.length === 0 && filter !== "" ? (
+            <p className={styles.filterEmpty} role="status">
+              No server matches “{filter}”. The filter matches the Server ID and the display name.
+            </p>
+          ) : (
+            <div className={styles.grid}>
+              {filtered.map((server) => (
               <div
                 key={server.serverId}
                 className={styles.card}
@@ -106,7 +154,8 @@ export function FleetPage({
                 </div>
               </div>
             ))}
-          </div>
+            </div>
+          )}
         </>
       ) : (
         <div className={styles.empty}>

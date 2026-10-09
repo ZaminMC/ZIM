@@ -37,6 +37,9 @@ const NewServerModal = lazy(() =>
 );
 const Palette = lazy(() => import("./Palette").then((m) => ({ default: m.Palette })));
 const JobsPage = lazy(() => import("./JobsPage").then((m) => ({ default: m.JobsPage })));
+const JoinPage = lazy(() =>
+  import("./browser/JoinPage").then((m) => ({ default: m.JoinPage })),
+);
 const AuditPage = lazy(() => import("./AuditPage").then((m) => ({ default: m.AuditPage })));
 const AboutPage = lazy(() => import("./AboutPage").then((m) => ({ default: m.AboutPage })));
 const FeedbackPage = lazy(() =>
@@ -73,6 +76,8 @@ function DestinationView({ destination, reloadToken }: { destination: Destinatio
       return <ServerView key={key} serverId={destination.serverId} />;
     case "console":
       return <ConsoleView key={key} serverId={destination.serverId} variant="dedicated" />;
+    case "join":
+      return <JoinPage key={key} host={destination.host} port={destination.port} />;
     case "jobs":
       return <JobsPage />;
     case "audit":
@@ -113,6 +118,15 @@ function destinationFromQuery(): Destination | null {
     case "console": {
       const serverId = url.split("/")[3] ?? url.split("/")[2];
       return serverId ? { kind: "console", serverId } : null;
+    }
+    case "join": {
+      // "host:port" — the host side may be empty (the port-only dialect).
+      const tail = url.split("/")[3] ?? url.split("/")[2] ?? "";
+      const sep = tail.lastIndexOf(":");
+      const port = Number(tail.slice(sep + 1));
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) return { kind: "missing", url };
+      const host = tail.slice(0, sep);
+      return { kind: "join", ...(host === "" ? {} : { host }), port };
     }
     default: return { kind: "missing", url };
   }

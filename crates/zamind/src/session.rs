@@ -212,6 +212,7 @@ async fn session_loop(
             continue;
         }
 
+
         let engine = engine.clone();
         let audit = audit.clone();
         let outbound_task = outbound.clone();
@@ -398,6 +399,13 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
     let id = request.id.clone();
     match request.method.as_str() {
         methods::DAEMON_STATUS => Response::ok(id, engine.daemon_status().await),
+        methods::JOIN_CHECK => {
+            let params: zamin_protocol::join::JoinCheckParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            json_ok(id, engine.join_check(params.host, params.port).await)
+        }
         methods::SERVER_LIST => {
             let servers = engine.list_servers().await;
             json_ok(id, ListServersResult { servers })

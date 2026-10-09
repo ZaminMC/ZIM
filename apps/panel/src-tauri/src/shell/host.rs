@@ -632,6 +632,9 @@ fn destination_identity(d: &Destination) -> String {
         Destination::Servers => "servers".into(),
         Destination::Server { server_id } => format!("server:{server_id}"),
         Destination::Console { server_id } => format!("console:{server_id}"),
+        Destination::Join { host, port } => {
+            format!("join:{}:{port}", host.clone().unwrap_or_default())
+        }
         Destination::Settings => "settings".into(),
         Destination::Jobs => "jobs".into(),
         Destination::Audit => "audit".into(),
@@ -1016,9 +1019,24 @@ pub async fn shell_omnibox_commit(
                 serde_json::json!({ "kind": "navigated" })
             }
             AddressRequest::Join { host, port } => {
-                // The join miss is honest (§7): the shell reports what it
-                // heard; resolution rides the daemon through the panel.
-                serde_json::json!({ "kind": "join", "host": host, "port": port })
+                // §7's honest join, completed: the address lands on its
+                // own destination (singleton identity — the same address
+                // refocuses its resting tab), and the Join page consults
+                // the daemon (registry, server-list ping) for the
+                // verdict. No webview navigates to a raw address.
+                let destination = Destination::Join { host, port };
+                let identity = destination_identity(&destination);
+                if let Some(existing) = strip
+                    .tabs
+                    .iter()
+                    .find(|t| destination_identity(t.destination()) == identity)
+                    .map(|t| t.id)
+                {
+                    strip.select(existing);
+                } else {
+                    strip.navigate(active, destination);
+                }
+                serde_json::json!({ "kind": "navigated" })
             }
             AddressRequest::Query(text) => {
                 // A discovery query lands on the new tab (§22): focused

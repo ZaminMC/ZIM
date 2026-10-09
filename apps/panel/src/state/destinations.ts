@@ -66,6 +66,15 @@ export interface ExtensionsDestination {
 export interface DownloadsDestination {
   kind: "downloads";
 }
+/** §7's join destination: a typed address the operator asked the shell
+ *  to reach. The Join page (not a webview navigation) consults the
+ *  daemon and speaks the verdict with its recovery paths. */
+export interface JoinDestination {
+  kind: "join";
+  /** `undefined` is the port-only dialect — the local loopback. */
+  host?: string;
+  port: number;
+}
 /** A typed request for an internal page that does not exist. The shell
  *  answers it honestly (§58: an unknown internal page is a real
  *  destination request, never silently a web search) — an error page,
@@ -81,6 +90,7 @@ export type Destination =
   | NewTabDestination
   | ServerDestination
   | ConsoleDestination
+  | JoinDestination
   | SettingsDestination
   | JobsDestination
   | AuditDestination
@@ -118,6 +128,8 @@ export function tabKey(destination: Destination): TabKey {
       return serverTab(destination.serverId);
     case "console":
       return consoleTab(destination.serverId);
+    case "join":
+      return `join:${destination.host ?? ""}:${destination.port}`;
     case "jobs":
       return JOBS_TAB;
     case "audit":
@@ -160,6 +172,8 @@ export function destinationUrl(destination: Destination): string {
       return `zim://server/${destination.serverId}`;
     case "console":
       return `zim://console/${destination.serverId}`;
+    case "join":
+      return `zim://join/${destination.host ?? ""}:${destination.port}`;
     case "missing":
       return destination.url;
   }
@@ -194,6 +208,10 @@ export function restingAddress(
   if (destination.kind === "console") {
     // The console tab rests at its internal URL: it is a ZIM page,
     // not the server's join address (that stays the server tab's rest).
+    return destinationUrl(destination);
+  }
+  if (destination.kind === "join") {
+    // The join tab rests at the address the operator typed (§7).
     return destinationUrl(destination);
   }
   const entry = entries.find((e) => e.serverId === destination.serverId);
@@ -352,6 +370,8 @@ export function destinationLabel(destination: Destination, entries: ServerEntry[
       return name(destination.serverId);
     case "console":
       return `${name(destination.serverId)} console`;
+    case "join":
+      return `${destination.host ?? "port"}:${destination.port}`;
     case "servers":
       return "Servers";
     case "settings":

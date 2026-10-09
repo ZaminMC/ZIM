@@ -78,7 +78,18 @@ export function NewServerModal() {
   const [loaders, setLoaders] = useState<string[] | null>(null);
   const [loaderId, setLoaderId] = useState<string>("");
   const [javaMajor, setJavaMajor] = useState<number | null>(null);
-  const [portText, setPortText] = useState("");
+  // The Join page's "create server on this port" prefill rides the ui
+  // store: consumed once on open, then cleared (a later open starts
+  // clean).
+  const prefillPort = useUi((s) => s.newServerPort);
+  const setNewServerPortPrefill = useUi((s) => s.setNewServerPort);
+  const [portText, setPortText] = useState(prefillPort ?? "");
+  useEffect(() => {
+    if (prefillPort != null) {
+      setPortText(prefillPort);
+      setNewServerPortPrefill(null);
+    }
+  }, [prefillPort, setNewServerPortPrefill]);
 
   // Download mode: java runtimes.
   const [runtimes, setRuntimes] = useState<JavaRuntime[] | null>(null);

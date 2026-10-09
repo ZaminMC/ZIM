@@ -38,6 +38,11 @@ pub enum Destination {
     Servers,
     Server { server_id: String },
     Console { server_id: String },
+    /// A join address the operator typed (§7): the shell lands it on its
+    /// own destination and the Join page consults the daemon — the
+    /// registry and a server-list ping — for the verdict. Never a raw
+    /// webview navigation; this is a Minecraft server browser.
+    Join { host: Option<String>, port: u16 },
     Settings,
     Jobs,
     Audit,
@@ -63,6 +68,9 @@ impl Destination {
             Destination::Downloads => "zim://downloads/".into(),
             Destination::Server { server_id } => format!("zim://server/{server_id}"),
             Destination::Console { server_id } => format!("zim://console/{server_id}"),
+            Destination::Join { host, port } => {
+                format!("zim://join/{}:{port}", host.clone().unwrap_or_default())
+            }
             Destination::Missing { url } => url.clone(),
         }
     }
@@ -96,6 +104,23 @@ impl Destination {
             "console" if !arg.is_empty() => Destination::Console {
                 server_id: arg.into(),
             },
+            // "host:port" — the host side may be empty (a port-only join).
+            // Anything unparseable stays an honest Missing.
+            "join" if !arg.is_empty() => match arg.rsplit_once(':') {
+                Some((host, port)) => port
+                    .parse::<u16>()
+                    .ok()
+                    .map(|port| Destination::Join {
+                        host: if host.is_empty() {
+                            None
+                        } else {
+                            Some(host.to_owned())
+                        },
+                        port,
+                    })
+                    .unwrap_or_else(|| Destination::Missing { url: text.to_owned() }),
+                None => Destination::Missing { url: text.to_owned() },
+            },
             _ => Destination::Missing {
                 url: text.to_owned(),
             },
@@ -109,6 +134,10 @@ impl Destination {
             Destination::Servers => "Fleet".into(),
             Destination::Server { server_id } => format!("Server {server_id}"),
             Destination::Console { server_id } => format!("Console {server_id}"),
+            Destination::Join { host, port } => match host {
+                Some(host) => format!("Join {host}:{port}"),
+                None => format!("Join port {port}"),
+            },
             Destination::Settings => "Settings".into(),
             Destination::Jobs => "Jobs".into(),
             Destination::Audit => "Audit".into(),
@@ -882,11 +911,23 @@ mod tests {
         };
         assert_eq!(Destination::parse(&d.url()), d);
         assert_eq!(
-            Destination::parse("zim://nonsense/x"),
-            Destination::Missing {
-                url: "zim://nonsense/x".into()
+            Destination::parse("zim://join/box.local:25565"),
+            Destination::Join {
+                host: Some("box.local".into()),
+                port: 25565
             }
         );
+        assert_eq!(
+            Destination::parse("zim://join/:25565"),
+            Destination::Join {
+                host: None,
+                port: 25565
+            }
+        );
+        assert!(matches!(
+            Destination::parse("zim://join/nonsense"),
+            Destination::Missing { .. }
+        ));
         assert_eq!(
             Destination::parse("zim://console/s1"),
             Destination::Console {

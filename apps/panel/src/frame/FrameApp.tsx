@@ -520,15 +520,10 @@ export function FrameApp() {
 
   const commitOmnibox = async () => {
     if (omniboxText == null) return;
-    const outcome = await omniboxCommit(omniboxText);
+    // A join commit lands the address on its own Join destination (§7) —
+    // the page speaks the verdict; the frame only clears itself.
+    await omniboxCommit(omniboxText);
     setOmniboxText(null);
-    if (outcome.kind === "join") {
-      setJoinNote(
-        outcome.host
-          ? `No local server is known at ${outcome.host}:${outcome.port} — the fleet page lists what the daemon sees.`
-          : `Nothing local listens on port ${outcome.port} — the fleet page lists what the daemon sees.`,
-      );
-    }
   };
 
   const classifyNow = async () => {

@@ -1623,6 +1623,44 @@ impl Engine {
         zamin_core::software::FabricMetaClient::new(&self.inner.fabric_url)
     }
 
+    /// The join check (§7): the server-list ping speaks for the daemon.
+    /// The io error's kind IS the classification — refused, timed out,
+    /// unroutable, or "answered but not the Minecraft protocol".
+    pub async fn join_check(
+        &self,
+        host: Option<String>,
+        port: u16,
+    ) -> zamin_protocol::join::JoinCheckResult {
+        use zamin_core::ping::server_list_ping;
+        use zamin_protocol::join::{JoinCheckResult, JoinState};
+        use std::io::ErrorKind;
+        let hostname = host.clone().unwrap_or_else(|| "127.0.0.1".into());
+        let addr = format!("{hostname}:{port}");
+        let result = server_list_ping(&addr, &hostname, port).await;
+        let _ = &self; // the check is stateless; the engine hosts the seam
+        match result {
+            Ok(status) => JoinCheckResult {
+                state: JoinState::Alive,
+                motd: status.motd(),
+                players_online: status.players.online,
+                players_max: status.players.max,
+                version: status.version.and_then(|v| v.name),
+            },
+            Err(error) => JoinCheckResult {
+                state: match error.kind() {
+                    ErrorKind::ConnectionRefused => JoinState::Refused,
+                    ErrorKind::TimedOut => JoinState::Timeout,
+                    ErrorKind::InvalidData => JoinState::Invalid,
+                    _ => JoinState::Unreachable,
+                },
+                motd: None,
+                players_online: None,
+                players_max: None,
+                version: None,
+            },
+        }
+    }
+
     pub async fn catalog_list(&self) -> zamin_protocol::software::CatalogListResult {
         use zamin_protocol::software::{CatalogEntry, CatalogListResult};
         CatalogListResult {

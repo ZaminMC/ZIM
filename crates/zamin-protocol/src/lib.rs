@@ -23,6 +23,7 @@ pub mod framing;
 pub mod handshake;
 pub mod java;
 pub mod jobs;
+pub mod join;
 pub mod logs;
 pub mod methods;
 pub mod metrics;

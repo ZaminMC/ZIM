@@ -218,3 +218,62 @@
   max-width: 44ch;
   line-height: 1.6;
 }
+
+/* The fleet filter: an instant, quiet row between the section title and
+   the grid — a field, not a control panel. */
+.filterRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 0 var(--space-4);
+}
+
+.filterIcon {
+  position: absolute;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.filterInput {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 32px 0 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-s);
+  outline: none;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.filterInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.filterInput::placeholder { color: var(--text-faint); }
+
+.filterClear {
+  position: absolute;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+}
+.filterClear:hover { background: var(--surface-hover, rgba(233, 238, 246, 0.07)); color: var(--text); }
+
+.filterEmpty {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-s);
+  color: var(--text-faint);
+}

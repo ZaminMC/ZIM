@@ -15,6 +15,9 @@ export interface ActionError {
 
 interface UiState {
   newServerOpen: boolean;
+  /** The Join page's "create server on this port" prefill: consumed by
+   *  the modal on open, then cleared. */
+  newServerPort: string | null;
   paletteOpen: boolean;
   connectionsOpen: boolean;
   /** Verb currently in flight per server ("start" | "stop" | …). */
@@ -22,6 +25,7 @@ interface UiState {
   /** Last failed dispatch per server. */
   actionErrors: Record<string, ActionError>;
   setNewServerOpen: (open: boolean) => void;
+  setNewServerPort: (port: string | null) => void;
   setPaletteOpen: (open: boolean) => void;
   setConnectionsOpen: (open: boolean) => void;
   setPending: (serverId: string, verb: string | null) => void;
@@ -30,12 +34,14 @@ interface UiState {
 
 export const useUi = create<UiState>()((set) => ({
   newServerOpen: false,
+  newServerPort: null,
   paletteOpen: false,
   connectionsOpen: false,
   pending: {},
   actionErrors: {},
 
   setNewServerOpen: (open) => set({ newServerOpen: open }),
+  setNewServerPort: (port) => set({ newServerPort: port }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setConnectionsOpen: (open) => set({ connectionsOpen: open }),
   setPending: (serverId, verb) =>

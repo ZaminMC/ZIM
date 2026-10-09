@@ -1,0 +1,80 @@
+/* The Join page — the verdict on a typed join address, in the shell's
+   own voice: one card, the facts, the recovery paths. The tone variants
+   carry the state without shouting (a left rule and a tinted glyph, not
+   a glowing dashboard). */
+
+.page {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.card {
+  max-width: 560px;
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+/* Tone: the verdict family, read from the left rule. */
+.down { border-left-color: var(--danger); }
+.unreachable { border-left-color: var(--warning); }
+.invalid { border-left-color: var(--warning); }
+.alive { border-left-color: var(--success); }
+
+.title {
+  margin: 0 0 var(--space-3);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.body {
+  margin: 0 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--text-m);
+  line-height: 1.5;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--bg);
+}
+
+.facts dt {
+  font-size: var(--text-s);
+  color: var(--text-faint);
+}
+
+.facts dd {
+  margin: 0;
+  font-size: var(--text-s);
+  color: var(--text);
+}
+
+.stopped {
+  margin-top: var(--space-4);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.url {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
+  color: var(--text);
+  word-break: break-all;
+}
