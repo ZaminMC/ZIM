@@ -78,16 +78,49 @@ impl MockServer {
                         let mut buf = [0u8; 4096];
                         // Read until end of headers (bodies are never sent to us).
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        // A just-accepted stream can surface a transient
+                        // zero-byte or error read on Windows before the
+                        // request bytes land — answering that phantom
+                        // empty request with the fallback 404 fails the
+                        // suite flakily (the same windows mock class as
+                        // the accept-error fix below). An empty buffer
+                        // gets a short bounded wait for the real bytes
+                        // instead; a genuine dead connection falls
+                        // through to the fallback as before.
+                        let mut empty_waits = 0u32;
                         loop {
                             match stream.read(&mut buf) {
-                                Ok(0) => break,
+                                Ok(0) => {
+                                    if request.is_empty() && empty_waits < 50 {
+                                        empty_waits += 1;
+                                        std::thread::sleep(Duration::from_millis(10));
+                                        continue;
+                                    }
+                                    break;
+                                }
                                 Ok(n) => {
+                                    empty_waits = 0;
                                     request.extend_from_slice(&buf[..n]);
                                     if request.windows(4).any(|w| w == b"\r\n\r\n") {
                                         break;
                                     }
                                 }
-                                Err(_) => break,
+                                Err(e)
+                                    if e.kind() == std::io::ErrorKind::WouldBlock
+                                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                                {
+                                    // The 5s read timeout is the honest
+                                    // deadline: no request ever came.
+                                    break;
+                                }
+                                Err(_) => {
+                                    if request.is_empty() && empty_waits < 50 {
+                                        empty_waits += 1;
+                                        std::thread::sleep(Duration::from_millis(10));
+                                        continue;
+                                    }
+                                    break;
+                                }
                             }
                         }
                         let text = String::from_utf8_lossy(&request);
