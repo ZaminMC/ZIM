@@ -133,7 +133,7 @@ export function JoinPage({ host, port }: { host?: string; port: number }) {
         <div className={styles.card}>
           <h1 className={styles.title}>Checking {address}…</h1>
           <p className={styles.body}>
-            ZIM is asking the daemon what lives at this address — the registry first, then the
+            ZIM is checking what lives at this address — the registry first, then the
             Minecraft server-list ping.
           </p>
         </div>

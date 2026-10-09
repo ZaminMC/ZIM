@@ -39,7 +39,7 @@ function TabCrashed({
       <h2 className={styles.title}>This tab crashed</h2>
       <p className={styles.copy}>
         The page hit an error and could not keep going. Other tabs are unaffected. Reloading
-        rebuilds this view from the daemon — the server process itself is never touched.
+        rebuilds this view from ZIM's service — the server process itself is never touched.
       </p>
       <p className={styles.errorSentence}>
         <code>{message}</code>

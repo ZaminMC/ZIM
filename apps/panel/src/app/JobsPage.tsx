@@ -161,7 +161,7 @@ export function JobsPage() {
         <div>
           <h1 className={styles.title}>Jobs</h1>
           <p className={styles.subtitle}>
-            Long-running daemon operations — the daemon keeps the record; this page reads it.
+            Long-running operations — ZIM's service keeps the record; this page reads it.
           </p>
         </div>
       </header>
@@ -189,7 +189,7 @@ export function JobsPage() {
       )}
 
       <p className={styles.note}>
-        Finished jobs are kept by the daemon (the newest 50); the list re-reads when this page
+        Finished jobs are kept by ZIM's service (the newest 50); the list re-reads when this page
         opens and stays live through job events while it is mounted.
       </p>
     </div>

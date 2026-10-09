@@ -179,7 +179,7 @@ function DiscoveryRootsSection() {
             </Button>
           </div>
           <p className={styles.rowDetail}>
-            Empty by default — the daemon always scans its own instances folder. Extra roots
+            Empty by default — ZIM always scans its own instances folder. Extra roots
             are folders of servers kept elsewhere; the scan never follows symlinks and skips
             hidden and staging folders.
           </p>

@@ -297,7 +297,7 @@ export function SchedulesView({ serverId }: { serverId: string }) {
 
       {schedules && schedules.length === 0 ? (
         <p className={styles.empty}>
-          No schedules yet. A nightly restart or an hourly backup takes one row — the daemon does
+          No schedules yet. A nightly restart or an hourly backup takes one row — ZIM does
           the remembering.
         </p>
       ) : null}

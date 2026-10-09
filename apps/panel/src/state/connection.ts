@@ -1,8 +1,13 @@
 // Connection store: mirrors the protocol client's status for the UI.
 // The client is the single source of truth; this is a projection.
+// The stored failure is the TRANSLATED title — the raw classes say
+// "the daemon did not answer catalog.list within 10000 ms", which is
+// diagnostics language, never settings-row language (state/errors.ts
+// owns the sentence). The technical detail stays in the client.
 
 import { create } from "zustand";
 import type { ProtocolClient } from "../protocol/client";
+import { describeError } from "./errors";
 
 export type ConnectionStatus = "offline" | "connecting" | "ready";
 
@@ -38,7 +43,8 @@ export const useConnection = create<ConnectionState>((set) => ({
         const failure = client.lastError;
         set({
           status,
-          lastError: failure instanceof Error ? failure.message : null,
+          lastError:
+            failure instanceof Error ? describeError(failure).title : null,
         });
       }
     });
