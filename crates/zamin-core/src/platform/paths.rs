@@ -111,10 +111,7 @@ mod tests {
         assert_eq!(config, PathBuf::from("/xdg/conf/zim"));
 
         let data_default = data_dir_unix(None, Some("/home/u".into()));
-        assert_eq!(
-            data_default,
-            PathBuf::from("/home/u/.local/share/zim")
-        );
+        assert_eq!(data_default, PathBuf::from("/home/u/.local/share/zim"));
 
         let config_default = config_dir_unix(None, None);
         assert_eq!(config_default, PathBuf::from(".config/zim"));
