@@ -63,6 +63,14 @@
   flex-wrap: wrap;
 }
 
+/* Every row's action (toggle, chip, field stack) hugs the row's right
+   edge — and when a long detail wraps it to its own line, it stays at
+   THAT line's right edge. One law for every row shape; a text-only row
+   (no sibling action) keeps its content at the left. */
+.row > .rowMain ~ :last-child {
+  margin-left: auto;
+}
+
 .rowMain {
   display: flex;
   flex-direction: column;
@@ -152,9 +160,6 @@
   display: flex;
   gap: 6px;
   flex: none;
-  /* When a long detail wraps the actions to their own line, they stay
-     at the row's right edge — the same place they sit on one line. */
-  margin-left: auto;
 }
 
 .channelLink {
