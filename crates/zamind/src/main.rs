@@ -3,6 +3,10 @@
 //! transport. Clients spawn it transparently; it never stops servers as a
 //! side effect of exiting.
 
+// The unit tests assert on Results directly — the same allowance every
+// workspace crate's test build carries.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 mod actor;
 mod audit;
 mod engine;
