@@ -32,17 +32,6 @@ impl Bookmarks {
             .unwrap_or_default()
     }
 
-    /// BookmarkStorage: save the codec file (best-effort — a read-only
-    /// home must not kill the browser; the next successful edit retries).
-    pub fn save(&self, path: &std::path::Path) {
-        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(path, bytes);
-        }
-    }
-
     /// A fresh id-keyed node (BookmarkModel's UUID index; this build
     /// derives ids from time+counter without an external dependency —
     /// documented in the porting spec §6).
@@ -112,7 +101,7 @@ mod tests {
         };
         marks.toggle(Destination::Jobs, "Jobs".into());
         let path = std::env::temp_dir().join(format!("zamin-bm-{}.json", std::process::id()));
-        marks.save(&path);
+        std::fs::write(&path, serde_json::to_vec_pretty(&marks).unwrap()).unwrap();
         let loaded = Bookmarks::load(&path);
         assert!(loaded.bar_visible);
         assert_eq!(loaded.items.len(), 1);

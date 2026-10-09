@@ -25,7 +25,9 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{
+    mpsc, Arc, Mutex, MutexGuard, PoisonError,
+};
 
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,
@@ -103,8 +105,41 @@ struct Session {
     bar_visible: bool,
 }
 
+/// The persistence snapshot: the exact bytes the pump writes, built
+/// under a SHORT lock (serialization only — the disk never sees the
+/// mutex).
+struct Persist {
+    session: Option<Vec<u8>>,
+    bookmarks: Option<Vec<u8>>,
+    session_path: Option<PathBuf>,
+    bookmarks_path: Option<PathBuf>,
+}
+
+/// The session's persistence pump.
+///
+/// `save` used to run two synchronous `fs::write`s (session + bookmarks)
+/// inside the state mutex on EVERY mutation — every click, every
+/// reorder, every drag move — and on Windows (Defender scans each new
+/// file) that read as a dead UI: every command queues behind one slow
+/// disk while the write holds the lock the whole shell needs. Now
+/// `ShellInner::save` only marks dirty and pokes a channel; ONE
+/// background thread owns the disk, coalescing the pokes into at most
+/// one write per tick. Writes are atomic (temp file + rename) so a hard
+/// kill can never leave a half-written session.
+const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(400);
+
+fn write_atomic(path: &std::path::Path, bytes: &[u8]) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
 pub struct ShellState {
-    inner: Mutex<ShellInner>,
+    inner: Arc<Mutex<ShellInner>>,
 }
 
 impl ShellState {
@@ -120,6 +155,53 @@ impl ShellState {
         inner.strip_widths.remove(window_label);
         inner.save();
     }
+
+    fn lock(&self) -> MutexGuard<'_, ShellInner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Take the persistence snapshot now (the exit path's synchronous
+    /// flush; the pump owns the interactive path).
+    pub fn flush(&self) {
+        let persist = {
+            let mut inner = self.lock();
+            let persist = inner.persist();
+            inner.dirty = false;
+            persist
+        };
+        Self::write(persist);
+    }
+
+    fn write(persist: Persist) {
+        if let (Some(path), Some(bytes)) = (persist.session_path, persist.session) {
+            write_atomic(&path, &bytes);
+        }
+        if let (Some(path), Some(bytes)) = (persist.bookmarks_path, persist.bookmarks) {
+            write_atomic(&path, &bytes);
+        }
+    }
+
+    fn spawn_pump(inner: Arc<Mutex<ShellInner>>, rx: mpsc::Receiver<()>) {
+        let _ = std::thread::Builder::new()
+            .name("shell-save".into())
+            .spawn(move || {
+                // Each poke opens a debounce window; the pokes that land
+                // inside it collapse into one write when it closes.
+                while rx.recv().is_ok() {
+                    std::thread::sleep(SAVE_DEBOUNCE);
+                    while rx.try_recv().is_ok() {}
+                    let persist = {
+                        let mut guard = inner.lock().unwrap_or_else(PoisonError::into_inner);
+                        if !guard.dirty {
+                            continue;
+                        }
+                        guard.dirty = false;
+                        guard.persist()
+                    };
+                    Self::write(persist);
+                }
+            });
+    }
 }
 struct ShellInner {
     /// One strip per window; the primary window's strip is the one the
@@ -130,6 +212,12 @@ struct ShellInner {
     bookmarks_path: Option<PathBuf>,
     drag: DragSession,
     next_window: u32,
+    /// Set by every mutation (save()); the pump thread clears it when
+    /// the coalesced write lands.
+    dirty: bool,
+    /// The pump's poke channel — save() sends, never blocks (the
+    /// channel is unbounded; a mutation only asks for a flush).
+    save_tx: mpsc::Sender<()>,
     /// The frame's viewport width per window (reported on boot/resize;
     /// each window's layout law runs on its own width — a single scalar
     /// went stale the moment a second window synced).
@@ -140,22 +228,21 @@ struct ShellInner {
 
 impl ShellState {
     pub fn new() -> Self {
-        ShellState {
-            inner: Mutex::new(ShellInner {
-                strips: HashMap::new(),
-                bookmarks: Bookmarks::default(),
-                session_path: None,
-                bookmarks_path: None,
-                drag: DragSession::default(),
-                next_window: 1,
-                strip_widths: HashMap::new(),
-                popups: HashMap::new(),
-            }),
-        }
-    }
-
-    fn lock(&self) -> MutexGuard<'_, ShellInner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        let (save_tx, save_rx) = mpsc::channel::<()>();
+        let inner = Arc::new(Mutex::new(ShellInner {
+            strips: HashMap::new(),
+            bookmarks: Bookmarks::default(),
+            session_path: None,
+            bookmarks_path: None,
+            drag: DragSession::default(),
+            next_window: 1,
+            dirty: false,
+            save_tx,
+            strip_widths: HashMap::new(),
+            popups: HashMap::new(),
+        }));
+        Self::spawn_pump(Arc::clone(&inner), save_rx);
+        ShellState { inner }
     }
 
     /// Load the session (if any) and seed the bookmarks + the primary
@@ -183,21 +270,28 @@ impl ShellState {
 }
 
 impl ShellInner {
-    fn save(&self) {
-        let session = Session {
+    /// A mutation asks for a flush: mark dirty and poke the pump. No
+    /// disk here — the pump coalesces the pokes and owns every write.
+    fn save(&mut self) {
+        self.dirty = true;
+        let _ = self.save_tx.send(());
+    }
+
+    /// Build the persistence snapshot (serialization only — the caller
+    /// owns the disk). Returns None paths when restore() never ran
+    /// (tests, early boot) — nothing to write then.
+    fn persist(&self) -> Persist {
+        let session = serde_json::to_vec(&Session {
             primary: self.strips.get("main").cloned(),
             bar_visible: self.bookmarks.bar_visible,
-        };
-        if let Some(path) = &self.session_path {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Ok(bytes) = serde_json::to_vec(&session) {
-                let _ = std::fs::write(path, bytes);
-            }
-        }
-        if let Some(path) = &self.bookmarks_path {
-            self.bookmarks.save(path);
+        })
+        .ok();
+        let bookmarks = serde_json::to_vec_pretty(&self.bookmarks).ok();
+        Persist {
+            session,
+            bookmarks,
+            session_path: self.session_path.clone(),
+            bookmarks_path: self.bookmarks_path.clone(),
         }
     }
 

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Window defaults. The host exposes only its own commands plus the notification, updater, process, opener (feedback's browser routes), and clipboard (feedback's screenshot handoff) plugins (the webview owns the taxonomy \u2014 notifications, update decisions, feedback composition alike); everything else stays core:default.",
+  "description": "Window defaults. The host exposes only its own commands plus window dragging (the frame's drag region — core:window:default omits start-dragging, and without it the undecorated window cannot be moved), the notification, updater, process, opener (feedback's browser routes), and clipboard (feedback's screenshot handoff) plugins (the webview owns the taxonomy \u2014 notifications, update decisions, feedback composition alike); everything else stays core:default.",
   "windows": [
     "main",
     "main-frame",
@@ -11,6 +11,7 @@
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "notification:default",
     "updater:default",
     "process:allow-restart",

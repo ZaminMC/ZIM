@@ -338,16 +338,20 @@ fn main() {
             shell::host::shell_popup_close,
             shell::host::shell_popup_dismiss
         ])
-        // The run loop owns one more tray law: with the window hidden the
+        // The run loop owns two more tray laws: with the window hidden the
         // OS never sees a "last window closed" moment, but a hidden window
         // plus a stray runtime close would still ask to exit — with no
         // exit code (i.e. not an explicit `app.exit`) the tray keeps the
         // process alive. Only the tray menu's Quit (exit code Some) ends
         // it. The restart exit code is honored by the runtime itself.
+        // Whatever ends the process, the session lands first: the save
+        // pump may still sit inside its debounce window when the exit is
+        // requested, so the loop flushes synchronously here.
         .build(tauri::generate_context!())
         .expect("error while building the ZIM host")
-        .run(|_app, event| {
+        .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                app.state::<ShellState>().flush();
                 if code.is_none() {
                     api.prevent_exit();
                 }
