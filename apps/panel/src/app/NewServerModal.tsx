@@ -510,7 +510,7 @@ export function NewServerModal() {
             </div>
 
             <span className={styles.hint}>
-              The daemon downloads and verifies the server jar, writes the starter files, and
+              ZIM downloads and verifies the server jar, writes the starter files, and
               registers the server. The first start asks for EULA acceptance — nothing else is
               manual.
             </span>
