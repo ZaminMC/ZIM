@@ -25,6 +25,7 @@ import {
   Ellipsis,
   Folder,
   Globe,
+  Group,
   History,
   Info,
   LayoutDashboard,
@@ -53,6 +54,7 @@ import {
   Sunrise,
   Terminal,
   Users,
+  Ungroup,
   VolumeX,
   X,
   Zap,
@@ -108,6 +110,7 @@ export const IconFolder = from(Folder);
 export const IconForward = from(ChevronRight);
 export const IconGear = from(Settings);
 export const IconGlobe = from(Globe);
+export const IconGroup = from(Group);
 export const IconInfo = from(Info);
 export const IconJobs = from(ListChecks);
 export const IconLogs = from(ScrollText);
@@ -118,6 +121,7 @@ export const IconNetwork = from(Network);
 export const IconNewWindow = from(AppWindow);
 export const IconOpenInNew = from(SquareArrowOutUpRight);
 export const IconPlayers = from(Users);
+export const IconUngroup = from(Ungroup);
 export const IconPin = from(Pin);
 export const IconPlus = from(Plus);
 export const IconPuzzle = from(Puzzle);

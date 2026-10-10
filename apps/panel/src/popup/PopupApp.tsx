@@ -1,14 +1,24 @@
 // The popup overlay — the shell's application-owned menus and forms.
-// Three shapes share this transparent child webview:
+// Four shapes share this transparent child webview:
 //
-// - "tab-menu": the tab context menu (Chromium's close-context set —
-//   pin, mute, duplicate, group, the scoped closes),
+// - "tab-menu": the tab context menu, item-for-item the port of
+//   tab_menu_model.cc's Build() (the ZIM-applicable subset: new tab to
+//   the right, the group adds, remove-from-group, reload, duplicate,
+//   pin, mute, the §54 axis verb, the close block),
 // - "app-menu": the three-dot browser menu (browser-level actions only:
 //   zoom, bookmarks bar, developer tools, application logs, Settings —
 //   server management never enters this menu),
-// - "group": the naming form that replaced the OS prompt
-//   (`tauri.localhost says: …` is gone; Enter confirms, Escape cancels,
-//   an empty name is a validation error, never a silent group).
+// - "group-editor": the port of tab_group_editor_bubble_view.cc — the
+//   title field whose every keystroke renames the group, the nine-color
+//   radio grid from color_picker_view.cc, and the New-tab-in-group /
+//   Ungroup / Close-group rows. Opened by the chip's RIGHT click
+//   (tab_group_header_view.cc's OnMouseReleased law; left stays the
+//   collapse toggle),
+// - the in-place naming form ("Add to new group…"): the new-group flow.
+//   Documented divergence: upstream creates an unnamed group and opens
+//   the editor; here one form seeds the name, the color rides along only
+//   when picked, and Enter confirms — the keyboard contract the OS prompt
+//   used to own, kept.
 //
 // Keyboard contract: the overlay takes focus on open; ArrowUp/Down walk
 // the items, Enter activates, Escape dismisses. A click in the
@@ -17,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CMD } from "../commandIds";
+import { GROUP_TAB_STRIP_COLORS } from "../ui/chromium/chromiumTabs";
 import {
   IconApps,
   IconCheck,
@@ -34,14 +45,23 @@ import {
   IconNewWindow,
   IconPin,
   IconPlus,
+  IconReload,
+  IconUngroup,
   IconZoomIn,
   IconZoomOut,
   IconZoomReset,
 } from "../ui/icons";
 
+interface PopupGroupRef {
+  id: number;
+  label: string;
+  color: number;
+}
+
 interface PopupContext {
   kind: string;
   tab_id: number | null;
+  group_id?: number | null;
   pinned?: boolean;
   muted?: boolean;
   zoom?: number;
@@ -49,6 +69,14 @@ interface PopupContext {
   /** §54: the strip's presentation axis — the tab menu's layout verb
    *  labels itself from it. */
   vertical?: boolean;
+  /** The addressed tab's group, when it has one ("Remove from group"). */
+  grouped?: number | null;
+  /** The strip's groups — the "Add to existing group" submenu's rows. */
+  groups?: PopupGroupRef[];
+  /** The group editor's subject. */
+  label?: string;
+  color?: number;
+  collapsed?: boolean;
 }
 
 const isTauri = (): boolean =>
@@ -76,10 +104,42 @@ async function closePopup(): Promise<void> {
   await invoke("shell_popup_close").catch(() => {});
 }
 
+/** The color picker's row (color_picker_view.cc): one solid circle per
+ *  TabGroupColorId in the enum's wire order, the selection a ring in the
+ *  bubble's own background color. The `checked` index and the pressed
+ *  handler differ between the editor (dispatch, stay open) and the
+ *  naming form (local state). */
+function ColorGrid({
+  checked,
+  onPick,
+}: {
+  checked: number;
+  onPick: (index: number) => void;
+}) {
+  return (
+    <div className="editor-colors" role="radiogroup" aria-label="Group color">
+      {GROUP_TAB_STRIP_COLORS.map((color, index) => (
+        <button
+          key={color.id}
+          type="button"
+          role="radio"
+          aria-checked={index === checked}
+          aria-label={color.label}
+          title={color.label}
+          className="color-dot"
+          style={{ background: color.light }}
+          onClick={() => onPick(index)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function PopupApp() {
   const [ctx, setCtx] = useState<PopupContext | null>(null);
-  const [groupKind, setGroupKind] = useState(false); // tab-menu → group form
+  const [groupKind, setGroupKind] = useState(false); // tab-menu → naming form
   const [groupName, setGroupName] = useState("");
+  const [formColor, setFormColor] = useState<number | null>(null);
   const [groupError, setGroupError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -92,10 +152,20 @@ export function PopupApp() {
       setCtx({
         kind,
         tab_id: 3,
+        group_id: 1,
         pinned: false,
         muted: false,
         zoom: 1,
         bar_visible: false,
+        vertical: false,
+        grouped: null,
+        groups: [
+          { id: 1, label: "survival", color: 1 },
+          { id: 2, label: "creative", color: 4 },
+        ],
+        label: "survival",
+        color: 1,
+        collapsed: false,
       });
       return;
     }
@@ -118,16 +188,16 @@ export function PopupApp() {
     };
   }, []);
 
-  const kind = groupKind ? "group" : (ctx?.kind ?? "tab-menu");
+  const kind = groupKind ? "new-group" : (ctx?.kind ?? "tab-menu");
 
-  // The group form autofocuses its input (and re-focuses it when the
-  // menu turns into the form).
+  // The title field autofocuses (both the editor and the naming form
+  // re-focus it when the menu turns into a form).
   useEffect(() => {
-    if (kind === "group") inputRef.current?.focus();
+    if (kind === "group-editor" || kind === "new-group") inputRef.current?.focus();
   }, [kind]);
 
   // The keyboard contract: Escape dismisses; the menu items rove with
-  // the arrow keys (the browser's own tab order covers the form).
+  // the arrow keys (the browser's own tab order covers the fields).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -138,12 +208,13 @@ export function PopupApp() {
           setGroupKind(false);
           setGroupError(null);
           setGroupName("");
+          setFormColor(null);
           return;
         }
         void closePopup();
         return;
       }
-      if (kind !== "group" && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      if (kind !== "new-group" && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
         event.preventDefault();
         const items = [
           ...(menuRef.current?.querySelectorAll<HTMLButtonElement>(".menu-item:not([aria-disabled='true'])") ?? []),
@@ -175,10 +246,81 @@ export function PopupApp() {
   if (!ctx) return <div className="gutter" onPointerDown={onGutterDown} />;
 
   const zoomPct = Math.round((ctx.zoom ?? 1) * 100);
+  const groups = ctx.groups ?? [];
+
+  const createGroup = (): void => {
+    const label = groupName.trim();
+    if (label === "") {
+      setGroupError("Give the group a name.");
+      return;
+    }
+    void dispatch(CMD.ADD_NEW_TAB_TO_GROUP, {
+      tab_id: ctx.tab_id,
+      label,
+      ...(formColor != null ? { color: formColor } : {}),
+    }).then(closePopup);
+  };
 
   return (
     <div className="gutter" onPointerDown={onGutterDown}>
-      {kind === "group" ? (
+      {kind === "group-editor" ? (
+        // tab_group_editor_bubble_view.cc, the non-saved path: title
+        // field → color grid → separator → New tab in group → separator
+        // → Ungroup → Close group. The writes are LIVE — every keystroke
+        // and pick reaches the model while the editor stays open.
+        <div
+          className="menu group-editor"
+          role="dialog"
+          aria-label="Edit group"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <input
+            ref={inputRef}
+            className="editor-title"
+            defaultValue={ctx.label ?? ""}
+            placeholder="Name this group"
+            maxLength={40}
+            aria-label="Group name"
+            onChange={(e) => {
+              void dispatch(CMD.RENAME_GROUP, {
+                group_id: ctx.group_id,
+                label: e.target.value,
+              });
+            }}
+            onKeyDown={(e) => {
+              // Enter never re-creates anything: the rename already
+              // happened on the keystroke; Enter just leaves.
+              if (e.key === "Enter") void closePopup();
+            }}
+          />
+          <ColorGrid
+            checked={ctx.color ?? 0}
+            onPick={(index) => {
+              void dispatch(CMD.SET_GROUP_COLOR, {
+                group_id: ctx.group_id,
+                color: index,
+              });
+            }}
+          />
+          <div className="menu-sep" />
+          <MenuItem
+            glyph={<IconPlus />}
+            label="New tab in group"
+            onClick={() => void run(CMD.NEW_TAB_IN_GROUP, { group_id: ctx.group_id })}
+          />
+          <div className="menu-sep" />
+          <MenuItem
+            glyph={<IconUngroup />}
+            label="Ungroup"
+            onClick={() => void run(CMD.UNGROUP_GROUP, { group_id: ctx.group_id })}
+          />
+          <MenuItem
+            glyph={<IconClose />}
+            label="Close group"
+            onClick={() => void run(CMD.CLOSE_TAB_GROUP, { group_id: ctx.group_id })}
+          />
+        </div>
+      ) : kind === "new-group" ? (
         <div
           className="menu group-form"
           role="dialog"
@@ -198,52 +340,31 @@ export function PopupApp() {
               setGroupError(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const label = groupName.trim();
-                if (label === "") {
-                  setGroupError("Give the group a name.");
-                  return;
-                }
-                void dispatch(CMD.ADD_NEW_TAB_TO_GROUP, {
-                  tab_id: ctx.tab_id,
-                  label,
-                }).then(closePopup);
-              }
+              if (e.key === "Enter") createGroup();
             }}
           />
           <p className="group-error" id="group-error" role={groupError ? "alert" : undefined}>
             {groupError ?? ""}
           </p>
+          <ColorGrid
+            checked={formColor ?? -1}
+            onPick={(index) =>
+              setFormColor((current) => (current === index ? null : index))
+            }
+          />
           <div className="group-actions">
             <button
               className="ghost"
               onClick={() => {
-                if (ctx.kind === "tab-menu") {
-                  setGroupKind(false);
-                  setGroupError(null);
-                  setGroupName("");
-                } else {
-                  void closePopup();
-                }
+                setGroupKind(false);
+                setGroupError(null);
+                setGroupName("");
+                setFormColor(null);
               }}
             >
               Cancel
             </button>
-            <button
-              className="primary"
-              disabled={groupName.trim() === ""}
-              onClick={() => {
-                const label = groupName.trim();
-                if (label === "") {
-                  setGroupError("Give the group a name.");
-                  return;
-                }
-                void dispatch(CMD.ADD_NEW_TAB_TO_GROUP, {
-                  tab_id: ctx.tab_id,
-                  label,
-                }).then(closePopup);
-              }}
-            >
+            <button className="primary" disabled={groupName.trim() === ""} onClick={createGroup}>
               Create group
             </button>
           </div>
@@ -255,10 +376,56 @@ export function PopupApp() {
           role="menu"
           onPointerDown={(e) => e.stopPropagation()}
         >
+          {/* Item-for-item tab_menu_model.cc's Build(): new tab to the
+              right; the group adds (the "existing groups" submenu rows
+              flattened under their verb); remove-from-group; then the
+              reload/duplicate/pin/mute block; the §54 axis verb; the
+              close block closes the menu. */}
           <MenuItem
             glyph={<IconPlus />}
             label="New tab to the right"
             onClick={() => void run(CMD.NEW_TAB)}
+          />
+          <MenuItem
+            glyph={<IconChevRight />}
+            label="Add to new group…"
+            hint="›"
+            onClick={() => {
+              // The menu turns into the naming form in place — the same
+              // overlay, one popup, no OS prompt anywhere.
+              setGroupKind(true);
+            }}
+          />
+          {groups.map((group) => (
+            <MenuItem
+              key={group.id}
+              glyph={<span className="group-dot" style={{ background: GROUP_TAB_STRIP_COLORS[group.color % GROUP_TAB_STRIP_COLORS.length]?.light }} />}
+              label={group.label === "" ? "Untitled group" : group.label}
+              onClick={() =>
+                void run(CMD.ADD_TAB_TO_EXISTING_GROUP, {
+                  tab_id: ctx.tab_id,
+                  group_id: group.id,
+                })
+              }
+            />
+          ))}
+          {ctx.grouped != null ? (
+            <MenuItem
+              glyph={<IconUngroup />}
+              label="Remove from group"
+              onClick={() => void run(CMD.REMOVE_TAB_FROM_GROUP, { tab_id: ctx.tab_id })}
+            />
+          ) : null}
+          <div className="menu-sep" />
+          <MenuItem
+            glyph={<IconReload />}
+            label="Reload"
+            onClick={() => void run(CMD.RELOAD)}
+          />
+          <MenuItem
+            glyph={<IconDuplicate />}
+            label="Duplicate"
+            onClick={() => void run(CMD.DUPLICATE_TAB, { tab_id: ctx.tab_id })}
           />
           <MenuItem
             glyph={<IconPin />}
@@ -271,25 +438,10 @@ export function PopupApp() {
             onClick={() => void run(CMD.TOGGLE_MUTE, { tab_id: ctx.tab_id })}
           />
           <MenuItem
-            glyph={<IconDuplicate />}
-            label="Duplicate"
-            onClick={() => void run(CMD.DUPLICATE_TAB, { tab_id: ctx.tab_id })}
-          />
-          <MenuItem
             glyph={<IconDashboard />}
             label={ctx.vertical ? "Use horizontal strip" : "Show tabs vertically"}
             onClick={() => void run(CMD.TOGGLE_VERTICAL_STRIP)}
             tick={ctx.vertical}
-          />
-          <MenuItem
-            glyph={<IconChevRight />}
-            label="Add to new group…"
-            hint="›"
-            onClick={() => {
-              // The menu turns into the naming form in place — the same
-              // overlay, one popup, no OS prompt anywhere.
-              setGroupKind(true);
-            }}
           />
           <div className="menu-sep" />
           <MenuItem

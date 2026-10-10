@@ -96,17 +96,19 @@ export const omniboxCommit = (text: string): Promise<CommitOutcome> =>
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
   isTauri() ? invokeHost("shell_omnibox_classify", { text }) : Promise.resolve(null);
 
-/** Open the application-owned popup overlay (tab-menu | app-menu),
- *  anchored at frame coordinates. The browser demo has no popup host;
- *  its DOM stand-in serves there instead. */
+/** Open the application-owned popup overlay (tab-menu | app-menu |
+ *  group-editor), anchored at frame coordinates. The group editor
+ *  addresses a GROUP (groupId), the menus a tab (tabId). The browser
+ *  demo has no popup host; its DOM stand-in serves there instead. */
 export const shellPopup = (
-  kind: "tab-menu" | "app-menu",
+  kind: "tab-menu" | "app-menu" | "group-editor",
   tabId: number | null,
   x: number,
   y: number,
+  groupId: number | null = null,
 ): Promise<void> =>
   isTauri()
-    ? invokeHost("shell_popup", { kind, tabId, x, y })
+    ? invokeHost("shell_popup", { kind, tabId, groupId, x, y })
     : Promise.resolve();
 
 /** Dismiss a window's popup overlay — a no-op when none is open, so it

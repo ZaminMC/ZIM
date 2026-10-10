@@ -61,6 +61,23 @@ pub const NAV_BACK: u32 = 50006;
 /// ⓩ Local: navigate the active tab forward.
 pub const NAV_FORWARD: u32 = 50007;
 
+/// ⓩ Local: the group editor's name field (upstream's bubble writes the
+/// visual data straight from the title controller — no browser IDC; this
+/// build numbers the frame verbs locally). An EMPTY name is legal.
+pub const RENAME_GROUP: u32 = 50024;
+/// ⓩ Local: the editor's color grid (tabs/groups/color_picker_view.cc —
+/// one circle per TabGroupColorId in the enum's wire order).
+pub const SET_GROUP_COLOR: u32 = 50025;
+/// ⓩ Local: "Remove tab from group" (tab_menu_model.cc's
+/// CommandRemoveFromGroup; no browser IDC exists for it).
+pub const REMOVE_TAB_FROM_GROUP: u32 = 50026;
+/// ⓩ Local: the editor's "Ungroup" — every member leaves, the group dies.
+pub const UNGROUP_GROUP: u32 = 50027;
+/// ⓩ Local: the editor's "New tab in group".
+pub const NEW_TAB_IN_GROUP: u32 = 50028;
+/// ⓩ Local: the tab menu's "Add to existing group" item, one per group.
+pub const ADD_TAB_TO_EXISTING_GROUP: u32 = 50029;
+
 /// Window-control verbs for the frame's caption buttons — no upstream
 /// command IDs (Views owns them natively); ZIM-local numbering.
 pub const WINDOW_MINIMIZE: u32 = 50010;

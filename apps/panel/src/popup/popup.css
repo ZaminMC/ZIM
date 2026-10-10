@@ -140,6 +140,7 @@ body {
   font-weight: 600;
   color: var(--frame-fg, #202124);
 }
+.group-form .editor-colors { margin: 0 0 10px; }
 .group-form input {
   width: 100%;
   box-sizing: border-box;
@@ -193,6 +194,78 @@ body {
 }
 .group-actions .primary:hover { background: var(--accent-strong); }
 .group-actions .primary:disabled { opacity: 0.45; }
+
+/* -- The group editor (tab_group_editor_bubble_view.cc) ------------------
+   kDialogWidth 240; control insets VH(8, 8) (DISTANCE_RELATED_CONTROL_*);
+   the title field takes every keystroke to the model; the color grid is
+   color_picker_view.cc — 16 DIP circles (gfx::kFaviconSize, non-touch),
+   spaced one RELATED_CONTROL each, the selection a 2px ring inset 3 in
+   the bubble's own background color; the rows ride the menu-item insets
+   VH(6, 8) (GetMenuItemInsets). */
+.group-editor { width: 240px; padding: 10px 8px; }
+.group-editor .editor-title {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  margin: 0 0 8px;
+  padding: 0 10px;
+  border: 1px solid var(--popup-line);
+  border-radius: 7px;
+  background: var(--frame-field, #f1f3f4);
+  color: var(--frame-fg, #202124);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.group-editor .editor-title:focus {
+  border-color: var(--frame-accent, #1a73e8);
+  box-shadow: 0 0 0 3px var(--frame-accent-soft);
+}
+.group-editor .menu-sep { margin: 6px 8px; } /* kSeparatorPadding 8, halved by the row gutters */
+
+.editor-colors {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px; /* DISTANCE_RELATED_CONTROL_HORIZONTAL */
+  padding: 0 2px;
+}
+/* The picker element: a solid circle; its border-box carries half the
+   spacing as padding (color_picker_view.cc's adaptive hit target). */
+.color-dot {
+  position: relative;
+  width: 16px; /* circle_size = gfx::kFaviconSize */
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  margin: 4px; /* half the RELATED_CONTROL gap, per element */
+  cursor: default;
+  flex: none;
+}
+/* The selection ring: inset 3, thickness 2, the bubble's own color —
+   PaintSelectionIndicator's cutout look. */
+.color-dot::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 2px solid var(--popup-bg, #ffffff);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+.color-dot[aria-checked="true"]::after { opacity: 1; }
+.color-dot:hover { box-shadow: 0 0 0 2px var(--frame-hover-strong); }
+
+/* The "Add to existing group" rows' color swatch (the submenu's group
+   dots), riding the icon gutter's 16px box. */
+.group-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

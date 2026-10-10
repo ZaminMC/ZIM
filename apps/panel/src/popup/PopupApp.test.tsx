@@ -255,6 +255,119 @@ describe("<PopupApp /> the group form", () => {
   });
 });
 
+describe("<PopupApp /> the group editor", () => {
+  beforeEach(() => {
+    invoked = [];
+    bootContext(null);
+    history.replaceState(null, "", "/popup.html");
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+  afterEach(() => {
+    cleanup();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+
+  const EDITOR_CONTEXT = {
+    kind: "group-editor",
+    tab_id: null,
+    group_id: 2,
+    label: "survival",
+    color: 1,
+    collapsed: false,
+  };
+
+  const EDITOR_ITEMS = ["New tab in group", "Ungroup", "Close group"];
+
+  async function openEditor(context: Record<string, unknown> = EDITOR_CONTEXT) {
+    tauriLane();
+    bootContext(context);
+    const view = render(<PopupApp />);
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit group" })).toBeTruthy();
+    });
+    return view;
+  }
+
+  it("carries the title, the nine-color grid, and the three rows", async () => {
+    await openEditor();
+    expect(screen.getByRole("textbox", { name: "Group name" })).toBeTruthy();
+    const radios = screen.getAllByRole("radio");
+    expect(radios).toHaveLength(9); // kNumEntries, wire order
+    expect(radios[1]!.getAttribute("aria-checked")).toBe("true"); // blue booted
+    for (const label of EDITOR_ITEMS) {
+      expect(screen.getByRole("menuitem", { name: label })).toBeTruthy();
+    }
+  });
+
+  it("renames LIVE — every keystroke reaches the model, the editor stays open", async () => {
+    await openEditor();
+    const input = screen.getByRole("textbox", { name: "Group name" });
+    fireEvent.change(input, { target: { value: "surv" } });
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    const command = invoked.find((c) => c.cmd === "shell_command");
+    expect(command?.args).toEqual({ id: CMD.RENAME_GROUP, arg: { group_id: 2, label: "surv" } });
+    // The write is in-place: no shell_popup_close rode along.
+    expect(invoked.some((c) => c.cmd === "shell_popup_close")).toBe(false);
+  });
+
+  it("picks a color in place — SET_GROUP_COLOR, still open", async () => {
+    await openEditor();
+    fireEvent.click(screen.getByRole("radio", { name: "Cyan" }));
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    const command = invoked.find((c) => c.cmd === "shell_command");
+    expect(command?.args).toEqual({ id: CMD.SET_GROUP_COLOR, arg: { group_id: 2, color: 7 } });
+    expect(invoked.some((c) => c.cmd === "shell_popup_close")).toBe(false);
+  });
+
+  it("Ungroup frees the members and closes", async () => {
+    await openEditor();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Ungroup" }));
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    const command = invoked.find((c) => c.cmd === "shell_command");
+    expect(command?.args).toEqual({ id: CMD.UNGROUP_GROUP, arg: { group_id: 2 } });
+    expect(invoked.some((c) => c.cmd === "shell_popup_close")).toBe(true);
+  });
+
+  it("Enter leaves (the rename already happened on the keystroke)", async () => {
+    await openEditor();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Group name" }), { key: "Enter" });
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_popup_close")).toBe(true);
+    });
+    expect(invoked.some((c) => c.cmd === "shell_command")).toBe(false);
+  });
+
+  it("the tab menu lists the strip's groups under the add verb", async () => {
+    await renderBooted({
+      ...TAURI_CONTEXT,
+      groups: [
+        { id: 1, label: "survival", color: 1 },
+        { id: 2, label: "", color: 0 },
+      ],
+    });
+    expect(screen.getByRole("menuitem", { name: /survival/ })).toBeTruthy();
+    // An EMPTY label reads as the untitled group — the chip would be a
+    // bare color dot, the menu needs words.
+    expect(screen.getByRole("menuitem", { name: /Untitled group/ })).toBeTruthy();
+  });
+
+  it("Remove from group rides the tab's grouped posture", async () => {
+    await renderBooted({ ...TAURI_CONTEXT, grouped: 1 });
+    fireEvent.click(screen.getByRole("menuitem", { name: /Remove from group/ }));
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    const command = invoked.find((c) => c.cmd === "shell_command");
+    expect(command?.args).toEqual({ id: CMD.REMOVE_TAB_FROM_GROUP, arg: { tab_id: 7 } });
+  });
+});
+
 describe("<PopupApp /> the app menu", () => {
   beforeEach(() => {
     invoked = [];
@@ -347,15 +460,20 @@ describe("<PopupApp /> the keyboard contract", () => {
     await renderBooted();
     const items = screen.getAllByRole("menuitem");
     const first = items[0]!;
-    const second = items[1]!;
+    // The second item is the group verb — its activation OPENS THE NAMING
+    // FORM (tab_menu_model.cc's submenu law), it dispatches nothing. The
+    // rove walks two steps to a dispatcher.
     first.focus();
     expect(document.activeElement).toBe(first);
     fireEvent.keyDown(window, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(second);
+    expect(document.activeElement).toBe(items[1]!);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    const third = items[2]!;
+    expect(document.activeElement).toBe(third);
     // The roved-to item activates (the browser fires click on Enter for
     // the focused button — jsdom doesn't synthesize that native step, so
     // the activation half is asserted through the click it produces).
-    fireEvent.click(second);
+    fireEvent.click(third);
     await waitFor(() => {
       expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
     });

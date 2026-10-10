@@ -610,24 +610,119 @@ impl Strip {
         Some(group_id)
     }
 
-    // The group-membership API for the menu verbs (a later phase wires
-    // group_add to the "move to group" verb; group_remove to ungroup).
-    #[allow(dead_code)]
+    // The group-membership API for the editor + menu verbs.
+    /// "Add to existing group" (tab_menu_model.cc's per-group submenu
+    /// items): the tab moves adjacent to the group's LAST member and
+    /// joins it; a collapsed group expands — a newcomer must be seen
+    /// (upstream's add-to-group law).
     pub fn group_add(&mut self, group: GroupId, id: TabId) {
-        let anchor = self.tabs.iter().position(|t| t.group == Some(group));
-        let Some(anchor) = anchor else { return };
-        if self.move_to(id, anchor).is_some() {
-            if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
-                t.group = Some(group);
+        if !self.groups.contains_key(&group) {
+            return;
+        }
+        let Some(from) = self.index_of(id) else {
+            return;
+        };
+        let mut tab = self.tabs.remove(from);
+        tab.group = Some(group);
+        tab.pinned = false;
+        // Recompute the anchor AFTER the removal — the mover may itself
+        // be a member, and its old slot shifted everyone.
+        let anchor = self
+            .tabs
+            .iter()
+            .rposition(|t| t.group == Some(group))
+            .map(|last| last + 1)
+            .unwrap_or_else(|| self.block_edge(false).min(self.tabs.len()));
+        self.tabs.insert(anchor.min(self.tabs.len()), tab);
+        if let Some(g) = self.groups.get_mut(&group) {
+            g.collapsed = false;
+        }
+    }
+
+    /// "Remove tab from group" (the tab menu's CommandRemoveFromGroup).
+    /// The LAST member out destroys the group — upstream groups never
+    /// exist empty.
+    pub fn group_remove(&mut self, id: TabId) {
+        let former = {
+            let mut former = None;
+            for t in self.tabs.iter_mut() {
+                if t.id == id {
+                    former = t.group.take();
+                    break;
+                }
+            }
+            former
+        };
+        if let Some(group) = former {
+            let still_members = self.tabs.iter().any(|t| t.group == Some(group));
+            if !still_members {
+                self.groups.remove(&group);
             }
         }
     }
 
-    #[allow(dead_code)]
-    pub fn group_remove(&mut self, id: TabId) {
-        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
-            t.group = None;
+    /// The editor's name field (tab_group_editor_bubble_view.cc's title
+    /// controller): the model takes every keystroke. An EMPTY title is
+    /// legal — upstream chips render the color alone.
+    pub fn group_rename(&mut self, group: GroupId, label: &str) {
+        if let Some(g) = self.groups.get_mut(&group) {
+            g.label = label.to_owned();
         }
+    }
+
+    /// The editor's color grid (color_picker_view.cc): one circle per
+    /// TabGroupColorId in the enum's wire order; an out-of-range index
+    /// is refused, never wrapped.
+    pub fn group_set_color(&mut self, group: GroupId, color: u8) -> bool {
+        if (color as u32) >= GROUP_COLORS {
+            return false;
+        }
+        match self.groups.get_mut(&group) {
+            Some(g) => {
+                g.color = color;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The editor's "Ungroup": every member leaves (their histories and
+    /// positions stay), the group dies.
+    pub fn group_ungroup(&mut self, group: GroupId) -> bool {
+        if !self.groups.contains_key(&group) {
+            return false;
+        }
+        for t in self.tabs.iter_mut() {
+            if t.group == Some(group) {
+                t.group = None;
+            }
+        }
+        self.groups.remove(&group);
+        true
+    }
+
+    /// The editor's "New tab in group": a fresh New tab joins the
+    /// group's end and takes focus.
+    pub fn group_new_tab(&mut self, group: GroupId) -> Option<TabId> {
+        if !self.groups.contains_key(&group) {
+            return None;
+        }
+        let id = self.next_tab;
+        self.next_tab += 1;
+        let mut tab = Tab::fresh(id, Destination::New, None);
+        tab.group = Some(group);
+        let anchor = self
+            .tabs
+            .iter()
+            .rposition(|t| t.group == Some(group))
+            .map(|last| last + 1)
+            .unwrap_or(self.tabs.len());
+        self.tabs.insert(anchor.min(self.tabs.len()), tab);
+        if let Some(g) = self.groups.get_mut(&group) {
+            g.collapsed = false;
+        }
+        self.active = Some(id);
+        Some(id)
     }
 
     pub fn group_toggle_collapsed(&mut self, group: GroupId) {
@@ -985,5 +1080,106 @@ mod tests {
                 server_id: "s1".into()
             }
         );
+    }
+
+    // -- The group editor's verbs (tab_group_editor_bubble_view.cc writes
+    //    routed through the command lane) -------------------------------
+
+    fn strip_with_group() -> (Strip, TabId, GroupId) {
+        let mut strip = Strip::new();
+        let a = strip.append(Destination::Servers, true);
+        let group = strip.group_create(&[a], "survival").unwrap();
+        (strip, a, group)
+    }
+
+    #[test]
+    fn group_rename_takes_every_keystroke_and_allows_empty() {
+        let (mut strip, _, group) = strip_with_group();
+        strip.group_rename(group, "surv");
+        assert_eq!(strip.groups[&group].label, "surv");
+        // An EMPTY title is legal — upstream chips render the color alone.
+        strip.group_rename(group, "");
+        assert_eq!(strip.groups[&group].label, "");
+    }
+
+    #[test]
+    fn group_color_refuses_out_of_range_and_unknown_groups() {
+        let (mut strip, _, group) = strip_with_group();
+        assert!(strip.group_set_color(group, 8));
+        assert_eq!(strip.groups[&group].color, 8);
+        assert!(!strip.group_set_color(group, 9)); // kNumEntries = 9
+        assert!(!strip.group_set_color(group, 255));
+        assert!(!strip.group_set_color(9999, 0));
+    }
+
+    #[test]
+    fn removing_the_last_member_destroys_the_group() {
+        let (mut strip, a, group) = strip_with_group();
+        strip.group_remove(a);
+        assert!(strip.groups.get(&group).is_none());
+        let member = strip.tabs.iter().find(|t| t.id == a).unwrap();
+        assert!(member.group.is_none());
+    }
+
+    #[test]
+    fn removing_a_non_last_member_keeps_the_group() {
+        let (mut strip, a, group) = strip_with_group();
+        let b = strip.append(Destination::Jobs, true);
+        strip.group_add(group, b);
+        strip.group_remove(b);
+        assert!(strip.groups.contains_key(&group));
+        assert!(strip
+            .tabs
+            .iter()
+            .find(|t| t.id == a)
+            .unwrap()
+            .group
+            .is_some());
+    }
+
+    #[test]
+    fn ungroup_frees_every_member_and_dies() {
+        let (mut strip, a, group) = strip_with_group();
+        let b = strip.append(Destination::Jobs, true);
+        strip.group_add(group, b);
+        assert!(strip.group_ungroup(group));
+        assert!(strip.groups.get(&group).is_none());
+        assert!(strip.tabs.iter().all(|t| t.group.is_none()));
+        // The tabs themselves survive.
+        assert_eq!(strip.tabs.len(), 3);
+        assert!(!strip.group_ungroup(group));
+    }
+
+    #[test]
+    fn group_add_lands_after_the_last_member_and_expands() {
+        let (mut strip, a, group) = strip_with_group();
+        let b = strip.append(Destination::Jobs, true);
+        let c = strip.append(Destination::About, true);
+        strip.groups.get_mut(&group).unwrap().collapsed = true;
+        strip.group_add(group, c);
+        // The mover sits directly after the group's last member (a)…
+        let a_index = strip.index_of(a).unwrap();
+        assert_eq!(strip.tabs[a_index + 1].id, c);
+        assert_eq!(strip.tabs[a_index + 1].group, Some(group));
+        // …every other tab stays OUT of the group (the newcomer joined
+        // the run, it did not swallow its neighbors)…
+        for tab in strip.tabs.iter() {
+            if tab.id != c && tab.id != a {
+                assert!(tab.group.is_none());
+            }
+        }
+        // …and the group expanded to show the newcomer.
+        assert!(!strip.groups[&group].collapsed);
+    }
+
+    #[test]
+    fn group_new_tab_joins_the_end_and_takes_focus() {
+        let (mut strip, a, group) = strip_with_group();
+        let fresh = strip.group_new_tab(group).unwrap();
+        let a_index = strip.index_of(a).unwrap();
+        assert_eq!(strip.tabs[a_index + 1].id, fresh);
+        assert_eq!(strip.tabs[a_index + 1].group, Some(group));
+        assert_eq!(strip.tabs[a_index + 1].destination(), &Destination::New);
+        assert_eq!(strip.active, Some(fresh));
     }
 }

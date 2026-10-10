@@ -751,6 +751,14 @@ export function FrameApp() {
                   onClick={() =>
                     void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, { group_id: group.id })
                   }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    // The chip's editor law (tab_group_header_view.cc's
+                    // OnMouseReleased): LEFT click toggles collapse, RIGHT
+                    // click opens the editor bubble — the chip IS the
+                    // collapsed group, the editor shapes it.
+                    void shellPopup("group-editor", null, e.clientX, e.clientY, group.id);
+                  }}
                 >
                   <span className="group-chip-label">{group.label}</span>
                 </button>,

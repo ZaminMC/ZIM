@@ -37,4 +37,12 @@ export const CMD = {
   DEV_TOOLS: 50021,
   OPEN_LOGS: 50022,
   TOGGLE_VERTICAL_STRIP: 50023,
+  // The group editor (tab_group_editor_bubble_view.cc's writes, routed
+  // through the command lane — no upstream browser IDCs exist for them).
+  RENAME_GROUP: 50024,
+  SET_GROUP_COLOR: 50025,
+  REMOVE_TAB_FROM_GROUP: 50026,
+  UNGROUP_GROUP: 50027,
+  NEW_TAB_IN_GROUP: 50028,
+  ADD_TAB_TO_EXISTING_GROUP: 50029,
 } as const;

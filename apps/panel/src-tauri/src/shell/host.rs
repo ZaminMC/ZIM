@@ -443,6 +443,8 @@ fn popup_label(window: &str) -> String {
 struct PopupState {
     kind: String,
     tab: Option<TabId>,
+    /// The group editor addresses a group, not a tab.
+    group: Option<GroupId>,
 }
 
 /// The overlay's rect for a kind anchored at (x, y): the menu's drop
@@ -457,6 +459,9 @@ fn popup_rect(
 ) -> (LogicalPosition<f64>, LogicalSize<f64>) {
     let (w, h) = match kind {
         "group" => (300.0, 180.0),
+        // kDialogWidth 240 (tab_group_editor_bubble_view.cc): the title
+        // field, the nine-color grid, and the three menu rows.
+        "group-editor" => (240.0, 224.0),
         _ => (280.0, 430.0),
     };
     let (win_w, win_h) = window_size;
@@ -847,6 +852,11 @@ pub async fn shell_command(
         .and_then(|a| a.get("label"))
         .and_then(|v| v.as_str())
         .map(String::from);
+    let arg_color = arg
+        .as_ref()
+        .and_then(|a| a.get("color"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u8);
     let arg_destination = arg.as_ref().and_then(|a| a.get("destination")).cloned();
 
     let mut window_verb: Option<u32> = None;
@@ -933,7 +943,12 @@ pub async fn shell_command(
                         let target = arg_id.or(strip.active);
                         if let Some(target) = target {
                             let label = arg_label.unwrap_or_else(|| "group".into());
-                            strip.group_create(&[target], &label);
+                            let group = strip.group_create(&[target], &label);
+                            // The naming form's picked color rides along;
+                            // no pick → the enum cycles on the group id.
+                            if let (Some(group), Some(color)) = (group, arg_color) {
+                                strip.group_set_color(group, color);
+                            }
                         }
                     }
                     cmd::CLOSE_TAB_GROUP => {
@@ -956,6 +971,41 @@ pub async fn shell_command(
                     cmd::TOGGLE_GROUP_COLLAPSE => {
                         if let Some(group) = arg_group {
                             strip.group_toggle_collapsed(group);
+                        }
+                    }
+                    // The group editor's verbs (tab_group_editor_bubble_view.cc
+                    // writes the visual data straight from its controls; this
+                    // build routes the same writes through the command lane).
+                    cmd::RENAME_GROUP => {
+                        if let (Some(group), Some(label)) = (arg_group, arg_label.as_deref()) {
+                            strip.group_rename(group, label);
+                        }
+                    }
+                    cmd::SET_GROUP_COLOR => {
+                        if let (Some(group), Some(color)) = (arg_group, arg_color) {
+                            strip.group_set_color(group, color);
+                        }
+                    }
+                    cmd::REMOVE_TAB_FROM_GROUP => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            strip.group_remove(target);
+                        }
+                    }
+                    cmd::UNGROUP_GROUP => {
+                        if let Some(group) = arg_group {
+                            strip.group_ungroup(group);
+                        }
+                    }
+                    cmd::NEW_TAB_IN_GROUP => {
+                        if let Some(group) = arg_group {
+                            strip.group_new_tab(group);
+                        }
+                    }
+                    cmd::ADD_TAB_TO_EXISTING_GROUP => {
+                        let target = arg_id.or(strip.active);
+                        if let (Some(target), Some(group)) = (target, arg_group) {
+                            strip.group_add(group, target);
                         }
                     }
                     cmd::TOGGLE_VERTICAL_STRIP => {
@@ -1235,6 +1285,7 @@ pub async fn shell_popup(
     window: tauri::Webview,
     kind: String,
     tab_id: Option<u32>,
+    group_id: Option<u32>,
     x: f64,
     y: f64,
     state: State<'_, ShellState>,
@@ -1260,12 +1311,16 @@ pub async fn shell_popup(
     let _ = app.emit_to(
         &label,
         "shell://popup-boot",
-        serde_json::json!({ "kind": kind, "tab_id": tab_id }),
+        serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id }),
     );
-    state
-        .lock()
-        .popups
-        .insert(window_name, PopupState { kind, tab: tab_id });
+    state.lock().popups.insert(
+        window_name,
+        PopupState {
+            kind,
+            tab: tab_id,
+            group: group_id.map(|g| g as GroupId),
+        },
+    );
     // Focus follows the popup: Escape and the arrow keys work from the
     // first keystroke, exactly like a freshly opened OS menu.
     if let Some(popup) = app.get_webview(&label) {
@@ -1283,15 +1338,26 @@ pub fn shell_popup_boot(
     state: State<'_, ShellState>,
 ) -> Result<serde_json::Value, String> {
     let window_name = window_label_of(&window);
-    let (kind, tab_id) = {
+    let (kind, tab_id, group_id) = {
         let inner = state.lock();
         match inner.popups.get(&window_name) {
-            Some(popup) => (popup.kind.clone(), popup.tab),
-            None => ("unknown".into(), None),
+            Some(popup) => (popup.kind.clone(), popup.tab, popup.group),
+            None => ("unknown".into(), None, None),
         }
     };
-    let mut context = serde_json::json!({ "kind": kind, "tab_id": tab_id });
-    if let Some(tab_id) = tab_id {
+    let mut context = serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id });
+    if kind == "group-editor" {
+        if let Some(group_id) = group_id {
+            let inner = state.lock();
+            if let Some(strip) = inner.strips.get(&window_name) {
+                if let Some(group) = strip.groups.get(&group_id) {
+                    context["label"] = serde_json::json!(group.label);
+                    context["color"] = serde_json::json!(group.color);
+                    context["collapsed"] = serde_json::json!(group.collapsed);
+                }
+            }
+        }
+    } else if let Some(tab_id) = tab_id {
         let inner = state.lock();
         if let Some(strip) = inner.strips.get(&window_name) {
             // The tab menu's presentation verb labels itself from the
@@ -1301,7 +1367,18 @@ pub fn shell_popup_boot(
                 context["pinned"] = serde_json::json!(tab.pinned);
                 context["muted"] = serde_json::json!(tab.muted);
                 context["zoom"] = serde_json::json!(tab.zoom);
+                context["grouped"] = serde_json::json!(tab.group);
             }
+            // "Add to existing group" (tab_menu_model.cc's submenu): the
+            // menu carries the strip's groups — id, name, and the color
+            // index the menu's dot renders from.
+            let mut groups: Vec<serde_json::Value> = strip
+                .groups
+                .values()
+                .map(|g| serde_json::json!({ "id": g.id, "label": g.label, "color": g.color }))
+                .collect();
+            groups.sort_by_key(|g| g["id"].as_u64());
+            context["groups"] = serde_json::json!(groups);
         }
         context["bar_visible"] = serde_json::json!(state.lock().bookmarks.bar_visible);
     } else {
