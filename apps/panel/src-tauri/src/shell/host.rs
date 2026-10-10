@@ -43,6 +43,13 @@ use crate::shell::tabs::{Destination, GroupId, Strip, Tab, TabId};
 /// kVerticalDetachMagnetism — tab_drag_controller.cc: 15 DIP (touch 50).
 const VERTICAL_DETACH_MAGNETISM: f32 = 15.0;
 
+/// Where inactive tab webviews park: far offscreen, past any screen's
+/// reach, still ALIVE (see sync's tab loop for why hiding is the wrong
+/// verb). The window clips its children — a parked webview paints
+/// nothing and takes no input; it only keeps rendering.
+const PARKED_TAB_X: f64 = -32000.0;
+const PARKED_TAB_Y: f64 = -32000.0;
+
 #[derive(Default)]
 struct DragSession {
     tab: Option<TabId>,
@@ -651,8 +658,19 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         )
     };
 
-    // Show the active tab's webview at its slot; hide the rest. Every
-    // tab's own zoom rides its webview (Chromium zooms per-contents).
+    // The active tab's webview sits at its slot; every OTHER tab parks
+    // OFFSCREEN, alive and composited. The window clips its children, so
+    // a parked webview paints nothing and takes no input — but it is NOT
+    // hidden: a hidden WebView2 suspends its renderer (JS timers freeze,
+    // the daemon wire's heartbeat stalls, the compositor drops its
+    // surface), and the resume on selection repaints paper and replays
+    // the whole boot — "switching tabs refreshes the whole app". Parked
+    // instead: the page's state, scroll, and live subscriptions survive,
+    // the wire keeps answering, and a switch is one bounds move — no
+    // flash, no reload, no re-seed. Background consoles keep drawing (a
+    // live panel, §75's law), at the modest cost Chromium itself pays
+    // for visible-window background tabs. Every tab's own zoom rides its
+    // webview (Chromium zooms per-contents).
     for tab in &snap.tabs {
         let Some(webview) = app.get_webview(&tab_label(window_label, tab.id)) else {
             continue;
@@ -662,15 +680,23 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
             let _ = webview.show();
             let _ = webview.set_zoom(tab.zoom as f64);
         } else {
-            let _ = webview.hide();
+            // The parked bounds keep the CONTENT SIZE: returning is a
+            // pure move — never a resize, so no reflow and no lost
+            // scroll on the tab's way back.
+            let _ = webview.set_bounds(Rect {
+                position: LogicalPosition::new(PARKED_TAB_X, PARKED_TAB_Y).into(),
+                size: content_bounds.size,
+            });
+            let _ = webview.show();
         }
     }
 
     // Webview hygiene: a tab the model no longer knows (closed,
-    // detached, moved between windows) must not survive as a hidden
-    // child — its renderer would keep running forever. Remove every
-    // orphan of this window — and its daemon wire with it (a closed
-    // tab's session must not linger on the daemon).
+    // detached, moved between windows) must not survive as a parked
+    // child — parked webviews keep rendering, so an orphan would burn a
+    // compositor forever. Remove every orphan of this window — and its
+    // daemon wire with it (a closed tab's session must not linger on
+    // the daemon).
     let live: std::collections::HashSet<String> = snap
         .tabs
         .iter()
