@@ -190,6 +190,70 @@ describe("parseAddressInput", () => {
     });
   });
 
+  it("the bare-word law (Chrome's fixup): host-looking words navigate, plain words search", () => {
+    // A dotted word is a host — it joins, the port it carries none (0)
+    // and the Join page speaks the verdict (§7: nothing is invented).
+    expect(parseAddressInput("box.example.com")).toEqual({
+      kind: "join",
+      host: "box.example.com",
+      port: 0,
+    });
+    // "localhost" is navigable by its own name (Chrome's exception —
+    // and the most common join of all).
+    expect(parseAddressInput("localhost")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 0,
+    });
+    // A plain word is a discovery search: "paper" must never join a
+    // host called "paper" (the twins' old divergence — Rust joined it).
+    expect(parseAddressInput("paper")).toEqual({
+      kind: "query",
+      text: "paper",
+    });
+    expect(parseAddressInput("mc-server")).toEqual({
+      kind: "query",
+      text: "mc-server",
+    });
+  });
+
+  it("the IPv6 literal law (Chrome's fixup): the brackets are input sugar", () => {
+    expect(parseAddressInput("::1")).toEqual({ kind: "join", host: "::1", port: 0 });
+    expect(parseAddressInput("[::1]")).toEqual({ kind: "join", host: "::1", port: 0 });
+    // The founder's bind-all spelling — normalizeHost's own alias.
+    expect(parseAddressInput("::")).toEqual({ kind: "join", host: "localhost", port: 0 });
+    expect(parseAddressInput("fe80::1")).toEqual({
+      kind: "join",
+      host: "fe80::1",
+      port: 0,
+    });
+    // The dotted-quad tail rides as two groups' worth of bits.
+    expect(parseAddressInput("::ffff:10.0.0.1")).toEqual({
+      kind: "join",
+      host: "::ffff:10.0.0.1",
+      port: 0,
+    });
+    // The full eight-group form.
+    expect(parseAddressInput("1:2:3:4:5:6:7:8")).toEqual({
+      kind: "join",
+      host: "1:2:3:4:5:6:7:8",
+      port: 0,
+    });
+    // Not addresses — the join dialect's own words keep their answers
+    // (a 16-bit group cannot hold 25565).
+    expect(parseAddressInput("0:25565")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25565,
+    });
+    expect(parseAddressInput("25565:8080")).toEqual({
+      kind: "join",
+      host: "25565",
+      port: 8080,
+    });
+    expect(parseAddressInput("1:2")).toEqual({ kind: "join", host: "1", port: 2 });
+  });
+
   it("treats free text as a discovery query, never a URL", () => {
     expect(parseAddressInput("What are the active servers?")).toEqual({
       kind: "query",

@@ -74,6 +74,7 @@ import {
 import { HoverCard } from "../ui/chromium/hoverCardView";
 import { seedFaviconsForDemo, startFaviconLane, useFavicons } from "./favicon";
 import { FAVICON_DOT_COLORS, SOFTWARE_GLYPHS, faviconDot } from "./faviconLaw";
+import { softwareMark } from "./softwareMarks";
 import { useFaviconDots } from "../state/faviconPrefs";
 import {
   IconBack,
@@ -158,18 +159,26 @@ function Glyph({ url }: { url: string }) {
   if (serverId && entry && dots) {
     const glyph = SOFTWARE_GLYPHS[entry.software];
     const dot = faviconDot(entry.state, entry.severity);
+    // The real brand mark wins when the software has one (paper, folia,
+    // purpur — softwareMarks.ts); the honest monogram rides for the
+    // rest. The dot is the same either way (the liveness law).
+    const mark = softwareMark(entry.software);
     return (
       <span
         className="favicon"
         role="img"
         aria-label={`${glyph.name} — ${dot}`}
       >
-        <span
-          className="favicon-mark"
-          style={{ background: glyph.bg, color: glyph.fg }}
-        >
-          {glyph.label}
-        </span>
+        {mark ? (
+          <img className="favicon-mark is-img" src={mark.src} alt="" />
+        ) : (
+          <span
+            className="favicon-mark"
+            style={{ background: glyph.bg, color: glyph.fg }}
+          >
+            {glyph.label}
+          </span>
+        )}
         <span
           className="favicon-dot"
           style={{ background: FAVICON_DOT_COLORS[dot] }}

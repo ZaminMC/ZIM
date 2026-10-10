@@ -77,6 +77,21 @@ describe("<FrameApp /> against the demo fixture", () => {
       expect(container.querySelectorAll("[data-tab]").length).toBe(before + 1);
     });
   });
+
+  it("wears the real brand mark for the software that has one", async () => {
+    const { container } = render(<FrameApp />);
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-tab]").length).toBeGreaterThan(
+        0,
+      );
+    });
+    // survival runs paper (softwareMarks.ts) — the official mark rides
+    // as an <img>, not a monogram span. (The fixture's other tabs point
+    // at marked softwares too; the monogram fallback is pinned at the
+    // marks module's level.)
+    const imgs = container.querySelectorAll("img.favicon-mark.is-img");
+    expect(imgs.length).toBeGreaterThan(0);
+  });
 });
 
 // -- The hover card's machine -----------------------------------------------

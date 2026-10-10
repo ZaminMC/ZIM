@@ -144,6 +144,15 @@ describe("the port picker's occupancy law", () => {
         "paper",
       );
     });
+    // The catalog settled — the BUILD select carries its id. Without this
+    // beat the submit's readiness below would race the versions/builds
+    // effects (the flake: "true to be false" when the re-arm ran before
+    // the build landed) — the port law must be the thing under test.
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>("Build").value).toBe(
+        "34",
+      );
+    });
     fireEvent.change(screen.getByLabelText("Server id"), {
       target: { value: "fresh" },
     });

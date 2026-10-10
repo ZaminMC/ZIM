@@ -177,6 +177,15 @@ body {
   user-select: none;
 }
 
+/* The real brand mark (softwareMarks.ts) rides as an <img>: the file's
+   own geometry fills the box, no tile, no stretch — the mark keeps its
+   shape at any size and the monogram's grid/font styles do not apply. */
+.favicon-mark.is-img {
+  display: block;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
 .favicon-dot {
   position: absolute;
   right: -2px;

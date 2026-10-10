@@ -266,6 +266,45 @@ const INTERNAL_URL = /^zim:\/\/([^/?#]+)\/?(?:([^/?#]+))?$/;
  *  an IPv4, a hostname, or a bracketed IPv6; the port is 1-65535. */
 const JOIN = /^(?:\[?([a-zA-Z0-9._-]+|\[[0-9a-fA-F:]+\])\]?)?:(\d{1,5})$|^\[?([a-zA-Z0-9._-]+)\]?$/;
 
+/** Whether the word parses as an IPv6 literal — the exact twin of the
+ *  Rust side's `Ipv6Addr::from_str` (classify's IPv6 law), because no
+ *  stdlib parse exists here. The RFC's own rules: 1-4 hex digits per
+ *  group, exactly 8 groups, or ONE "::" elision covering at least one
+ *  group; an optional dotted-quad tail rides the last group (the
+ *  "::ffff:127.0.0.1" spelling) and counts as TWO groups. A host:port
+ *  spelling never passes ("box:25565" has non-hex chars, "0:25565"'s
+ *  port exceeds a 16-bit group), so the join dialect keeps its words. */
+export function isIpv6Shaped(word: string): boolean {
+  // Dots ride the gate so the dotted-quad tail below can speak — the
+  // group checks are the real law, a dot can never pass one.
+  if (!/^[0-9a-fA-F:.]+$/.test(word)) return false;
+  const halves = word.split("::");
+  if (halves.length > 2) return false; // at most one elision
+  const elided = halves.length === 2;
+  const head = halves[0] ?? "";
+  const headGroups = head === "" ? [] : head.split(":");
+  // The tail side only exists across an elision — without "::" the
+  // whole word is the head (the old indexing double-counted it).
+  const tail = elided ? (halves[1] ?? "") : "";
+  const tailGroups = tail === "" ? [] : tail.split(":");
+  // The dotted-quad tail: the last group may be an IPv4 ending — it
+  // rides the address as TWO groups' worth of bits.
+  let ipv4Tail = false;
+  const last = tailGroups[tailGroups.length - 1];
+  if (last && last.includes(".")) {
+    if (!/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(last)) return false;
+    if (last.split(".").some((o) => Number(o) > 255)) return false;
+    tailGroups.pop();
+    ipv4Tail = true;
+  }
+  const groups = headGroups.length + tailGroups.length + (ipv4Tail ? 2 : 0);
+  if (elided && groups >= 8) return false; // the elision must cover ≥1
+  if (!elided && groups !== 8) return false;
+  return [...headGroups, ...tailGroups].every(
+    (g) => /^[0-9a-fA-F]{1,4}$/.test(g),
+  );
+}
+
 /** The tail of a PRODUCED join URL (destinationUrl() writes
  *  `zim://join/{host}:{port}` — the omnibox rests on that string, so a
  *  re-commit must navigate, not fall to Missing; the user's own
@@ -316,6 +355,18 @@ export function parseAddressInput(text: string): AddressRequest {
     // answers honestly (no such page) — not silently a web search.
     return { kind: "internal", destination: { kind: "missing", url: trimmed } };
   }
+  // The IPv6 literal law (Chrome's fixup): the brackets are input sugar
+  // — "::1" and "[::1]" both join. Runs before the dialect so a bare
+  // address is never mistaken for host:port words; the dialect's own
+  // spellings never parse as addresses, so nothing else moves.
+  const unbracketed = trimmed.startsWith("[")
+    ? trimmed.endsWith("]")
+      ? trimmed.slice(1, -1)
+      : trimmed.slice(1)
+    : trimmed;
+  if (isIpv6Shaped(unbracketed)) {
+    return { kind: "join", host: normalizeHost(trimmed), port: 0 };
+  }
   const join = JOIN.exec(trimmed);
   if (join) {
     if (join[2]) {
@@ -328,6 +379,18 @@ export function parseAddressInput(text: string): AddressRequest {
       if (/^\d{1,5}$/.test(join[3])) {
         const port = Number(join[3]);
         if (port >= 1 && port <= 65_535) return { kind: "join", port };
+      } else if (
+        join[3].includes(".") ||
+        join[3].toLowerCase() === "localhost"
+      ) {
+        // The bare-word law (Chrome's fixup posture): a host-looking
+        // word navigates — the dot is the host's own signal — and
+        // "localhost" is navigable by its name (Chrome's exception, and
+        // the most common join of all). A plain word is a discovery
+        // search: "paper" must never join a host called "paper". The
+        // word carries no port — 0, and the Join page speaks the
+        // verdict (§7: nothing is invented).
+        return { kind: "join", host: normalizeHost(join[3]), port: 0 };
       }
     }
   }
