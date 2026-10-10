@@ -286,15 +286,42 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// The first `.jar` argument on a command line (founder §3/§4: the OS
+/// file association hands ZIM the double-clicked jar's path).
+/// Case-insensitive on the extension — Windows, the platform the
+/// association registers on, is case-insensitive itself. A path that
+/// does not exist still moves forward: the content layer's discovery
+/// verdict names the honest failure ("nothing at this folder"), which
+/// beats swallowing it here.
+fn first_jar_arg(args: &[String]) -> Option<String> {
+    args.iter()
+        .skip(1) // argv[0] is the program
+        .map(|a| a.trim().trim_matches('"'))
+        .find(|a| !a.is_empty() && a.to_ascii_lowercase().ends_with(".jar"))
+        .map(String::from)
+}
+
+/// The §4 handoff into the shell: store the offer, nudge the active
+/// tab's webview. Shared by the cold start (the OS launched ZIM BY a
+/// jar) and the single-instance forward (a second double-click while
+/// ZIM runs) — one law, two doors.
+fn offer_open_path(app: &tauri::AppHandle, args: &[String]) {
+    if let Some(path) = first_jar_arg(args) {
+        app.state::<ShellState>().offer_open(app, &path);
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         // ONE ZIM at a time — registered FIRST (the plugin's own law):
         // the second process's only job is to raise the first window and
         // exit, so it never becomes a second writer racing the first
         // over the session and bookmark files (the persistence audit's
-        // P1 root).
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        // P1 root). The forwarded argv carries the §4 handoff: a jar
+        // the OS just asked this running instance to open.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             show_main_window(app);
+            offer_open_path(app, &argv);
         }))
         .plugin(tauri_plugin_notification::init())
         // The update lane (ADR-0024): the webview drives check/install/relaunch
@@ -315,6 +342,16 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             app.state::<ShellState>().restore(&handle);
+
+            // The §4 cold-start door: the OS launched ZIM BY a jar
+            // (double-click / "open with"). After restore — the offer is
+            // addressed to the session's active tab, so the strip must
+            // exist first. The claiming webview boots later and takes the
+            // path from its hello.
+            {
+                let args: Vec<String> = std::env::args().collect();
+                offer_open_path(&handle, &args);
+            }
 
             // The tray (§12.1 seam): closing the window parks ZIM here
             // instead of leaving a taskbar ghost. The tray is a LIVE
@@ -411,6 +448,7 @@ fn main() {
             shell::host::shell_boot,
             shell::host::shell_snapshot,
             shell::host::shell_tab_hello,
+            shell::host::shell_open_claim,
             shell::host::shell_tab_navigate,
             shell::host::shell_tab_action,
             shell::host::shell_command,

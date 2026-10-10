@@ -180,6 +180,34 @@ impl ShellState {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The OS handed ZIM a file (founder §4): address it to the main
+    /// window's active tab, hold it for that tab's claim, and nudge the
+    /// tab's webview if it is already alive. A nudge to a webview that
+    /// does not exist is a no-op — the pending copy carries the delivery
+    /// to the webview's hello. Last-wins by design: a second file-open
+    /// replaces an unclaimed one, the same way a fresh omnibox commit
+    /// replaces a waiting query.
+    pub fn offer_open(&self, app: &AppHandle, path: &str) {
+        let label = {
+            let mut inner = self.lock();
+            let Some(strip) = inner.strips.get("main") else {
+                // No strip yet (pre-restore): the cold-start path stores
+                // the offer AFTER restore, so this is unreachable — but
+                // dropping the offer beats parking it addressless.
+                return;
+            };
+            let Some(active) = strip.active else {
+                return;
+            };
+            inner.pending_open = Some((active, path.to_owned()));
+            tab_label("main", active)
+        };
+        // The nudge's delivery law is the omnibox query's own: an emit to
+        // a webview that does not exist is a no-op, and the pending copy
+        // carries the delivery to that webview's hello.
+        let _ = app.emit_to(&label, "shell://open-file", serde_json::json!({}));
+    }
+
     /// Take the persistence snapshot now (the exit path's synchronous
     /// flush; the pump owns the interactive path). The write lock makes
     /// this and the pump serial: no shared .tmp, no rename that finds
@@ -258,6 +286,14 @@ struct ShellInner {
     strip_widths: HashMap<String, f32>,
     /// One popup overlay per window at most (menus, the group form).
     popups: HashMap<String, PopupState>,
+    /// The OS file-open handoff (founder §4): a path the OS handed ZIM
+    /// (double-clicked jar — single-instance argv while running, the
+    /// command line at cold start), addressed to the main window's
+    /// ACTIVE tab and delivered exactly once — `shell_open_claim` is the
+    /// consume point, so the hello peek and the live nudge event cannot
+    /// double-open. Transient by design: an open offer the operator
+    /// never claimed dies with the process, never with the session.
+    pending_open: Option<(TabId, String)>,
 }
 
 impl ShellState {
@@ -274,6 +310,7 @@ impl ShellState {
             save_tx,
             strip_widths: HashMap::new(),
             popups: HashMap::new(),
+            pending_open: None,
         }));
         Self::spawn_pump(Arc::clone(&inner), Arc::new(Mutex::new(())), save_rx);
         ShellState {
@@ -789,6 +826,16 @@ pub fn shell_tab_hello(
         .iter()
         .find(|t| t.id == tab_id)
         .ok_or("tab vanished")?;
+    // The OS file-open peek (founder §4): the offer addressed to THIS tab
+    // rides the hello so a webview booting after the offer still receives
+    // it. A peek, never a take — `shell_open_claim` is the one consume
+    // point, so a reload after the live nudge cannot double-open.
+    let open_path = match &inner.pending_open {
+        Some((addressed, path)) if window_name == "main" && *addressed == tab_id => {
+            Some(path.clone())
+        }
+        _ => None,
+    };
     Ok(serde_json::json!({
         "tab_id": tab.id,
         "fallback": false,
@@ -800,7 +847,36 @@ pub fn shell_tab_hello(
         // before this webview existed — Alt-Enter's fresh tab): the page
         // takes it once at boot, the same text the live event carries.
         "query": tab.pending_query,
+        // The OS file-open dialect, model-held the same way.
+        "open_path": open_path,
     }))
+}
+
+/// The §4 consume point: the calling tab claims the OS's file-open offer
+/// when — and only when — the offer is addressed to it. One offer, one
+/// claim: the hello peek and the live nudge both funnel here, so neither
+/// a reload nor a duplicate nudge can open the server twice.
+#[tauri::command]
+pub fn shell_open_claim(
+    window: tauri::Webview,
+    state: State<'_, ShellState>,
+) -> Result<Option<String>, String> {
+    let label = window.label().to_owned();
+    let Some((window_name, tab_id)) = parse_tab_label(&label) else {
+        return Ok(None); // dev bridge: no model, no offer
+    };
+    let mut inner = state.lock();
+    Ok(match inner.pending_open.take() {
+        Some((addressed, path)) if window_name == "main" && addressed == tab_id => {
+            Some(path)
+        }
+        // Not this tab's offer: put it back untouched. A sibling's nudge
+        // must not eat the active tab's handoff.
+        other => {
+            inner.pending_open = other;
+            None
+        }
+    })
 }
 
 /// A content webview navigates (ServerView → Fleet, a Join verdict's
@@ -953,7 +1029,36 @@ pub async fn shell_command(
                 let strip = inner.strip(&window_name);
                 match id {
                     cmd::NEW_TAB => {
-                        strip.append(Destination::New, true);
+                        // The content layer's opening verb (§4's jar lane,
+                        // §16's "open this" links): a destination rides the
+                        // command exactly as NAVIGATE_ACTIVE carries one —
+                        // absent means the operator's plain + (Destination::New).
+                        // A waiting query rides the SAME law the omnibox's
+                        // Alt-Enter tab speaks: the text waits on the tab,
+                        // so the booting webview still receives it through
+                        // hello.
+                        let destination = match &arg_destination {
+                            Some(value) => match
+                                serde_json::from_value::<Destination>(value.clone())
+                            {
+                                Ok(destination) => destination,
+                                Err(_) => Destination::New,
+                            },
+                            None => Destination::New,
+                        };
+                        let query = arg
+                            .as_ref()
+                            .and_then(|a| a.get("query"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        let id = strip.append(destination, true);
+                        if let Some(query) = query {
+                            if let Some(tab) =
+                                strip.tabs.iter_mut().find(|t| t.id == id)
+                            {
+                                tab.pending_query = Some(query);
+                            }
+                        }
                     }
                     cmd::CLOSE_TAB => {
                         let target = arg_id.or(strip.active);

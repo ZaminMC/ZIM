@@ -49,6 +49,15 @@
       "binaries/zamind",
       "binaries/zamin"
     ],
+    "fileAssociations": [
+      {
+        "ext": ["jar"],
+        "name": "Minecraft Server JAR",
+        "description": "A Minecraft server jar — double-clicking opens it in ZIM (founder §4). Jars ZIM's own discovery layer cannot classify land on the New Tab page with the folder's honest answer, never a guess.",
+        "role": "Editor",
+        "mimeType": "application/java-archive"
+      }
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

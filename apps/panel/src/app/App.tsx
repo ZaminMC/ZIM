@@ -19,6 +19,7 @@ import { useUi } from "../state/ui";
 import { useTabs } from "../state/tabs";
 import { startWire } from "../state/wire";
 import { useConnection } from "../state/connection";
+import { openServerFile } from "../state/openFile";
 import { sortedServers, useServers } from "../state/servers";
 import { ServerView } from "./ServerView";
 import { ConsoleView } from "./ConsoleView";
@@ -169,11 +170,29 @@ export function App() {
     }
     let disposed = false;
     const unlisteners: Promise<Unlisten>[] = [];
+
+    // The §4 OS handoff, consumed exactly once per offer: the host may
+    // deliver the open path through the hello reply (a webview booting
+    // after the offer) or through the nudge event (a webview already
+    // alive); `shell_open_claim` is the single consume point, so a
+    // reload after the event cannot open the server twice.
+    const takeOfferedOpen = async () => {
+      try {
+        const path = await invokeHost<string | null>("shell_open_claim");
+        if (disposed || path === null || path.length === 0) return;
+        await openServerFile(path);
+      } catch {
+        // The claim is best-effort: a host without the lane (older
+        // build) simply answers nothing.
+      }
+    };
+
     void invokeHost<{
       fallback: boolean;
       destination?: Destination;
       reload?: number;
       query?: string | null;
+      open_path?: string | null;
     }>("shell_tab_hello").then((hello) => {
       if (disposed || hello.fallback || !hello.destination) return;
       setDestination(hello.destination);
@@ -182,7 +201,14 @@ export function App() {
       // query landed before this webview existed, the model held it, the
       // same store the live event writes).
       if (hello.query) useTabs.getState().setDiscoveryQuery(hello.query);
+      // The OS file-open dialect rides the same model-held delivery.
+      if (hello.open_path) void takeOfferedOpen();
     });
+    unlisteners.push(
+      listenHost("shell://open-file", () => {
+        void takeOfferedOpen();
+      }),
+    );
     unlisteners.push(
       listenHost<{
         tab_id: number;
