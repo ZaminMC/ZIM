@@ -323,6 +323,20 @@ export class ProtocolClient {
     } catch (error) {
       if (this.isStale(generation)) return;
       this.lastFailure = error;
+      // The corpse's signature: the pipe ACCEPTED (start resolved, the
+      // pumps are up) but the handshake starved — a wedged daemon holds
+      // the listener while its session never speaks. The retry alone
+      // would speak into the same wedge forever ("ZIM is always
+      // disconnected"): this ask is the heal — the host probes, ends
+      // the stale image, respawns its own sibling. Every other failure
+      // (refused pipe, dead endpoint) rides the plain retry, which its
+      // own path already covers through daemon_ensure.
+      if (error instanceof RequestTimeoutError) {
+        const healed = await this.transport?.ensure?.().catch(() => false);
+        if (healed) {
+          this.lastFailure = null;
+        }
+      }
       await this.transport?.stop().catch(() => {});
       this.transport = null;
       this.setStatus("offline");

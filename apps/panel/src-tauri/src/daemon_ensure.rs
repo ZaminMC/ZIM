@@ -76,6 +76,41 @@ pub async fn endpoint_ready(endpoint: &Endpoint) -> bool {
     zamin_ipc::connect(endpoint.clone()).await.is_ok()
 }
 
+/// The answer budget for the liveness probe: generous enough for a
+/// daemon under a startup log flood (the session task answers a ping in
+/// microseconds even then), far below the webview's own reconnect
+/// patience.
+const ANSWER_BUDGET: Duration = Duration::from_secs(2);
+
+/// Does the daemon ANSWER, not merely listen? The kernel owns a
+/// listener's accept queue, so a WEDGED zamind.exe — hung session loop,
+/// half-dead upgrade, anything that stopped servicing — still accepts
+/// every connect while never speaking a frame. The old probe read that
+/// wedge as "already-running", the transport's retry died against the
+/// same corpse, and the panel read "always disconnected" forever. This
+/// probe speaks the protocol's own ping: connect, frame, expect ANY
+/// reply within the budget. A corpse answers nothing; that is the
+/// verdict the heal acts on.
+async fn daemon_answers(endpoint: &Endpoint) -> bool {
+    let Ok(connection) = zamin_ipc::connect(endpoint.clone()).await else {
+        return false;
+    };
+    let (mut write, mut read) = connection.split();
+    let ping = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "daemon.ping",
+    })
+    .to_string();
+    if zamin_bridge::send_frame(&mut write, &ping).await.is_err() {
+        return false;
+    }
+    matches!(
+        tokio::time::timeout(ANSWER_BUDGET, read.recv()).await,
+        Ok(Ok(Some(_)))
+    )
+}
+
 /// Spawn the daemon without arguments — defaults are already correct
 /// (per-user endpoint, XDG/Known-Folders data dir).
 ///
@@ -108,23 +143,95 @@ pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Probe, spawn if down, wait for bind. Returns what happened, typed as a
-/// small string the webview logs verbatim ("already-running" | "spawned").
+/// End every WEDGED daemon the panel could have spawned. The verb is the
+/// installer's own precedent (installer-hooks.nsh's ZIM_KILL_IMAGE
+/// speaks the same image kill): the daemon is the panel's per-user
+/// sibling, so the image name is unambiguous on Windows. Unix walks
+/// /proc for exes matching the daemon's binary NAME (a per-user daemon
+/// is the only zamind this user runs) and SIGKILLs the pids. A graceful
+/// ask makes no sense here — the caller is here precisely because
+/// nothing behind the pipe answers anything.
+fn kill_stale_daemons() {
+    #[cfg(windows)]
+    {
+        use std::process::{Command, Stdio};
+        let mut command = Command::new("taskkill");
+        command
+            .args(["/F", "/IM", "zamind.exe"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let _ = command.status();
+    }
+    #[cfg(unix)]
+    {
+        let name = daemon_binary_name().to_owned();
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|s| s.parse::<i32>().ok())
+            else {
+                continue;
+            };
+            let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else {
+                continue; // another user's, or already gone
+            };
+            if exe.file_name().is_some_and(|n| n == name) {
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+}
+
+/// Wait for the wedged daemon's pipe to actually disappear (the kernel
+/// keeps the listen alive for one scheduling tick after the kill), so
+/// the fresh spawn wins the single-instance race instead of the corpse.
+async fn wait_pipe_clear(endpoint: &Endpoint) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if !endpoint_ready(endpoint).await {
+            return;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+    // Still there: the kill lost (permissions, an unexpected owner). The
+    // spawn below will lose the single-instance race loudly, which is
+    // the honest failure — never a silent wedge.
+}
+
+/// Probe, heal the wedged, spawn if down, wait for an ANSWERING daemon.
+/// Returns what happened, typed as a small string the webview logs
+/// verbatim ("already-running" | "healed" | "spawned").
 pub async fn ensure_daemon() -> Result<String, String> {
     let endpoint = Endpoint::default_endpoint();
-    if endpoint_ready(&endpoint).await {
+    if daemon_answers(&endpoint).await {
         return Ok("already-running".to_owned());
     }
     let binary = resolve_daemon_binary()
         .ok_or_else(|| "the zamind daemon was not found next to the panel or on PATH".to_owned())?;
+    // The pipe may still accept while nothing behind it answers — end
+    // the corpse BEFORE the fresh spawn, or the single-instance race
+    // loses to it (the loser exits(1) and the wait below times out).
+    kill_stale_daemons();
+    wait_pipe_clear(&endpoint).await;
     spawn_daemon(&binary).map_err(|error| format!("could not start the daemon: {error}"))?;
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
-        if endpoint_ready(&endpoint).await {
+        // The spawn verdict is the ANSWER, not the bind: the webview's
+        // retry would speak into a wedge otherwise.
+        if daemon_answers(&endpoint).await {
             return Ok("spawned".to_owned());
         }
         if Instant::now() >= deadline {
-            return Err("the daemon did not start listening within 10 s".to_owned());
+            return Err("the daemon did not start answering within 10 s".to_owned());
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }

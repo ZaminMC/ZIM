@@ -395,12 +395,20 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
     // tab has none to show (its placeholder speaks instead). Every other
     // destination — internal pages included — is an address worth
     // showing, because the user can have arrived here by navigation.
+    // A JOIN page shows the BARE address the operator speaks —
+    // `localhost:25565`, never `zim://join/localhost:25565` (the
+    // founder's own words). The scheme is the shell's plumbing; the
+    // operator's address is the host and the port, and the omnibox's
+    // classifier re-lands that bare text on the same join anyway.
     let address = strip
         .tabs
         .iter()
         .find(|t| t.id == active)
         .map(|t| match t.destination() {
             Destination::New => String::new(),
+            Destination::Join { host, port } => {
+                format!("{}:{port}", host.clone().unwrap_or_default())
+            }
             other => other.url(),
         })
         .unwrap_or_default();

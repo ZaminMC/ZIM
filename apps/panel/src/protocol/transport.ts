@@ -13,6 +13,12 @@ export interface Transport {
   send(frame: string): void;
   /** Close the transport cleanly. */
   stop(): Promise<void>;
+  /** The wedged-daemon ask: the host probes whether the daemon ANSWERS
+   *  (a corpse holds the pipe while its session never speaks), ends the
+   *  stale image, and respawns the sibling. Local transports implement
+   *  it; a remote wire has nobody to heal from here and answers false.
+   *  Optional — the demo's stand-in transport has no host behind it. */
+  ensure?(): Promise<boolean>;
 }
 
 // --- WebSocket transport (development: the Node dev bridge) ---
@@ -129,6 +135,12 @@ export class TauriTransport implements Transport {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("daemon_send", { frame });
     })();
+  }
+
+  async ensure(): Promise<boolean> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const outcome = await invoke<string>("daemon_ensure").catch(() => null);
+    return outcome === "spawned" || outcome === "already-running";
   }
 
   async stop(): Promise<void> {

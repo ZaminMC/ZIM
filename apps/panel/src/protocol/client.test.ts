@@ -16,6 +16,10 @@ class MockTransport implements Transport {
   started = 0;
   stopped = 0;
   startError: Error | null = null;
+  /** The wedged-daemon ask's fixture: off by default (the ask is
+    * optional), flipped by the heal's own test. */
+  ensureHeals = false;
+  ensureCalls = 0;
   private sink: ((batch: readonly string[]) => void) | null = null;
   private down: (() => void) | null = null;
 
@@ -38,6 +42,11 @@ class MockTransport implements Transport {
     this.sink = null;
     this.down = null;
     return Promise.resolve();
+  }
+
+  async ensure(): Promise<boolean> {
+    this.ensureCalls += 1;
+    return this.ensureHeals;
   }
 
   /** Simulate daemon → panel frames. */
@@ -166,6 +175,25 @@ describe("ProtocolClient", () => {
     const expectation = expect(pending).rejects.toBeInstanceOf(RequestTimeoutError);
     await vi.advanceTimersByTimeAsync(1_001);
     await expectation;
+    await client.dispose();
+  });
+
+  it("a starved handshake asks the host to heal before the retry", async () => {
+    // The corpse's wire: start resolves (the pipe accepted), the hello
+    // never gets a reply. The retry alone would speak into the same
+    // wedge forever — the heal ask must fire first.
+    const client = makeClient();
+    const connecting = client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = transports[0]!;
+    first.ensureHeals = true;
+    // The handshake's budget starves; the catch asks the host to heal.
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(first.ensureCalls).toBe(1);
+    // The backoff's retry opened a fresh wire (the corpse's is dropped).
+    await vi.advanceTimersByTimeAsync(10);
+    expect(transports.length).toBeGreaterThan(1);
+    void connecting;
     await client.dispose();
   });
 
