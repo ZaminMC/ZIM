@@ -10,6 +10,7 @@ import {
   demoLayoutStripVertical,
   dropIndexFromSlots,
   dropIndexFromSlotsVertical,
+  insertAtDropIndex,
   revealSlot,
   stripScroll,
   stripScrollVertical,
@@ -40,6 +41,36 @@ describe("dropIndexFromSlots", () => {
   it("never lands on a group chip", () => {
     const withChip = [slot(7, 6, 70, true), ...TABS];
     expect(dropIndexFromSlots(withChip, 30)).toBe(0);
+  });
+});
+
+describe("insertAtDropIndex — the block landing (move_block's mirror)", () => {
+  const row = (id: number, pinned: boolean) => ({ id, pinned });
+
+  it("lands a multi-tab block in one piece", () => {
+    // rest = the strip minus the lifted block [4, 5]; the block lands
+    // between 2 and 3 as a contiguous run.
+    const rest = [row(1, false), row(2, false), row(3, false)];
+    const out = insertAtDropIndex(rest, [row(4, false), row(5, false)], 2);
+    expect(out.map((t) => t.id)).toEqual([1, 2, 4, 5, 3]);
+  });
+
+  it("an unpinned block never enters the pinned prefix", () => {
+    const rest = [row(1, true), row(2, true), row(3, false)];
+    const out = insertAtDropIndex(rest, [row(4, false), row(5, false)], 0);
+    expect(out.map((t) => t.id)).toEqual([1, 2, 4, 5, 3]);
+  });
+
+  it("a pinned block clamps inside the pinned region", () => {
+    const rest = [row(1, true), row(2, false), row(3, false)];
+    const out = insertAtDropIndex(rest, [row(4, true), row(5, true)], 5);
+    expect(out.map((t) => t.id)).toEqual([1, 4, 5, 2, 3]);
+  });
+
+  it("a single tab rides the same law (the old contract)", () => {
+    const rest = [row(1, false), row(2, false)];
+    const out = insertAtDropIndex(rest, row(3, false), 1);
+    expect(out.map((t) => t.id)).toEqual([1, 3, 2]);
   });
 });
 

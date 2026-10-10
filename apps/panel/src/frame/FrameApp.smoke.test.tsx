@@ -143,6 +143,198 @@ describe("<FrameApp /> against the demo fixture", () => {
       ).toBe(0);
     });
   });
+
+  // jsdom has no PointerEvent — every session event below rides a real
+  // MouseEvent stand-in (button, coordinates, modifiers all carried).
+  const sessionPress = (el: HTMLElement, opts: PointerEventInit = {}) =>
+    el.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        ...opts,
+      }),
+    );
+  const sessionMove = (x: number, y = 12) =>
+    window.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+  const sessionUp = (x: number, y = 12) =>
+    window.dispatchEvent(
+      new MouseEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+
+  it("a selected source drags the WHOLE selection as one block (MoveSelectedTabsTo)", async () => {
+    const { container } = render(<FrameApp />);
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-tab]").length).toBeGreaterThan(
+        0,
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // The selection: the boot's active plus one ctrl-added tab.
+    const tabs = () =>
+      Array.from(container.querySelectorAll<HTMLElement>("[data-tab]"));
+    const target = tabs().find(
+      (t) =>
+        !t.className.includes("tab-active") &&
+        !t.className.includes("tab-pinned"),
+    );
+    expect(target).toBeTruthy();
+    target!.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        ctrlKey: true,
+      }),
+    );
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".tab-inactive.tab-selected").length,
+      ).toBe(1);
+    });
+    // The press on the selected source keeps the selection (the press
+    // law) — a real drag then carries EVERY selected tab: both wear the
+    // lifted posture while the session lives.
+    const rect = target!.getBoundingClientRect();
+    sessionPress(target!, { clientX: rect.x + 10, clientY: rect.y + 10 });
+    sessionMove(rect.x + 80);
+    await waitFor(() => {
+      expect(container.querySelectorAll(".tab-dragging").length).toBe(2);
+    });
+    // The drop lands the block: the two selected tabs end up ADJACENT
+    // in the strip (they were apart), and the selection survives.
+    const idOf = (el: HTMLElement) => el.dataset.tabId;
+    const beforePair = tabs()
+      .filter((t) => t.className.includes("tab-selected") || t.className.includes("tab-active"))
+      .map(idOf);
+    sessionUp(rect.x + 80);
+    await waitFor(() => {
+      const after = tabs()
+        .filter(
+          (t) =>
+            t.className.includes("tab-selected") ||
+            t.className.includes("tab-active"),
+        )
+        .map(idOf);
+      const positions = after.map((id) =>
+        tabs().findIndex((t) => idOf(t) === id),
+      );
+      expect(beforePair.length).toBeGreaterThan(0);
+      const span = (positions[positions.length - 1] ?? 0) - (positions[0] ?? 0);
+      expect(span).toBe(positions.length - 1);
+    });
+    expect(container.querySelectorAll(".tab-dragging").length).toBe(0);
+  });
+
+  it("a ctrl-DESELECTed source refuses the drag (Tab::OnMousePressed's return false)", async () => {
+    const { container } = render(<FrameApp />);
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-tab]").length).toBeGreaterThan(
+        0,
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const ctrlPress = (el: HTMLElement) =>
+      el.dispatchEvent(
+        new MouseEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          ctrlKey: true,
+        }),
+      );
+    // Build a selection, then deselect the added tab: the drag press is
+    // the SAME press that removed it — the source stands outside its
+    // selection at the threshold, so the session dies before it began.
+    const tabs = () =>
+      Array.from(container.querySelectorAll<HTMLElement>("[data-tab]"));
+    const target = tabs().find(
+      (t) =>
+        !t.className.includes("tab-active") &&
+        !t.className.includes("tab-pinned"),
+    );
+    expect(target).toBeTruthy();
+    ctrlPress(target!);
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".tab-inactive.tab-selected").length,
+      ).toBe(1);
+    });
+    const orderBefore = tabs().map((t) => t.dataset.tabId);
+    ctrlPress(target!); // the deselect — the drag press itself
+    await new Promise((resolve) => setTimeout(resolve, 60)); // the emit lands
+    const rect = target!.getBoundingClientRect();
+    sessionPress(target!, { clientX: rect.x + 10, clientY: rect.y + 10 });
+    sessionMove(rect.x + 90);
+    sessionUp(rect.x + 90);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    // No drag posture ever painted, no reorder happened.
+    expect(container.querySelectorAll(".tab-dragging").length).toBe(0);
+    expect(tabs().map((t) => t.dataset.tabId)).toEqual(orderBefore);
+  });
+
+  it("the plain release without a drag collapses a standing multi-selection (OnMouseReleased)", async () => {
+    const { container } = render(<FrameApp />);
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-tab]").length).toBeGreaterThan(
+        0,
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const tabs = () =>
+      Array.from(container.querySelectorAll<HTMLElement>("[data-tab]"));
+    const target = tabs().find(
+      (t) =>
+        !t.className.includes("tab-active") &&
+        !t.className.includes("tab-pinned"),
+    );
+    expect(target).toBeTruthy();
+    // The multi-selection stands.
+    target!.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        ctrlKey: true,
+      }),
+    );
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".tab-inactive.tab-selected").length,
+      ).toBe(1);
+    });
+    // A plain press keeps the selection; the plain RELEASE (a click that
+    // never became a drag) collapses it to the clicked tab — and that
+    // tab becomes the active. (jsdom never synthesizes a click from a
+    // programmatic pointer pair — the release's click rides explicitly,
+    // exactly what the browser dispatches on the release.)
+    const rect = target!.getBoundingClientRect();
+    sessionPress(target!, { clientX: rect.x + 10, clientY: rect.y + 10 });
+    sessionUp(rect.x + 10, rect.y + 10);
+    target!.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }),
+    );
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".tab-inactive.tab-selected").length,
+      ).toBe(0);
+      expect(target!.className.includes("tab-active")).toBe(true);
+    });
+  });
 });
 
 // -- The hover card's machine -----------------------------------------------

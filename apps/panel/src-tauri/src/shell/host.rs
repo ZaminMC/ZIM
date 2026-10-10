@@ -1771,10 +1771,22 @@ fn reorder_in_strip(
         if let Some(axis) = axis {
             // The lift-out rule: the insertion index runs over the
             // REMAINING tabs — the dragged tab's own slot never
-            // participates in its own drop verdict.
+            // participates in its own drop verdict. A source standing
+            // in a multi-selection lifts the WHOLE selection out
+            // (MaybeStartDrag dragged them together — the drop verdict
+            // runs over the strip minus the block; reorder_drop makes
+            // the same block call on the model side).
+            let block: Vec<u32> = {
+                let strip = inner.strip(window_name);
+                if strip.selection.contains(&id) && strip.selection.len() > 1 {
+                    strip.selection.iter().copied().collect()
+                } else {
+                    vec![id]
+                }
+            };
             let others: Vec<layout::Slot> = slots
                 .iter()
-                .filter(|s| !s.header && s.id != id)
+                .filter(|s| !s.header && !block.contains(&s.id))
                 .cloned()
                 .collect();
             let index = if vertical {

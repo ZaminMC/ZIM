@@ -192,6 +192,15 @@ function Glyph({ url }: { url: string }) {
 
 export function FrameApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  // The snapshot's synchronous mirror: the drag session's threshold
+  // decision reads the FRESHEST selection the host pushed — a render
+  // tick behind is a drag behind (the state's own update waits for the
+  // next commit; the pointer's threshold does not).
+  const snapRef = useRef<Snapshot | null>(null);
+  const applySnap = useCallback((next: Snapshot) => {
+    snapRef.current = next;
+    setSnap(next);
+  }, []);
   // The update lane's phases, read straight from the store the frame owns.
   const updatePhase = useUpdates((s) => s.phase);
   const installNow = useUpdates((s) => s.installNow);
@@ -239,10 +248,6 @@ export function FrameApp() {
   // When a drag session released: its pointerup also dispatches a click,
   // and the release must never select the tab it just dragged.
   const dragJustEnded = useRef(0);
-  // A modifier press's timestamp — the click that follows a selection
-  // gesture is the gesture's own release, never a select (the snapshot
-  // the click handler reads can still be stale when the click lands).
-  const gesturePressAt = useRef(0);
   // The demo menu's inline group naming (the popup overlay's form in the
   // real shell; the demo has no popup host).
   const [demoGroupFor, setDemoGroupFor] = useState<number | null>(null);
@@ -551,23 +556,20 @@ export function FrameApp() {
       if ((event.target as HTMLElement | null)?.closest(".tab-close")) return;
       // Tab::OnMousePressed's modifier branches (tab.cc:726-764): the
       // selection gestures fire on the PRESS, in the law's own order —
-      // shift+ctrl > shift > ctrl. A modifier press never arms the drag
-      // this wave: dragging a multi-selection is MoveSelectedTabsTo's
-      // law, the model's next port (documented in PROVENANCE.md).
+      // shift+ctrl > shift > ctrl. EVERY left press then falls through
+      // to MaybeStartDrag (upstream arms the drag on the press too);
+      // the ONE refusal is ctrl-DESELECT — `if (!IsSelected())
+      // return false` — which the threshold decides below with the
+      // host's fresh selection. The gesture's own RELEASE never selects:
+      // upstream discriminates on the RELEASE event's own modifiers
+      // (OnMouseReleased's branch), which the tab's click handler reads
+      // straight off the click event.
       if (event.shiftKey && (event.ctrlKey || event.metaKey)) {
-        gesturePressAt.current = performance.now();
         void shellCommand(CMD.ADD_SELECTION_FROM_ANCHOR_TO, { tab_id: tabId });
-        return;
-      }
-      if (event.shiftKey) {
-        gesturePressAt.current = performance.now();
+      } else if (event.shiftKey) {
         void shellCommand(CMD.EXTEND_TAB_SELECTION, { tab_id: tabId });
-        return;
-      }
-      if (event.ctrlKey || event.metaKey) {
-        gesturePressAt.current = performance.now();
+      } else if (event.ctrlKey || event.metaKey) {
         void shellCommand(CMD.TOGGLE_TAB_SELECTION, { tab_id: tabId });
-        return;
       }
       const element = event.currentTarget as HTMLElement;
       const pointerId = event.pointerId;
@@ -594,6 +596,32 @@ export function FrameApp() {
           !moved &&
           Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10
         ) {
+          // MaybeStartDrag's set law (tab_strip.cc:267), read from the
+          // host's FRESHEST snapshot — the press's gesture synced during
+          // the walk to the threshold. A source standing in a
+          // multi-selection drags the WHOLE selection; the ctrl-DESELECTed
+          // source stands OUTSIDE its selection — upstream's `return
+          // false` — so the session dies before it began (no capture, no
+          // host session, and the release's click stays suppressed by the
+          // gesture gate). A plain or shift press always owns its
+          // membership (SelectTab / ExtendSelectionTo put the source in),
+          // so a source outside a modifier-less selection is only the
+          // deselect race — the same verdict.
+          const fresh = snapRef.current;
+          const selectedIds = fresh
+            ? fresh.tabs.filter((t) => t.selected).map((t) => t.id)
+            : [];
+          if (!selectedIds.includes(tabId)) {
+            moved = false;
+            done = true;
+            dragRef.current = null;
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            window.removeEventListener("pointercancel", onCancel);
+            window.removeEventListener("keydown", onKey);
+            element.removeEventListener("lostpointercapture", onLost);
+            return;
+          }
           moved = true;
           if (dragRef.current) dragRef.current.moved = true;
           // The threshold is where the drag begins: capture the pointer
@@ -682,7 +710,7 @@ export function FrameApp() {
     bootFrame()
       .then((first) => {
         if (first) {
-          setSnap(first);
+          applySnap(first);
           setBootError(null);
         } else if (!isTauri()) {
           // No host answered and no demo fixture asked for the stage:
@@ -705,7 +733,7 @@ export function FrameApp() {
           );
         }
       });
-  }, []);
+  }, [applySnap]);
 
   // Boot + the snapshot lane (the model pushes every change; a pushed
   // snapshot also rescues a frame whose boot answer was lost).
@@ -727,7 +755,7 @@ export function FrameApp() {
     }
     void onSnapshot((next) => {
       if (disposed) return;
-      setSnap(next);
+      applySnap(next);
       setBootError(null);
     }).then((off) => {
       if (disposed) off();
@@ -752,7 +780,7 @@ export function FrameApp() {
       unlisten?.();
       window.removeEventListener("resize", report);
     };
-  }, [boot]);
+  }, [boot, applySnap]);
 
   // The strip's re-measure whenever it (re)appears: boot, bookmarks-bar
   // posture flips, any snapshot that changes the band's shape. The two
@@ -981,48 +1009,56 @@ export function FrameApp() {
 
   // The drag session's live strip (Chromium's animated track): while
   // the pointer stays in the band, the strip renders the layout AS IF
-  // the dragged tab already stood at the preview index — the neighbors
+  // the dragged block already stood at the preview index — the neighbors
   // slide, the gap travels with the pointer, and the release lands the
-  // tab exactly where the gap sits (the model settles at the drop, so
+  // block exactly where the gap sits (the model settles at the drop, so
   // the post-drop snapshot matches what is already on screen). Beyond
   // the band the posture is a tear-off: the model slots hold, the gap
-  // closes, and the lifted tab floats alone. The preview runs over the
-  // slots MINUS the dragged tab (the lift-out rule the drop applies),
-  // so the verdict can never chase its own gap.
+  // closes, and the lifted tabs float alone. The preview runs over the
+  // slots MINUS the dragged block (the lift-out rule the drop applies),
+  // so the verdict can never chase its own gap. The BLOCK is
+  // MaybeStartDrag's set law: the source standing in a multi-selection
+  // drags the whole selection (strip order); otherwise itself alone.
   const dragTabId = dragPointer != null ? (dragRef.current?.tab ?? null) : null;
+  const dragBlockIds: number[] = (() => {
+    if (dragTabId == null) return [];
+    const selectedIds = snap.tabs.filter((t) => t.selected).map((t) => t.id);
+    return selectedIds.includes(dragTabId) && selectedIds.length > 1
+      ? selectedIds
+      : [dragTabId];
+  })();
   // The strip band the session lives in: the horizontal band's height
   // law (41 + 15 DIP) or the rail's width law (240 + 15 DIP).
   const inStripBand =
     dragPointer != null &&
     (vertical ? dragPointer.x <= railW + 15 : dragPointer.y <= 41 + 15);
   let visualSlots = snap.slots;
-  if (dragTabId != null && inStripBand) {
-    const draggedSlot = snap.slots.find((s) => !s.header && s.id === dragTabId);
+  if (dragTabId != null && dragBlockIds.length > 0 && inStripBand) {
     const draggedTab = snap.tabs.find((t) => t.id === dragTabId);
-    if (draggedSlot && draggedTab) {
+    if (draggedTab) {
       const preview = vertical
         ? dropIndexFromSlotsVertical(
-            snap.slots.filter((s) => s.header || s.id !== dragTabId),
+            snap.slots.filter((s) => s.header || !dragBlockIds.includes(s.id)),
             dragPointer.y + scrollValue,
           )
         : dropIndexFromSlots(
-            snap.slots.filter((s) => s.header || s.id !== dragTabId),
+            snap.slots.filter((s) => s.header || !dragBlockIds.includes(s.id)),
             dragPointer.x + scrollValue,
           );
-      // The hypothetical arrangement — the dragged tab re-inserted at
+      // The hypothetical arrangement — the dragged block re-inserted at
       // the preview index under the SAME insertion law the model's
-      // move_to applies (the pinned block's edge clamps the index) —
-      // laid out by the same law the model uses, so the drop lands
-      // exactly where the gap sits and the release is seamless.
+      // move_block applies (the block lands in one piece) — laid out by
+      // the same law the model uses, so the drop lands exactly where the
+      // gap sits and the release is seamless.
+      const block = dragBlockIds
+        .map((id) => snap.tabs.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => t != null)
+        .map((t) => ({ id: t.id, pinned: t.pinned, group: t.group }));
       const withDragged = insertAtDropIndex(
         snap.tabs
-          .filter((t) => t.id !== dragTabId)
+          .filter((t) => !dragBlockIds.includes(t.id))
           .map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
-        {
-          id: draggedTab.id,
-          pinned: draggedTab.pinned,
-          group: draggedTab.group,
-        },
+        block,
         preview,
       );
       visualSlots = vertical
@@ -1064,6 +1100,19 @@ export function FrameApp() {
     const maxDy = railHeight - visualY - height + 12;
     return Math.min(Math.max(raw, min), Math.max(min, maxDy));
   };
+  // The block's ONE delta: the source's own slot supplies the clamp, the
+  // whole block rides the same number — Chromium's dragged views move as
+  // a unit, never shearing apart at the window's edge.
+  const blockSourceSlot =
+    dragTabId != null
+      ? snap.slots.find((s) => !s.header && s.id === dragTabId)
+      : null;
+  const blockDx = blockSourceSlot
+    ? dragDx(blockSourceSlot.x, blockSourceSlot.width)
+    : null;
+  const blockDy = blockSourceSlot
+    ? dragDy(blockSourceSlot.y, blockSourceSlot.height)
+    : null;
 
   const commitOmnibox = async () => {
     if (omniboxText == null) return;
@@ -1310,23 +1359,18 @@ export function FrameApp() {
                 nextVisibleTab != null &&
                 nextVisibleTab.group != null &&
                 nextVisibleTab.group === tab.group;
-              // The drag session's lift: the moved tab follows the pointer
-              // (clamped to the window) with the settle transitions off.
-              // The translate's base is the MODEL slot — the visual layout
+              // The drag session's lift: every dragged block member
+              // follows the pointer (the SAME delta — the block moves as
+              // a unit) with the settle transitions off. The translate's
+              // base is the MEMBER's own MODEL slot — the visual layout
               // reshuffles under the session, and a hypothetical base
               // would compound the pointer delta into a drift.
-              const dragging = dragTabId === tab.id;
+              const dragging = dragBlockIds.includes(tab.id);
               const modelSlot = dragging
                 ? snap.slots.find((s) => !s.header && s.id === tab.id)
                 : null;
-              const dx =
-                dragging && modelSlot
-                  ? dragDx(modelSlot.x, modelSlot.width)
-                  : null;
-              const dy =
-                dragging && modelSlot
-                  ? dragDy(modelSlot.y, modelSlot.height)
-                  : null;
+              const dx = dragging ? blockDx : null;
+              const dy = dragging ? blockDy : null;
               // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
               // cannot fit beside a glyph — the slot shows its glyph alone,
               // centered in the visible span, the way Chromium's minimum
@@ -1407,19 +1451,22 @@ export function FrameApp() {
                   onMouseEnter={() =>
                     updateHoverCard({ kind: "tab", id: tab.id }, "hover")
                   }
-                  onClick={() => {
+                  onClick={(e) => {
                     // A drag session's release also dispatches a click —
                     // the just-ended drag never selects.
                     if (performance.now() - dragJustEnded.current < 200) return;
-                    // A modifier press's click is the gesture's own
-                    // release — never a select.
-                    if (performance.now() - gesturePressAt.current < 400)
-                      return;
-                    // Tab::OnMousePressed's plain branch fires SelectTab
-                    // ONLY when the tab is not already selected — the
-                    // plain click on a selected tab keeps the selection
-                    // (that's what makes the drag-together usable).
-                    if (!tab.selected) selectTab(tab.id);
+                    // Tab::OnMouseReleased's law, verbatim: only the
+                    // PLAIN release selects — a release that still holds
+                    // shift or the selection modifier is the selection
+                    // gesture's own tail (the modifier presses select
+                    // ON the press; their release must not re-select).
+                    if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+                    // Tab::OnMouseReleased's plain branch: SelectTab —
+                    // the press kept a standing multi-selection only so a
+                    // real drag could carry it; a plain RELEASE without a
+                    // drag collapses it to the clicked tab (the same law
+                    // that makes a click on the active tab a no-op).
+                    selectTab(tab.id);
                   }}
                   onAuxClick={(e) => {
                     if (e.button === 1) {

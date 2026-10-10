@@ -149,3 +149,80 @@ Files ported (chromium/src main, fetched 2026-10-10):
 - **Selected-hover** renders the same 75% fill (upstream mixes
   selected-hover at 85% — kHoveredSelectedTabOpacity — unused until the
   two-opacity law has a consumer that needs the distinction).
+
+## Task 17 — the selection drags as a block (TabDragController's carry + MoveSelectedTabsTo)
+
+Files ported (chromium/src main, fetched 2026-10-10):
+
+- `chrome/browser/ui/tabs/tab_strip_model.cc:1079` — `MoveSelectedTabsTo`:
+  the selection splits into its pinned and unpinned classes (strip
+  order), each lands CONTIGUOUS at its own clamped destination —
+  `last_pinned = clamp(index + n_p - 1, n_p - 1, pinned_count - 1)`,
+  `first_unpinned = clamp(index + n_p, pinned_count, count - n_u)`. The
+  bounds read the PRE-move geometry; the insert lands the class in one
+  piece over the strip with the class lifted out. Ported as
+  `Strip::move_selected_to` + the private `move_block` (lift, close the
+  gap, insert at dest + offset, then the group law).
+- `chrome/browser/ui/tabs/tab_strip_model_unittest.cc:5535` — the
+  MoveSelectedTabsTo matrix (19 cases + two group cases) copied VERBATIM
+  as the Rust pin `move_selected_to_matches_the_unittest_matrix` (the
+  state string is GetTabStripStateString's: creation rank + 'p'). The
+  group cases are adapted to ZIM's group_create (it gathers members to
+  the unpinned edge — a documented divergence) with the strand geometry
+  rebuilt by hand; the harness's own law came from
+  `tab_strip_model_test_utils.{h,cc}` (PrepareTabstripForSelectionTest:
+  background tabs, pin the first N, selection EXACTLY `selected_tabs`,
+  anchor = first).
+- `chrome/browser/ui/views/tabs/tab_strip.cc:267` — `MaybeStartDrag`'s
+  set law: the dragging views are ALL selected tabs (strip order;
+  fully-selected groups bring their headers). Ported at the frame's
+  threshold: the drag set reads the host's FRESHEST snapshot (the press's
+  gesture synced during the walk to the 10 DIP threshold).
+- `chrome/browser/ui/views/tabs/tab.cc:726` — the press law's completion:
+  EVERY left press falls through to MaybeStartDrag (upstream arms on the
+  press — modifier presses included); the ONE refusal is ctrl-DESELECT
+  (`if (!IsSelected()) return false`). Ported: the gestures still fire on
+  the press, the session arms on EVERY press, and the threshold aborts
+  when the source stands outside its selection.
+- `chrome/browser/ui/views/tabs/tab.cc:769` (OnMouseReleased) — the
+  release law: only the PLAIN release (no shift, no selection modifier
+  still held) selects — `SelectTab` collapses a standing multi-selection.
+  The press kept the selection only so a real drag could carry it.
+  Ported verbatim in the tab's click handler; the old 400ms timestamp
+  gate is GONE (upstream discriminates on the release event's own
+  modifiers — a timestamp cannot).
+- `chrome/browser/ui/views/tabs/dragging/dragging_tabs_session.cc:140` —
+  the live drag moves the model with `MoveSelectedTabsTo(to_index, ...)`
+  behind a 16 DIP scaled threshold; the drop inherits the same law.
+- `chrome/browser/ui/views/tabs/dragging/{tab_drag_controller,drag_session_data}.{h,cc}`
+  — the drag session's shape (initial_selection_model carried, the
+  revert law when tabs close mid-drag, RestoreInitialSelection on
+  detach).
+
+### Documented deltas
+
+- **The drag set materializes at the THRESHOLD, not the press.**
+  Upstream computes `dragging_views` inside MaybeStartDrag (press time)
+  from a synchronous model. ZIM's shell is async (command → host →
+  snapshot); reading the selection at the threshold (~2 frames later)
+  keeps the verdict model-authoritative. A supersonic ctrl-drag could
+  briefly preview a single tab before the gesture syncs — the DROP still
+  lands the full block (reorder_drop re-derives the block from the
+  model's selection).
+- **The float is one delta.** Upstream lays each dragged view against the
+  block's combined bounds; ZIM computes ONE translate (the source slot's
+  clamp) and rides every member on it — the block never shears, and the
+  far members may overflow the window edge by the block's tail.
+- **Group headers do not join the drag.** Upstream's fully-selected
+  groups carry their header views; ZIM's strip has no draggable header
+  slot (the chip is the group's own surface) — the tabs drag, the chip
+  stays.
+- **Block tear-off is single-tab.** Upstream's detach carries every
+  dragged tab into the new window; ZIM's `detach` lifts one tab — a
+  drop past the window with a multi-selection tears off the SOURCE
+  alone. The dock-back/reorder path is the block law; the tear-off's
+  multi-tab seeding is the next port if the shell grows multi-detach.
+- **The demo mirror skips the unpin policy.** `demoDragDrop` lifts the
+  block and lands it (insertAtDropIndex's block form); the pinned-class
+  unpin on an edge-crossing drop stays model-side (the harness tests it
+  directly) — the fixture has no pin command to exercise it through.

@@ -441,7 +441,16 @@ impl Strip {
     /// (upstream's drag-out-of-block unpin; the reverse never pins — an
     /// unpinned tab dropped into the pinned block lands at its edge,
     /// move_to's clamp).
+    ///
+    /// A SELECTED drop rides the block: when the source stands in a
+    /// multi-selection, the drop is MoveSelectedTabsTo's law
+    /// ([`Strip::move_selected_to`]) — the whole selection lands as one
+    /// block (MaybeStartDrag dragged them together, the drop moves them
+    /// together) — and the unpin policy rides with the SOURCE: a pinned
+    /// source dropped past the block's edge unpins every selected pinned
+    /// tab (they crossed the boundary together).
     pub fn reorder_drop(&mut self, id: TabId, index_among_others: usize) -> Option<usize> {
+        let block = self.selection.contains(&id) && self.selection.len() > 1;
         let pinned = self
             .tabs
             .iter()
@@ -449,9 +458,102 @@ impl Strip {
             .map(|t| t.pinned)
             .unwrap_or(false);
         if pinned && index_among_others >= self.block_edge(true) {
-            self.set_pinned(id, false);
+            if block {
+                let pinned_selected: Vec<TabId> = self
+                    .tabs
+                    .iter()
+                    .filter(|t| t.pinned && self.selection.contains(&t.id))
+                    .map(|t| t.id)
+                    .collect();
+                for tab_id in pinned_selected {
+                    self.set_pinned(tab_id, false);
+                }
+            } else {
+                self.set_pinned(id, false);
+            }
+        }
+        if block {
+            self.move_selected_to(index_among_others)?;
+            return self.index_of(id);
         }
         self.move_to(id, index_among_others)
+    }
+
+    /// TabStripModel::MoveSelectedTabsTo (tab_strip_model.cc:1079) — the
+    /// drag's block move. The selection splits into its pinned and
+    /// unpinned classes (strip order, by stable id), and each class
+    /// lands CONTIGUOUS at its own clamped destination:
+    /// `last_pinned = clamp(index + n_p - 1, n_p - 1, pinned_count - 1)`
+    /// puts the pinned class inside the pinned region; the unpinned
+    /// class lands from `clamp(index + n_p, pinned_count, count - n_u)`
+    /// on. The bounds read the PRE-move geometry (the unittest's own
+    /// arithmetic — the 20-case matrix in tab_strip_model_unittest.cc
+    /// pins the law verbatim); the insert lands the class in one piece
+    /// over the strip with the class lifted out, which is exactly the
+    /// net the upstream move chain produces. The group law rides after
+    /// each class: a moved tab whose group no longer contiguous
+    /// ungroups (the same divergence [`Strip::move_to`] documents; the
+    /// unittest's part-group case keeps the group alive with the
+    /// stay-put member). The law never unpins — the drop policy above
+    /// owns that decision.
+    pub fn move_selected_to(&mut self, index: usize) -> Option<()> {
+        let pinned_count = self.block_edge(true);
+        let pinned_selected: Vec<TabId> = self
+            .tabs
+            .iter()
+            .filter(|t| t.pinned && self.selection.contains(&t.id))
+            .map(|t| t.id)
+            .collect();
+        let unpinned_selected: Vec<TabId> = self
+            .tabs
+            .iter()
+            .filter(|t| !t.pinned && self.selection.contains(&t.id))
+            .map(|t| t.id)
+            .collect();
+        if pinned_selected.is_empty() && unpinned_selected.is_empty() {
+            return None;
+        }
+        let count_before = self.tabs.len() as isize;
+        let n_p = pinned_selected.len() as isize;
+        let n_u = unpinned_selected.len() as isize;
+        if n_p > 0 {
+            let last_pinned = (index as isize + n_p - 1).clamp(n_p - 1, pinned_count as isize - 1);
+            let dest = (last_pinned - n_p + 1) as usize;
+            self.move_block(&pinned_selected, dest);
+        }
+        if n_u > 0 {
+            let first_unpinned =
+                (index as isize + n_p).clamp(pinned_count as isize, count_before - n_u);
+            self.move_block(&unpinned_selected, first_unpinned as usize);
+        }
+        Some(())
+    }
+
+    /// One class's landing: the class lifts out in strip order, the
+    /// remainder closes the gap, the class re-inserts at `dest` in one
+    /// piece — then the group law: a moved tab whose group is no longer
+    /// contiguous leaves it (the stay-put members keep the group).
+    fn move_block(&mut self, ids: &[TabId], dest: usize) {
+        let mut block = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(pos) = self.tabs.iter().position(|t| t.id == *id) {
+                block.push(self.tabs.remove(pos));
+            }
+        }
+        let dest = dest.min(self.tabs.len());
+        for (offset, tab) in block.into_iter().enumerate() {
+            self.tabs.insert(dest + offset, tab);
+        }
+        for id in ids {
+            let Some(group) = self.tabs.iter().find(|t| t.id == *id).and_then(|t| t.group) else {
+                continue;
+            };
+            if !self.group_contiguous(group) {
+                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == *id) {
+                    t.group = None;
+                }
+            }
+        }
     }
 
     /// SelectTabAt — the PLAIN click's law (Tab::OnMousePressed fires it
@@ -1365,6 +1467,226 @@ mod tests {
         let tab = strip.tabs.iter().find(|t| t.id == b).unwrap();
         assert!(tab.pinned);
         assert_eq!(strip.tabs[0].id, b);
+    }
+
+    // -- MoveSelectedTabsTo: the block move (tab_strip_model.cc:1079).
+    // The harness is upstream's own (tab_strip_model_test_utils.cc's
+    // PrepareTabstripForSelectionTest): tab_count tabs, the first
+    // pinned_count pinned, exactly `selected` selected, the anchor on
+    // the first. The expectations are GetTabStripStateString's —
+    // creation rank + 'p' — copied VERBATIM from
+    // tab_strip_model_unittest.cc's MoveSelectedTabsTo matrix.
+
+    /// The unittest's own harness (see the block comment above). Returns
+    /// the tabs in CREATION order — the state string's numbering. Every
+    /// append is background (upstream's PrepareTabs adds quiet tabs), and
+    /// the boot tab's standing selection is cleared — the harness's
+    /// selection is EXACTLY `selected` (SetSelectionFromModel's law).
+    fn prepare_for_selection_test(
+        strip: &mut Strip,
+        tab_count: usize,
+        pinned_count: usize,
+        selected: &[usize],
+    ) -> Vec<TabId> {
+        while strip.tabs.len() < tab_count {
+            strip.append(Destination::Servers, false);
+        }
+        let created: Vec<TabId> = strip.tabs.iter().map(|t| t.id).collect();
+        for tab_id in created.iter().take(pinned_count) {
+            strip.set_pinned(*tab_id, true);
+        }
+        strip.selection.clear();
+        strip.anchor = None;
+        for index in selected {
+            strip.selection.insert(created[*index]);
+        }
+        if let Some(first) = selected.first() {
+            let id = created[*first];
+            strip.active = Some(id);
+            strip.anchor = Some(id);
+        }
+        created
+    }
+
+    /// GetTabStripStateString — creation rank + 'p' per tab.
+    fn state_string(strip: &Strip, created: &[TabId]) -> String {
+        strip
+            .tabs
+            .iter()
+            .map(|t| {
+                let rank = created
+                    .iter()
+                    .position(|&c| c == t.id)
+                    .expect("every tab was created");
+                if t.pinned {
+                    format!("{rank}p")
+                } else {
+                    format!("{rank}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn move_selected_to_matches_the_unittest_matrix() {
+        // (tab_count, pinned_count, selected, target_index, expected)
+        // — tab_strip_model_unittest.cc:5543 verbatim.
+        let matrix: &[(usize, usize, &[usize], usize, &str)] = &[
+            // 1 selected tab.
+            (2, 0, &[0], 1, "1 0"),
+            (3, 0, &[0], 2, "1 2 0"),
+            (3, 0, &[2], 0, "2 0 1"),
+            (3, 0, &[2], 1, "0 2 1"),
+            (3, 0, &[0, 1], 0, "0 1 2"),
+            // 2 selected tabs.
+            (6, 0, &[4, 5], 1, "0 4 5 1 2 3"),
+            (3, 0, &[0, 1], 1, "2 0 1"),
+            (4, 0, &[0, 2], 1, "1 0 2 3"),
+            (6, 0, &[0, 1], 3, "2 3 4 0 1 5"),
+            // 3 selected tabs.
+            (6, 0, &[0, 2, 3], 3, "1 4 5 0 2 3"),
+            (7, 0, &[4, 5, 6], 1, "0 4 5 6 1 2 3"),
+            (7, 0, &[1, 5, 6], 4, "0 2 3 4 1 5 6"),
+            // 5 selected tabs.
+            (8, 0, &[0, 2, 3, 6, 7], 3, "1 4 5 0 2 3 6 7"),
+            // 7 selected tabs.
+            (
+                16,
+                0,
+                &[0, 1, 2, 3, 4, 7, 9],
+                8,
+                "5 6 8 10 11 12 13 14 0 1 2 3 4 7 9 15",
+            ),
+            // With pinned tabs.
+            (6, 2, &[2, 3], 2, "0p 1p 2 3 4 5"),
+            (6, 2, &[0, 4], 3, "1p 0p 2 3 4 5"),
+            (6, 3, &[1, 2, 4], 0, "1p 2p 0p 4 3 5"),
+            (8, 3, &[1, 3, 4], 4, "0p 2p 1p 5 6 3 4 7"),
+            (7, 4, &[2, 3, 4], 3, "0p 1p 2p 3p 5 4 6"),
+        ];
+        for (i, (tab_count, pinned_count, selected, target, expected)) in matrix.iter().enumerate()
+        {
+            let mut strip = Strip::new();
+            let created =
+                prepare_for_selection_test(&mut strip, *tab_count, *pinned_count, selected);
+            strip
+                .move_selected_to(*target)
+                .expect("the selection exists");
+            assert_eq!(state_string(&strip, &created), *expected, "case {i}");
+        }
+    }
+
+    #[test]
+    fn move_selected_to_keeps_a_whole_group_that_moves_together() {
+        // MoveSelectedTabsToWithEntireGroupSelected, adapted to ZIM's
+        // group_create (it gathers members to the unpinned edge — a
+        // documented divergence — so the group lives at the edge here):
+        // the whole group rides the block intact and stays grouped.
+        let mut strip = Strip::new();
+        let created = prepare_for_selection_test(&mut strip, 10, 5, &[2, 3, 5, 6]);
+        let group = strip
+            .group_create(&[created[5], created[6]], "docs")
+            .unwrap();
+        strip.move_selected_to(3).expect("the selection exists");
+        assert_eq!(state_string(&strip, &created), "0p 1p 4p 2p 3p 5 6 7 8 9");
+        assert!(strip.groups.contains_key(&group));
+        assert!(strip.group_contiguous(group));
+    }
+
+    #[test]
+    fn move_selected_to_ungroups_only_the_stranded_mover() {
+        // MoveSelectedTabsToWithPartGroupSelected, adapted: the mover is
+        // a group member whose landing lands an ungrouped tab between it
+        // and its stay-put partner — the MOVER ungroups, the group
+        // survives with the stayer.
+        let mut strip = Strip::new();
+        let created = prepare_for_selection_test(&mut strip, 10, 5, &[2, 3, 5]);
+        let group = strip
+            .group_create(&[created[5], created[6]], "docs")
+            .unwrap();
+        // An ungrouped stranger slots in BEFORE the group: the group now
+        // sits at 6,7 with tab 7 ahead of it — the geometry the strand
+        // needs (ZIM's group_create put the group at the edge).
+        strip.move_to(created[7], 5);
+        strip.move_selected_to(3).expect("the selection exists");
+        assert_eq!(state_string(&strip, &created), "0p 1p 4p 2p 3p 5 7 6 8 9");
+        let mover = strip.tabs.iter().find(|t| t.id == created[5]).unwrap();
+        assert!(!mover.group.is_some());
+        let stayer = strip.tabs.iter().find(|t| t.id == created[6]).unwrap();
+        assert_eq!(stayer.group, Some(group));
+    }
+
+    #[test]
+    fn a_selected_drop_rides_the_block() {
+        // The drop policy: a source standing in a multi-selection
+        // drops the WHOLE selection as one block (MaybeStartDrag
+        // dragged them together — the drop moves them together).
+        let mut strip = Strip::new();
+        let fresh = strip.tabs[0].id;
+        let a = strip.append(Destination::Servers, false);
+        let b = strip.append(Destination::Jobs, false);
+        let c = strip.append(Destination::About, false);
+        let d = strip.append(Destination::Settings, false);
+        strip.selection.clear();
+        strip.anchor = None;
+        strip.selection.insert(b);
+        strip.selection.insert(d);
+        strip.active = Some(d);
+        strip.anchor = Some(d);
+        // Dropping d at 1 among the others [fresh, a, c] (the boot tab
+        // rides at 0) carries b: the block [b, d] lifts out and lands
+        // between fresh and a.
+        strip.reorder_drop(d, 1).expect("the drop lands");
+        let order: Vec<TabId> = strip.tabs.iter().map(|t| t.id).collect();
+        assert_eq!(order, vec![fresh, b, d, a, c]);
+        assert!(strip.selection.contains(&b) && strip.selection.contains(&d));
+    }
+
+    #[test]
+    fn a_pinned_source_dropped_past_the_edge_unpins_the_selected_class() {
+        // The unpin policy rides with the SOURCE across the whole
+        // selected pinned class: they crossed the boundary together.
+        let mut strip = Strip::new();
+        let fresh = strip.tabs[0].id;
+        strip.set_pinned(fresh, true);
+        let a = strip.append(Destination::Servers, false);
+        // The spacer keeps the block's edge honest (one unpinned tab
+        // below the class) — its id is never selected.
+        let spacer = strip.append(Destination::Jobs, false);
+        let b = strip.append(Destination::About, false);
+        strip.set_pinned(a, true);
+        strip.set_pinned(b, true);
+        // Block [fresh, a, b], edge 3; the selection is {a, b} and the
+        // drop of b at 3 lands at the edge → BOTH unpin.
+        strip.selection.clear();
+        strip.selection.insert(a);
+        strip.selection.insert(b);
+        strip.reorder_drop(b, 3).expect("the drop lands");
+        let a_tab = strip.tabs.iter().find(|t| t.id == a).unwrap();
+        let b_tab = strip.tabs.iter().find(|t| t.id == b).unwrap();
+        assert!(!a_tab.pinned);
+        assert!(!b_tab.pinned);
+        // The block lands together — the unpins edge-jumped them, the
+        // block move re-gathered them at the drop point.
+        let order: Vec<TabId> = strip.tabs.iter().map(|t| t.id).collect();
+        assert_eq!(order, vec![fresh, spacer, b, a]);
+    }
+
+    #[test]
+    fn a_single_selection_drop_stays_the_single_law() {
+        // The regression guard: a lone selection drops exactly as the
+        // single law always did — the block gate needs company.
+        let mut strip = Strip::new();
+        let fresh = strip.tabs[0].id;
+        let a = strip.append(Destination::Servers, false);
+        let b = strip.append(Destination::Jobs, false);
+        strip.selection.clear();
+        strip.selection.insert(a);
+        strip.active = Some(a);
+        strip.reorder_drop(a, 2).expect("the drop lands");
+        let order: Vec<TabId> = strip.tabs.iter().map(|t| t.id).collect();
+        assert_eq!(order, vec![fresh, b, a]);
     }
 
     #[test]

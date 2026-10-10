@@ -181,34 +181,39 @@ export const shellDrag = (
 };
 
 /** The drop's insertion law, view side — mirrors shell/tabs.rs's
- *  move_to: the drop index lives in SLOT space (the pinned block
- *  leads), the array lives in MODEL space. An unpinned tab never
+ *  move_to/move_block: the drop index lives in SLOT space (the pinned
+ *  block leads), the array lives in MODEL space. An unpinned tab never
  *  lands inside the pinned block; a pinned one never leaves it by
- *  drop index (block_edge's clamp). The dragged tab inserts before
- *  the anchor the clamped index names, in array terms. */
+ *  drop index (block_edge's clamp). The dragged tab — or BLOCK (a
+ *  multi-selection's drop, move_block's one-piece landing) — lands at
+ *  the clamped index, each member at clamped + offset — move_block's
+ *  own walk (model order and slot order agree: both lead with the
+ *  pinned block, so the clamped slot index IS the model index). */
 export function insertAtDropIndex<T extends { id: number; pinned: boolean }>(
   rest: T[],
-  dragged: T,
+  dragged: T | T[],
   index: number,
 ): T[] {
-  const laidOut = [...rest].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  const pinnedCount = laidOut.filter((t) => t.pinned).length;
-  const clamped = dragged.pinned
+  const block = Array.isArray(dragged) ? dragged : [dragged];
+  const lead = block[0];
+  if (!lead) return [...rest];
+  const pinnedCount = rest.filter((t) => t.pinned).length;
+  const clamped = lead.pinned
     ? Math.min(Math.max(index, 0), pinnedCount)
     : Math.max(index, pinnedCount);
-  const anchor = laidOut[clamped];
   const out = [...rest];
-  if (!anchor) {
-    out.push(dragged);
-    return out;
+  for (let offset = 0; offset < block.length; offset++) {
+    const member = block[offset];
+    if (!member) break;
+    out.splice(Math.min(clamped + offset, out.length), 0, member);
   }
-  const pos = out.findIndex((t) => t.id === anchor.id);
-  out.splice(pos < 0 ? out.length : pos, 0, dragged);
   return out;
 }
 
 /** The demo's reorder echo — shell/tabs.rs's reorder_drop at fixture
- *  scale: lift the tab out, insert at the drop index among the others
+ *  scale: lift the dragged tab — or the WHOLE selection, when the
+ *  source stands in a multi-selection (the block gate the model's
+ *  reorder_drop runs) — out, insert at the drop index among the others
  *  (the block-edge clamp included). The mutation is worthless without
  *  a push: demoEmit() re-reads the fixture through the same layout law
  *  the host's emit_tab_state rides — without it the reorder happened
@@ -222,19 +227,29 @@ function demoDragDrop(tabId: number, x: number | null, y: number | null): void {
     active: demo.active,
   };
   const slots = demo.vertical ? demoLayoutStripVertical(stripArg, 240) : demoLayoutStrip(stripArg);
-  const others = slots.filter((s) => !s.header && s.id !== tabId);
+  // The block gate: a selected source with company lifts the whole
+  // selection (strip order), itself alone otherwise.
+  const blockIds =
+    demo.selection.has(tabId) && demo.selection.size > 1
+      ? demo.tabs.filter((t) => demo.selection.has(t.id)).map((t) => t.id)
+      : [tabId];
+  const others = slots.filter((s) => !s.header && !blockIds.includes(s.id));
   const index = demo.vertical
     ? dropIndexFromSlotsVertical(others, y ?? 0)
     : dropIndexFromSlots(others, x ?? 0);
-  const from = demo.tabs.findIndex((t) => t.id === tabId);
-  if (from < 0) return;
-  const [gone] = demo.tabs.splice(from, 1);
-  if (!gone) return;
   // insertAtDropIndex keeps the input members' references — the full
   // fixture rows ride along; no lossy id-lookup rebuild (a lookup in
   // the post-splice array could never find the lifted tab and the
   // emit's snapshot read a hole: reading 'id' of undefined).
-  demo.tabs = insertAtDropIndex(demo.tabs, gone, index);
+  const lifted: typeof demo.tabs = [];
+  for (const id of blockIds) {
+    const from = demo.tabs.findIndex((t) => t.id === id);
+    if (from < 0) continue;
+    const [gone] = demo.tabs.splice(from, 1);
+    if (gone) lifted.push(gone);
+  }
+  if (!lifted.length) return;
+  demo.tabs = insertAtDropIndex(demo.tabs, lifted, index);
   demoEmit();
 }
 
