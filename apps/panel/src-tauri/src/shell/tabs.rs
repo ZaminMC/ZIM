@@ -235,7 +235,9 @@ pub fn zoom_step(current: f32, direction: i32) -> f32 {
 pub struct Group {
     pub id: GroupId,
     pub label: String,
-    /// Index into the frame's six-color palette.
+    /// Index into Chromium's group color enum (tab_group_color.h,
+    /// TabGroupColorId — the wire format values are written to disk, so
+    /// the index semantics never change).
     pub color: u8,
     pub collapsed: bool,
 }
@@ -268,7 +270,11 @@ pub struct Strip {
 }
 
 pub const MAX_CLOSED: usize = 25;
-pub const GROUP_COLORS: u32 = 6;
+/// tab_groups::TabGroupColorId::kNumEntries — grey, blue, red, yellow,
+/// green, pink, purple, cyan, orange (components/tab_groups/tab_group_color.h).
+/// New group ids cycle the enum; the frame resolves the index through the
+/// backported palette (ui/chromium/chromiumTabs.ts).
+pub const GROUP_COLORS: u32 = 9;
 
 impl Default for Strip {
     fn default() -> Self {

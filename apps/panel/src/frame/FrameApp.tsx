@@ -42,6 +42,17 @@ import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
 import { startUpdates, stopUpdates, updatesSentence, useUpdates } from "../state/updates";
 import { CMD } from "../commandIds";
 import {
+  GROUP_LINE_STROKE_INSET,
+  STRIP_COLORS,
+  TAB_HEIGHT,
+  TAB_STRIP_DECLUTTER_MIN_TABS_FOR_SEPARATOR_HIDE,
+  activeTabPath,
+  groupChipForeground,
+  groupTabStripColor,
+  separatorColor,
+  topCornerRadiusForWidth,
+} from "../ui/chromium/chromiumTabs";
+import {
   IconBack,
   IconForward,
   IconReload,
@@ -69,14 +80,16 @@ import {
 } from "../ui/icons";
 import "./frame.css";
 
-const GROUP_COLOR_VARS = [
-  "var(--group-sky)",
-  "var(--group-grass)",
-  "var(--group-amber)",
-  "var(--group-rose)",
-  "var(--group-violet)",
-  "var(--group-slate)",
-];
+// The strip's group colors ARE Chromium's (ui/chromium/chromiumTabs.ts —
+// the classic palette from chrome_color_mixer.cc, enum order from
+// tab_group_color.h). No local rogue set survives.
+const groupVars = (colorIndex: number): Record<string, string> => {
+  const color = groupTabStripColor(colorIndex);
+  return {
+    ["--tab-group-color" as string]: color.light,
+    ["--tab-group-fg" as string]: groupChipForeground(color.light),
+  };
+};
 
 // The favicon lane: the frame knows each destination's kind from its
 // zim:// URL, so a glyph stands where the site's icon will ride later.
@@ -647,6 +660,9 @@ export function FrameApp() {
         ref={stripRef}
         data-tauri-drag-region
         aria-orientation={vertical ? "vertical" : "horizontal"}
+        data-declutter={
+          snap.tabs.length >= TAB_STRIP_DECLUTTER_MIN_TABS_FOR_SEPARATOR_HIDE || undefined
+        }
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).dataset.tab === undefined) {
             // Windows titlebar law: a bare-strip double click asks about
@@ -662,7 +678,15 @@ export function FrameApp() {
             region and the double-click maximize law keeps working. */}
         <div
           className="strip-lane"
-          style={{ transform: vertical ? `translateY(${-scrollValue}px)` : `translateX(${-scrollValue}px)` }}
+          style={{
+            transform: vertical ? `translateY(${-scrollValue}px)` : `translateX(${-scrollValue}px)`,
+            // The separator's color is the foreground blended over the strip
+            // until 2.5 contrast (tab_style.cc's GetContrastRatioValues).
+            ["--tab-separator-color" as string]: separatorColor(
+              STRIP_COLORS.light.frame,
+              STRIP_COLORS.light.tabFg,
+            ),
+          }}
           onWheel={(e) => {
             if (maxScroll === 0) return;
             const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
@@ -720,7 +744,7 @@ export function FrameApp() {
                     left: slot.x,
                     width: slot.width,
                     ...(vertical ? { top: slot.y, height: slot.height } : {}),
-                    ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
+                    ...groupVars(group.color),
                   }}
                   title={`Group ${group.label}${group.collapsed ? " — collapsed" : ""}`}
                   aria-label={`Toggle group ${group.label}`}
@@ -803,11 +827,27 @@ export function FrameApp() {
                   ...(dy != null
                     ? { transform: `translateY(${dy}px)`, transition: "none", willChange: "transform" }
                     : {}),
+                  // The top radius shrinks with the slot (GetTopCorner RadiusForWidth);
+                  // both the active path and the squarcle hover consume it.
+                  ["--tab-top-radius" as string]: `${topCornerRadiusForWidth(slot.width)}px`,
                   ...(group
                     ? {
-                        ["--tab-group-color" as string]: GROUP_COLOR_VARS[group.color % 6],
-                        ["--ul-left" as string]: memberLeft ? "0px" : undefined,
-                        ["--ul-right" as string]: memberRight ? "0px" : undefined,
+                        ...groupVars(group.color),
+                        // The underline's boundary law (tab_group_underline.cc's
+                        // GetInsetsForUnderline): member boundaries run the
+                        // band continuously (0); a group's edge insets the
+                        // stroke (18); an ACTIVE tab at the edge pokes the
+                        // stroke out past its bounds (−2).
+                        ["--ul-left" as string]: memberLeft
+                          ? "0px"
+                          : tab.active
+                            ? "-2px"
+                            : `${GROUP_LINE_STROKE_INSET}px`,
+                        ["--ul-right" as string]: memberRight
+                          ? "0px"
+                          : tab.active
+                            ? "-2px"
+                            : `${GROUP_LINE_STROKE_INSET}px`,
                       }
                     : {}),
                 }}
@@ -837,6 +877,20 @@ export function FrameApp() {
                 }}
                 onPointerDown={(e) => startDragSession(e, tab.id)}
               >
+                {/* The active tab's body IS Chromium's GetPath() — the
+                    extension-armed chrome shape, drawn as SVG from the
+                    backported law. A dragged tab paints as selected, so it
+                    wears the same body. */}
+                {tab.active || dragging ? (
+                  <svg
+                    className="tab-body"
+                    viewBox={`0 0 ${Math.max(slot.width, 1)} ${TAB_HEIGHT}`}
+                    preserveAspectRatio="none"
+                    aria-hidden
+                  >
+                    <path d={activeTabPath(slot.width)} />
+                  </svg>
+                ) : null}
                 <span className="tab-glyph" aria-hidden>
                   <Glyph url={tab.url} />
                 </span>

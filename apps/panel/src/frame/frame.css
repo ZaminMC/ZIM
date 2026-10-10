@@ -37,7 +37,17 @@ body {
 
 .frame-boot { opacity: 0; }
 
-/* -- Tab strip: 35 + 6 band (TAB_HEIGHT + STRIP_PADDING) ----------------- */
+/* -- Tab strip: Chromium's 35+6 band, painted by the backported law -------
+
+   2026-10-10: the strip's shapes and colors are no longer homegrown —
+   they are the PORT of Chromium's tab strip (ui/chromium/chromiumTabs.ts,
+   upstream chrome/browser/ui/{tabs,views/tabs,ui/color} @ 157.0.8097.0,
+   BSD — see LICENSE.CHROMIUM there). This sheet only consumes the ported
+   law: the active tab's body is GetPath() drawn as SVG by the view; the
+   inactive tab's hover is the detached squarcle (kHighlight); group
+   chips are the solid pill of tab_group_header_view; separators and the
+   group line ride tab_style.cc and tab_group_underline.cc. Upstream
+   citations live with each rule. */
 
 .strip {
   position: relative;
@@ -53,71 +63,83 @@ body {
   height: 35px; /* TAB_HEIGHT */
   display: flex;
   align-items: center;
-  gap: 6px;
-  /* Content law for the flat overlap: each neighbor slot starts 18px
-     inside this tab's span (tab_overlap()), so BOTH insets clear that
-     zone with a 6px breath — the glyph, the title, and the close button
-     never straddle the boundary where a neighbor's background ends.
-     Upstream the same zone is absorbed by the tab's curved corners
-     (tab_width_constraints.cc). */
-  padding: 0 24px;
+  gap: 8px; /* TAB_PRE_TITLE_PADDING */
+  /* GetContentsInsets(): one bottom radius (12) + one horizontal padding
+     (8) each side — the content never rides the overlap zone. */
+  padding: 0 20px;
   box-sizing: border-box;
   cursor: default;
   font-size: 12px;
   font-weight: 450;
   line-height: 1;
-  border-radius: 10px 10px 0 0; /* CORNER_TOP */
-  transition: background 120ms ease-out, width 200ms cubic-bezier(0.2, 0, 0, 1),
+  /* The tab's BODY is not this div: the active tab paints GetPath() as an
+     SVG (.tab-body), the inactive one paints the squarcle on hover
+     (::before). The div itself stays transparent so the strip's ground
+     and the neighbors' shapes read through the overlap zones. */
+  transition: width 200ms cubic-bezier(0.2, 0, 0, 1),
     left 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.tab-inactive { background: transparent; color: var(--frame-fg-dim); z-index: 1; }
-/* The hover fill is OPAQUE and visibly darker (the user's Chrome
-   reference: the strip darkens ~12% under the pointer). The old 5.7%
-   translucent wash was invisible at a glance AND bled through the
-   neighbor's transparent body across the 18px overlap zone — the
-   chain law needs an opaque fill to have anything to cover with. */
-.tab-inactive:hover { background: var(--strip-hover); color: var(--frame-fg); }
+/* GetPath() (horizontal_tab_style_views.cc): the chrome tab — top corners
+   r10 (shrunk by the width law via --tab-top-radius), bottom extensions
+   r12 melting into the toolbar. The view emits it; the sheet fills it
+   with the toolbar (kColorTabBackgroundActiveFrameActive). */
+.tab-body {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: var(--frame-surface);
+  pointer-events: none;
+}
+
+/* The content sits above whichever body the tab wears. */
+.tab-glyph,
+.tab-title,
+.tab-muted,
+.tab-close {
+  position: relative;
+}
+
+.tab-inactive { background: none; color: var(--frame-fg); z-index: 1; }
+/* The hover fill is the DETACHED SQUARCLE (kHighlight path): inset one
+   bottom radius from each slot edge, kTabHeight − padding − overlap tall,
+   rounded at the width-law top radius. Its color is the pipeline's law
+   (tab_strip_color_mixer.cc): 40% of the toolbar over the frame —
+   AlphaBlend, an OPAQUE answer (#ebedf0 in light) — never a translucent
+   wash bleeding neighbors through the overlap zone. */
+.tab-inactive::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 7px; /* 35 − SQUARCLE_HEIGHT 28 */
+  left: 12px; /* SQUARCLE_INSET_X = BOTTOM_CORNER_RADIUS */
+  right: 12px;
+  border-radius: var(--tab-top-radius, 10px);
+  background: var(--strip-hover);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.tab-inactive:hover::before { opacity: 1; }
 .tab-active {
-  background: var(--frame-surface);
   color: var(--frame-fg);
   font-weight: 500;
   /* Chromium paints the active tab above its tab siblings (TabContainer
-     renders active above inactive) — its body and both bottom curls must
-     cover a neighbor's hover fill, never the reverse. One exception is
-     the chain law below: the NEXT unit's opaque body wins its own left
-     overlap zone, so a group chip following this tab paints over it. */
+     renders active above inactive) — its body must cover a neighbor's
+     hover squarcle, never the reverse. One exception is the chain law
+     below: the NEXT unit's opaque body wins its own left overlap zone,
+     so a group chip following this tab paints over it. */
   z-index: 2;
 }
-
-/* The active tab melts into the toolbar: bottom corner extensions,
-   radius 12 (CORNER_BOTTOM). Each extension is a 12×12 square OUTSIDE
-   the tab's span whose TOP-OUTER corner is cut away — the surface fills
-   the region hugging the tab and the toolbar, the strip shows through
-   the quarter-disc toward the tab strip's ground (TabStyleViews'
-   GetTabPath extend-to-bottom arms). They always render: the active
-   tab paints above every neighbor, so the curl wins the overlap zone. */
-.tab-active::before,
-.tab-active::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  width: 12px;
-  height: 12px;
-  background: inherit;
-  pointer-events: none;
-}
-.tab-active::before { left: -12px; border-top-left-radius: 12px; }
-.tab-active::after { right: -12px; border-top-right-radius: 12px; }
 
 .tab-glyph {
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--frame-fg-dim);
-  transition: color 120ms ease-out;
+  width: 16px; /* gfx::kFaviconSize */
+  height: 16px;
+  color: inherit;
 }
-.tab-active .tab-glyph { color: var(--frame-fg); }
 
 .tab-title {
   flex: 1;
@@ -127,34 +149,35 @@ body {
   white-space: nowrap;
 }
 
-/* A pinned tab is its favicon: the glyph alone, centered in the VISIBLE
-   span of the slot (width − overlap — the next slot paints over the
-   right 18px), the way Chromium centers pinned content (pinned_width). */
+/* A pinned tab is its favicon: the glyph alone, centered in the slot the
+   way Chromium centers pinned content (content width 24 inside the
+   contents insets, which is the slot's own center at 64 DIP). */
 .tab-pinned {
   justify-content: center;
-  padding: 0 18px 0 0;
+  padding: 0 20px;
 }
-.tab-pinned .tab-glyph { color: var(--frame-fg); }
 
 /* The dragged tab lifts above everything (Chromium's dragging tab is
-   the top-most view in the strip) and follows the pointer without the
-   settle transitions. It also paints OPAQUE with the selected fill —
-   an inactive tab's transparent body would show every tab, chip, and
-   separator underneath it as ghost pixels sliding across the lifted
-   tab (the user's "weird tab pixels" shot). Chromium's dragged tab
-   renders as the selected tab, always. */
+   the top-most view in the strip), follows the pointer without the
+   settle transitions, and paints AS SELECTED — it wears GetPath()'s
+   body from the view. */
 .tab-dragging {
   z-index: 4;
   cursor: grabbing;
-  background: var(--frame-surface);
   color: var(--frame-fg);
+  font-weight: 500;
 }
 
 /* Minimum-width tabs (the shrink law's 32 DIP floor): the glyph alone
-   fits — title, mute state, and close give way. */
+   fits — title, mute state, and close give way. The squarcle expands
+   into the separator zone (SQUARCLE_TIGHT_INSET_X = 12 − 3). */
 .tab-tight {
   justify-content: center;
-  padding: 0 18px 0 0;
+  padding: 0;
+}
+.tab-tight::before {
+  left: 9px;
+  right: 9px;
 }
 .tab-tight .tab-title,
 .tab-tight .tab-muted,
@@ -192,21 +215,22 @@ body {
 .tab .tab-close:hover { opacity: 1; background: rgba(32, 33, 36, 0.12); }
 .tab-pinned .tab-close { display: none; }
 
-/* Separators: explicit 2×20 marks the VIEW renders at the boundary
-   between two adjacent inactive, undragged tab slots (SEPARATOR_W ×
-   SEPARATOR_H). The old CSS sibling selector could not see across a
-   group chip or an absolutely-positioned slot run — the view owns the
-   adjacency truth, so the view owns the separators. Hover of either
-   neighbor and the drag session hide them (tab_style's separator
-   visibility rule). */
+/* Separators: explicit 2×16 marks the VIEW renders at the boundary
+   between two adjacent inactive, undragged tab slots (GetSeparatorSize:
+   thickness 2, height 16, corner radius 1; margins 6 from the band's
+   top — the mark hangs from the tab view's ceiling). The color is the
+   2.5-contrast blend (GetContrastRatioValues) the lane carries as a
+   custom property. Hover of either neighbor and the drag session hide
+   them (the separator visibility rule); twenty or more tabs declutter
+   them away (kTabStripDeclutterMinTabsForSeparatorHide). */
 .tab-separator {
   position: absolute;
-  bottom: 0;
+  top: 0;
   z-index: 1;
-  width: 1px;
-  height: 20px;
-  margin-bottom: 7.5px; /* centers 20px in the 35px tab band */
-  background: var(--frame-line);
+  width: 2px; /* SEPARATOR_THICKNESS */
+  height: 16px; /* SEPARATOR_HEIGHT */
+  border-radius: 1px; /* GetSeparatorCornerRadius */
+  background: var(--tab-separator-color, var(--frame-line));
   transition: opacity 100ms ease-out;
 }
 .tab-separator[hidden] { display: none; }
@@ -216,60 +240,58 @@ body {
 .tab:hover + .tab-separator,
 .tab-separator:has(+ .tab:hover) { opacity: 0; }
 .strip:has(.tab-dragging) .tab-separator { opacity: 0; }
+.strip[data-declutter] .tab-separator { opacity: 0; }
 
 .tab-group-underline {
   position: absolute;
-  /* The underline lives INSIDE the tab's visible span only. The next
-     slot paints over this tab's right 18px (the overlap law), and an
-     INACTIVE neighbor's body is transparent — an underline reaching
-     past 22px-from-the-right edge would show through it and read as a
-     line leaking onto the neighbor. The same inset guards the left
-     edge (the previous unit's overlap zone). Chromium clips the
-     underline to the tab's path; the insets are that clip, stated in
-     layout units.
-     The continuity exception (--ul-left/--ul-right = 0): toward a
-     SAME-GROUP neighbor the underline runs to the slot edge — the
-     neighbor's own underline overlaps it in the 18px zone, one color,
-     so the members read as ONE band (TabStyleViews' group band), not
-     disconnected dashes. The view sets the vars only where a member
-     stands; every other boundary keeps the 22px law. */
-  left: var(--ul-left, 22px);
-  right: var(--ul-right, 22px);
-  bottom: 0;
-  height: 2px;
+  /* The group line IS Chromium's TabGroupUnderline: a 2 DIP stroke
+     (FocusRing halo thickness) riding one toolbar-overlap above the
+     strip's floor, inset GetStrokeInset() = 18 DIP from any boundary
+     that is not a member (the view sets --ul-left/--ul-right per the
+     boundary law: members 0, edges 18, active edges −2). The continuity
+     exception: toward a SAME-GROUP neighbor the band runs to the slot
+     edge — the neighbor's own stroke overlaps it in the 18px paint
+     zone, one color, one band (tab_group_line_view.cc's line path). */
+  left: var(--ul-left, 18px);
+  right: var(--ul-right, 18px);
+  bottom: 1px; /* GROUP_LINE_BOTTOM = kTabstripToolbarOverlap */
+  height: 2px; /* GROUP_LINE_STROKE_THICKNESS */
   border-radius: 1px;
-  background: var(--tab-group-color, var(--group-sky));
+  background: var(--tab-group-color);
 }
 
-/* The group's header chip (tab_group_header.h): every group leads with
-   it, a collapsed group IS it. Upstream it is a TAB-SHAPED element, not
-   a floating pill — the slot's overlap paints over the previous tab's
-   curve zone, and a translucent pill would bleed that tab through. So:
-   full tab height, tab radius, opaque tint over the strip's ground.
-   z-index 3: the overlap chain's law is "the next unit paints over the
-   previous unit's right 18px" (the same law that centers pinned content
-   in its visible span). The chip is opaque, so it must win the zone or
-   its leading cap dissolves into whatever tab precedes it — the amputated
-   "urvival" chip. The active tab's floor curl loses nothing the eye can
-   see: the chip's own body anchors the same floor the curl melts into.
-   Above the active tab (2), below the dragged tab (4), like upstream's
-   paint order: dragged > group header > active > rest. */
+/* The group's header chip (tab_group_header_view.cc): every group leads
+   with it, a collapsed group IS it. Upstream it is a SOLID pill — the
+   body is the group's tab strip color (GetTabGroupTabStripColorId), the
+   label is the max-contrast color over that body, the corner radius is
+   6 (kCornerRadius), the size rides 20 DIP (kEmptyChipSize) at 4 DIP
+   inside the tab view (GetTitleChipOffset). It toggles the group's
+   collapse on click (tab_group_views.cc — the chip IS the collapsed
+   group). z-index 3: the overlap chain's law is "the next unit paints
+   over the previous unit's right 18px" — the chip is opaque, so it must
+   win the zone or its leading cap dissolves into whatever tab precedes
+   it. Above the active tab (2), below the dragged tab (4), like
+   upstream's paint order: dragged > group header > active > rest. */
 .group-chip {
   position: absolute;
-  bottom: 0;
-  height: 35px;
+  top: 4px; /* GROUP_CHIP_TOP */
+  height: 20px; /* kEmptyChipSize */
   display: flex;
   align-items: center;
   border: none;
-  padding: 0 12px;
-  border-radius: 10px 10px 0 0; /* CORNER_TOP */
-  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 20%, var(--frame-bg));
+  padding: 0 6px; /* kCornerRadius inset each side */
+  box-sizing: border-box;
+  border-radius: 6px; /* kCornerRadius */
+  background: var(--tab-group-color);
+  color: var(--tab-group-fg);
   cursor: default;
   transition: background 120ms ease-out, left 200ms cubic-bezier(0.2, 0, 0, 1);
   z-index: 3;
 }
+/* The press ink over a solid body (kColorSysStateHoverOnSubtle):
+   a translucent darkening that works over every palette entry. */
 .group-chip:hover {
-  background: color-mix(in srgb, var(--tab-group-color, var(--group-sky)) 30%, var(--frame-bg));
+  background-image: linear-gradient(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.08));
 }
 .group-chip-label {
   max-width: 100%;
@@ -278,8 +300,8 @@ body {
   white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
-  line-height: 1;
-  color: var(--tab-group-color, var(--group-sky));
+  line-height: 16px;
+  color: inherit;
 }
 
 .tab-dragging-live {
@@ -319,7 +341,7 @@ body {
   color: var(--frame-fg-dim);
   cursor: default;
 }
-.strip-chev:hover { background: var(--strip-hover); color: var(--frame-fg); }
+.strip-chev:hover { background: var(--frame-hover-strong); color: var(--frame-fg); }
 .strip-chev[disabled] { opacity: 0.3; }
 
 .new-tab {
@@ -332,13 +354,14 @@ body {
   border: none;
   background: transparent;
   color: var(--frame-fg-dim);
-  /* The hover paints a CIRCLE (the user's Chrome reference crop): a
-     round fill around the +, not a band-wide rect. */
   border-radius: 50%;
   cursor: default;
   transition: background 120ms ease-out, color 120ms ease-out;
+  /* The hover paints the CONTROL INK (tab_strip_color_mixer.cc's
+     kColorTabStripControlButtonInkDrop: max-contrast ink at 16%) as a
+     CIRCLE around the +, not a band-wide rect. */
 }
-.new-tab:hover { background: var(--strip-hover); color: var(--frame-fg); }
+.new-tab:hover { background: var(--frame-hover-strong); color: var(--frame-fg); }
 
 .window-controls {
   position: absolute;
@@ -644,7 +667,8 @@ body {
 .frame.vertical .omnibox-wrap { flex-basis: 100%; margin: 4px 0 0; }
 
 /* Rows: full-width, top-anchored, rounded all over — a row is a card,
-   not a hanging tab. */
+   not a hanging tab. The horizontal bodies stand down: no GetPath()
+   svg, no squarcle — a row hovers and activates as a whole card. */
 .frame.vertical .tab,
 .frame.vertical .group-chip {
   bottom: auto;
@@ -652,11 +676,12 @@ body {
   transition: background 120ms ease-out, top 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 .frame.vertical .tab { padding: 0 10px; }
+.frame.vertical .tab-body,
+.frame.vertical .tab-inactive::before { display: none; }
+.frame.vertical .tab:hover { background: var(--strip-hover); }
 /* The active row keeps its white card — but melts into nothing (there
-   is no toolbar beneath it to melt into; the curls stand down). */
+   is no toolbar beneath it to melt into). */
 .frame.vertical .tab-active { background: var(--frame-surface); box-shadow: var(--shadow-s); }
-.frame.vertical .tab-active::before,
-.frame.vertical .tab-active::after { display: none; }
 /* No separators: rows separate themselves. */
 .frame.vertical .tab-separator { display: none; }
 /* The group band becomes the row's left edge — the rail's own group

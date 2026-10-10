@@ -127,14 +127,13 @@
   --frame-fg-dim: #5f6368;
   --frame-hover: rgba(32, 33, 36, 0.057);
   --frame-hover-strong: rgba(32, 33, 36, 0.1);
-  /* The STRIP's own hover: OPAQUE, ~12% darker than the strip ground —
-     the user's Chrome reference crop reads 227 → 199. The tab bodies'
-     chain law paints the next unit over the previous unit's right 18px,
-     which only works when the fill under it is opaque: a translucent
-     wash was both invisible and bled through the neighbor's transparent
-     body (the pixel-leak family). Contrast with --frame-hover above,
-     which serves the WHITE toolbar grounds where translucency is safe. */
-  --strip-hover: #c3c6ca;
+  /* The STRIP's own hover: the pipeline's law, not a guess — Chromium's
+     tab_strip_color_mixer.cc paints an inactive tab's hover as
+     AlphaBlend(active bg, inactive bg, 40%), i.e. 40% of the white
+     toolbar over the #dee1e6 strip = #ebedf0, OPAQUE (a translucent
+     wash bled neighbors through the 18px overlap zone). The squarcle,
+     the rail's row hover, and every strip-ground hover consume this. */
+  --strip-hover: #ebedf0;
   --frame-line: rgba(32, 33, 36, 0.16);
   --frame-accent: #1a73e8;
   --frame-accent-soft: rgba(26, 115, 232, 0.1);
@@ -146,16 +145,29 @@
   --popup-bg: #ffffff;
   --popup-line: rgba(32, 33, 36, 0.12);
 
-  /* Tab groups' six-color palette (tab_group_visual_data.h's spirit):
-     the LIGHT-theme variants — deep enough to read as text on white and
-     the gray strip, tinted at 15-20% for fills. (tab_group_header's
-     light-mode color set.) */
-  --group-sky: #1a73e8;
-  --group-grass: #188038;
-  --group-amber: #b06000;
-  --group-rose: #c5221f;
-  --group-violet: #9334e6;
-  --group-slate: #5f6368;
+  /* Tab groups: Chromium's nine-color enum, verbatim (components/
+     tab_groups/tab_group_color.h order — the wire format; values from
+     chrome_color_mixer.cc's classic palette: base_light entries). The
+     frame's chip + underline consume these through the backported law
+     (ui/chromium/chromiumTabs.ts); the legacy six aliases keep the
+     content-side shim rendering until it, too, speaks the enum. */
+  --group-grey: #5f6368; /* kGoogleGrey700 */
+  --group-blue: #1a73e8; /* kGoogleBlue600 */
+  --group-red: #d93025; /* kGoogleRed600 */
+  --group-yellow: #f9ab00; /* kGoogleYellow600 */
+  --group-green: #188038; /* kGoogleGreen700 */
+  --group-pink: #d01884; /* kGooglePink700 */
+  --group-purple: #a142f4; /* kGooglePurple500 */
+  --group-cyan: #007b83; /* kGoogleCyan900 */
+  --group-orange: #fa903e; /* kGoogleOrange400 */
+
+  /* Legacy aliases (the pre-port names the content shim still asks for). */
+  --group-sky: var(--group-blue);
+  --group-grass: var(--group-green);
+  --group-amber: var(--group-orange);
+  --group-rose: var(--group-red);
+  --group-violet: var(--group-purple);
+  --group-slate: var(--group-grey);
 }
 
 /* -- Document reset (ADR-0033): the tab-content document owns the whole

@@ -24,7 +24,20 @@ import { tabKey, type TabKey } from "./destinations";
 export type TabId = string;
 export type GroupId = string;
 
-export const GROUP_COLORS = ["sky", "grass", "amber", "rose", "violet", "slate"] as const;
+// Chromium's group color enum, verbatim (components/tab_groups/
+// tab_group_color.h — TabGroupColorId; the frame renders these through
+// the backported palette in ui/chromium/chromiumTabs.ts).
+export const GROUP_COLORS = [
+  "grey",
+  "blue",
+  "red",
+  "yellow",
+  "green",
+  "pink",
+  "purple",
+  "cyan",
+  "orange",
+] as const;
 export type GroupColor = (typeof GROUP_COLORS)[number];
 
 export interface Tab {
@@ -361,7 +374,7 @@ export const useTabs = create<TabsState>()((set) => ({
           ...s.groups,
           [groupId]: {
             label: DEFAULT_GROUP_LABEL,
-            color: colors[Object.keys(s.groups).length % colors.length] ?? "sky",
+            color: colors[Object.keys(s.groups).length % colors.length] ?? "grey",
             collapsed: false,
           },
         },
