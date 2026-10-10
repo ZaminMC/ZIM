@@ -193,22 +193,68 @@ export function serializeProperties(lines: PropertyLine[]): string {
     .join("\n");
 }
 
-/** An immutable edit: the pair named `key` (first match) gets `value`;
- *  everything else — including its position — stays exactly as it was.
- *  Setting a pair to the value it already carries is a no-op (the raw
- *  line stays put, byte for byte). */
+/** An immutable edit: the pair named `key` gets `value`; everything
+ *  else — including its position — stays exactly as it was.
+ *
+ *  LAST match wins, because that is Java's own load semantics: when a
+ *  key is duplicated, `Properties.load` keeps the final assignment and
+ *  the file's earlier copies are shadowed. Compose renders the winner
+ *  (composeRows), so the edit lands on the line the server actually
+ *  reads — a first-match edit would write a value the file silently
+ *  ignores and the row would appear to "not stick". Shadowed copies
+ *  are left byte-stable; Source shows and edits them. Setting a pair
+ *  to the value it already carries is a no-op. */
 export function setPropertyValue(
   lines: PropertyLine[],
   key: string,
   value: string,
 ): PropertyLine[] {
-  let matched = false;
-  return lines.map((line) => {
-    if (line.kind !== "pair" || matched || line.key !== key) return line;
-    matched = true;
-    if (line.value === value) return line;
-    return { ...line, value };
-  });
+  let winner = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line?.kind === "pair" && line.key === key) winner = i;
+  }
+  const current = winner === -1 ? undefined : lines[winner];
+  if (current === undefined || current.value === value) return lines;
+  const next = lines.slice();
+  next[winner] = { ...current, value };
+  return next;
+}
+
+/** The pairs the Compose view renders, under the file's own load
+ *  semantics (last-wins — the same law setPropertyValue edits by, so a
+ *  row always shows and writes the line the server reads):
+ *  - a duplicated key appears ONCE, as its final line; the earlier
+ *    copies are counted in `shadowed` for the honest note;
+ *  - a pair with an EMPTY key is not a renderable row (a blank label
+ *    would lie about what it edits); it is counted in `uneditable`
+ *    alongside comments and blanks, which Compose never touches.
+ *  `rows` keys are unique by construction — safe React keys. */
+export function composeRows(lines: PropertyLine[]): {
+  rows: PropertyLine[];
+  shadowed: number;
+  uneditable: number;
+} {
+  const byKey = new Map<string, PropertyLine>();
+  let shadowed = 0;
+  let uneditable = 0;
+  for (const line of lines) {
+    if (line.kind !== "pair") {
+      uneditable += 1;
+      continue;
+    }
+    const key = line.key ?? "";
+    if (key === "") {
+      uneditable += 1;
+      continue;
+    }
+    if (byKey.has(key)) shadowed += 1;
+    // Last-wins: a later duplicate replaces the row in place (Map keeps
+    // first insertion order — the row stays where the key first appeared
+    // in the file) while its earlier copy joins the shadowed count.
+    byKey.set(key, line);
+  }
+  return { rows: [...byKey.values()], shadowed, uneditable };
 }
 
 /** `server-port` → "Server Port". Words split on `-`, `.`, `_`. */

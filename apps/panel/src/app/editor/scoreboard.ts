@@ -47,7 +47,16 @@ const ROW_KEY = /^(?:lines?|row)[._-]?(\d+)$/i;
 const MAX_ROWS = 32;
 
 function pairOf(lines: PropertyLine[], key: string): PropertyLine | undefined {
-  return lines.find((line) => line.kind === "pair" && line.key === key);
+  // LAST match — Java's load semantics, the same law composeRows renders
+  // and setPropertyValue edits by. A duplicated `title=` pair has exactly
+  // one winner (the file's final line), and this reads it; a first-match
+  // read would report (and withPair would rewrite) a value the file
+  // silently ignores.
+  let found: PropertyLine | undefined;
+  for (const line of lines) {
+    if (line.kind === "pair" && line.key === key) found = line;
+  }
+  return found;
 }
 
 /** Which layout these rows speak, and where the rows live. Exported for

@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  composeRows,
   controlFor,
   humanizeKey,
   parseProperties,
@@ -144,5 +145,38 @@ describe("properties AST", () => {
     expect(out[0]).toBe("# board");
     expect(out[1]).toBe("title=New");
     expect(out[2]).toBe("lines=a,b");
+  });
+
+  it("a duplicated key resolves LAST — Java's load semantics, not first-match", () => {
+    // Properties.load keeps the final assignment: the earlier line is
+    // shadowed, the file's reader never sees it. The AST edits the line
+    // the server reads; the shadowed copy keeps its bytes for Source.
+    const raw = ["motd=first", "motd=second", "plain=1"].join("\n");
+    const edited = setPropertyValue(parseProperties(raw), "motd", "third");
+    expect(serializeProperties(edited)).toBe(
+      ["motd=first", "motd=third", "plain=1"].join("\n"),
+    );
+  });
+
+  it("composeRows dedupes by last-wins and counts what it hides", () => {
+    const raw = ["a=1", "b=2", "a=3", "c=4", "a=5"].join("\n");
+    const { rows, shadowed, uneditable } = composeRows(parseProperties(raw));
+    // One row per key — the React keys are unique by construction — and
+    // each row holds its FINAL value, the one the server loads.
+    expect(rows.map((line) => line.key)).toEqual(["a", "b", "c"]);
+    expect(rows[0]?.value).toBe("5");
+    expect(shadowed).toBe(2);
+    expect(uneditable).toBe(0);
+  });
+
+  it("composeRows counts comments, blanks, and keyless pairs as uneditable, never rows", () => {
+    // A pair with an empty key (`=value`) is not a renderable row — a
+    // blank label would lie about what it edits. It is preserved for
+    // Source, counted for the honest note.
+    const raw = ["# note", "", "=value", ": other", "plain=1"].join("\n");
+    const { rows, shadowed, uneditable } = composeRows(parseProperties(raw));
+    expect(rows.map((line) => line.key)).toEqual(["plain"]);
+    expect(shadowed).toBe(0);
+    expect(uneditable).toBe(4);
   });
 });

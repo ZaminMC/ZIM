@@ -60,6 +60,14 @@ describe("readScoreboard", () => {
   it("returns null for a plain properties file", () => {
     expect(readScoreboard(parseProperties("server-port=25565\n"))).toBeNull();
   });
+
+  it("reads the LAST duplicate of a key — the file's own loader semantics", () => {
+    // Java's Properties.load keeps the final assignment; a first-match
+    // read would report (and write back) a value the file silently
+    // ignores. The winner is the last line.
+    const spec = readScoreboard(parseProperties("title=Old\nlines=a,b\ntitle=New\n"));
+    expect(spec?.title).toBe("New");
+  });
 });
 
 describe("writeScoreboardTitle", () => {

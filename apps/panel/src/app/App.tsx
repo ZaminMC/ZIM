@@ -59,10 +59,9 @@ const SettingsPage = lazy(() =>
   import("./browser/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
 
-function DestinationView({ destination, reloadToken }: { destination: Destination; reloadToken: number }) {
+function DestinationView({ destination }: { destination: Destination }) {
   const setNewServerOpen = useUi((s) => s.setNewServerOpen);
   const serverMap = useServers((s) => s.servers);
-  const key = `${JSON.stringify(destination)}:${reloadToken}`;
   switch (destination.kind) {
     case "devtools":
       return <DevToolsPage />;
@@ -75,15 +74,15 @@ function DestinationView({ destination, reloadToken }: { destination: Destinatio
         />
       );
     case "new":
-      return <NewTabPage key={key} />;
+      return <NewTabPage />;
     case "settings":
       return <SettingsPage />;
     case "server":
-      return <ServerView key={key} serverId={destination.serverId} />;
+      return <ServerView serverId={destination.serverId} />;
     case "console":
-      return <ConsoleView key={key} serverId={destination.serverId} variant="dedicated" />;
+      return <ConsoleView serverId={destination.serverId} variant="dedicated" />;
     case "join":
-      return <JoinPage key={key} host={destination.host} port={destination.port} />;
+      return <JoinPage host={destination.host} port={destination.port} />;
     case "jobs":
       return <JobsPage />;
     case "audit":
@@ -289,7 +288,20 @@ export function App() {
       ) : null}
       <TabBoundary>
         <Suspense fallback={<div className={styles.lazyFallback} />}>
-          <DestinationView destination={destination} reloadToken={reloadToken} />
+          {/* The page band: one destination at a time, keyed by
+              destination AND reload token. The key is §60's law — the
+              reload verb rebuilds the view on EVERY page (the evidence
+              and settings pages used to ignore the token, so ⟳ did
+              nothing there), while a destination change remounts by
+              construction anyway. The swap rides ADR-0030's one page
+              entrance: --speed-slow, opacity + two pixels of Y,
+              compositor-only. */}
+          <div
+            className={styles.page}
+            key={`${JSON.stringify(destination)}:${reloadToken}`}
+          >
+            <DestinationView destination={destination} />
+          </div>
         </Suspense>
       </TabBoundary>
       <Suspense fallback={null}>

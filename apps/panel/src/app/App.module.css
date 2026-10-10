@@ -27,6 +27,34 @@
   min-height: 0;
 }
 
+/* The page band — one destination at a time, keyed by destination and
+   reload token (App.tsx). The band passes the flex:1 geometry through
+   to whichever view it holds, and the swap between two bands is
+   ADR-0030's one "page change" major entrance: --speed-slow, opacity
+   plus two pixels of Y, transform/opacity only so the change rides the
+   compositor. Animations run at element creation — data updates inside
+   a page never replay; only a real page change (or ⟳) does. The lazy
+   pages settle when their chunk lands, which is the honest moment. */
+.page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: pageIn var(--speed-slow) var(--ease);
+}
+
+.page > * {
+  flex: 1;
+  min-height: 0;
+}
+
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
 /* The beat before a lazy evidence page lands — quiet, not a spinner. */
 .lazyFallback {
   flex: 1;

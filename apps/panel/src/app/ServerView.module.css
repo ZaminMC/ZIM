@@ -213,7 +213,9 @@
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  transition: color var(--speed-fast) var(--ease);
+  transition:
+    color var(--speed-fast) var(--ease),
+    border-bottom-color var(--speed-fast) var(--ease);
 }
 
 .viewTab:hover {
@@ -233,6 +235,24 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* §75's "sidebar transitions", in ADR-0030's entrance language: a
+   surface entering the panel settles in — opacity plus two pixels of
+   Y, fast, transform/opacity only so the swap rides the compositor.
+   Animations run at element creation, so a re-render inside one view
+   never replays; only a section switch (a remount) does. The lazy
+   views settle when their content arrives — after the chunk, not
+   before it, which is the honest moment. */
+.panel > * {
+  animation: panelIn var(--speed-fast) var(--ease);
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
 }
 
 .lazyLoad {

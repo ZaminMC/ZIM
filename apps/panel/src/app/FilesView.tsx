@@ -25,6 +25,7 @@ import type {
   FilesSearchResult,
 } from "../protocol/types";
 import {
+  composeRows,
   parseProperties,
   serializeProperties,
   setPropertyValue,
@@ -59,6 +60,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 // into an app-owned question; the confirm handler carries the act().
 type FileAsk =
   | { kind: "confirm-restart" }
+  | { kind: "discard"; path: string }
   | { kind: "delete"; path: string }
   | { kind: "copy"; from: string; name: string; suggested: string }
   | { kind: "move"; from: string; name: string }
@@ -276,7 +278,7 @@ export function FilesView({ serverId }: { serverId: string }) {
         .then(() => refresh(dir))
         .catch((cause: unknown) => {
           const described = describeError(cause);
-          setError({ message: `${note}: described.title`, code: described.code });
+          setError({ message: `${note}: ${described.title}`, code: described.code });
         })
         .finally(() => setBusy(false));
     },
@@ -351,7 +353,7 @@ export function FilesView({ serverId }: { serverId: string }) {
         .then(() => refresh(dir))
         .catch((cause: unknown) => {
           const described = describeError(cause);
-          setError({ message: `upload failed: described.title`, code: described.code });
+          setError({ message: `upload failed: ${described.title}`, code: described.code });
         })
         .finally(() => setBusy(false));
     },
@@ -438,6 +440,32 @@ export function FilesView({ serverId }: { serverId: string }) {
     [specialized, composeFile],
   );
 
+  // The compose surface's row model: Java's last-wins law applied once,
+  // so the rows the view renders are exactly the pairs the file's reader
+  // would load — duplicated keys show their final line (one row, one
+  // React key), shadowed copies are counted for the honest note.
+  const composed = useMemo(
+    () => (composeFile !== null ? composeRows(composeFile.lines) : null),
+    [composeFile],
+  );
+
+  // Leaving the editor (close, breadcrumb, or opening another file) must
+  // never lose a dirty draft silently — §60's "preserve unsaved editor
+  // state" and §81's honest-question law. The navigation that would
+  // discard it is parked in pendingNav and runs only after the confirm.
+  const [pendingNav, setPendingNav] = useState<{ run: () => void } | null>(null);
+  const leaveEditor = useCallback(
+    (navigate: () => void) => {
+      if (openPath !== null && draft !== saved) {
+        setPendingNav({ run: navigate });
+        setAsk({ kind: "discard", path: openPath });
+        return;
+      }
+      navigate();
+    },
+    [openPath, draft, saved],
+  );
+
   // A different file restarts the mode choice: the specialized tab is a
   // claim about THIS file, and it does not travel to the next one.
   useEffect(() => {
@@ -479,7 +507,7 @@ export function FilesView({ serverId }: { serverId: string }) {
   return (
     <section className={styles.files} aria-label="Server files">
       <nav className={styles.crumbs} aria-label="Path">
-        <button className={styles.crumb} onClick={() => { setOpenPath(null); refresh(""); }}>
+        <button className={styles.crumb} onClick={() => leaveEditor(() => { setOpenPath(null); refresh(""); })}>
           root
         </button>
         {crumbs.map((crumb) => (
@@ -487,7 +515,7 @@ export function FilesView({ serverId }: { serverId: string }) {
             <span className={styles.separator}>/</span>
             <button
               className={styles.crumb}
-              onClick={() => { setOpenPath(null); refresh(crumb.path); }}
+              onClick={() => leaveEditor(() => { setOpenPath(null); refresh(crumb.path); })}
             >
               {crumb.name}
             </button>
@@ -559,7 +587,7 @@ export function FilesView({ serverId }: { serverId: string }) {
                 Save &amp; Restart
               </Button>
             ) : null}
-            <Button onClick={() => { setOpenPath(null); setComposeMode(false); setSpecializedMode(false); }}>Close</Button>
+            <Button onClick={() => leaveEditor(() => { setOpenPath(null); setComposeMode(false); setSpecializedMode(false); })}>Close</Button>
           </div>
           {composeMode && specializedMode && specialized?.id === "scoreboard" && scoreboardSpec !== null ? (
             <ScoreboardEditor
@@ -567,14 +595,12 @@ export function FilesView({ serverId }: { serverId: string }) {
               onTitle={(title) => composeApply((lines) => writeScoreboardTitle(lines, title))}
               onRows={(rows) => composeApply((lines) => writeScoreboardRows(lines, scoreboardSpec, rows))}
             />
-          ) : composeMode && composeFile !== null ? (
+          ) : composeMode && composed !== null ? (
             <div className={styles.compose} aria-label={`Compose view for ${openPath}`}>
-              {composeFile.lines
-                .filter((line) => line.kind === "pair")
-                .map((line) => {
-                  const control = controlFor(line.value ?? "");
-                  const label = humanizeKey(line.key ?? "");
-                  return (
+              {composed.rows.map((line) => {
+                const control = controlFor(line.value ?? "");
+                const label = humanizeKey(line.key ?? "");
+                return (
                     <div key={line.key} className={styles.composeRow}>
                       <label className={styles.composeLabel} htmlFor={`compose-${line.key}`}>
                         {label}
@@ -613,9 +639,16 @@ export function FilesView({ serverId }: { serverId: string }) {
                     </div>
                   );
                 })}
-              {composeFile.lines.some((line) => line.kind !== "pair") ? (
+              {composed.shadowed > 0 ? (
                 <p className={styles.composeNote}>
-                  Comments and blank lines are preserved exactly — Source shows and edits them.
+                  {composed.shadowed} duplicated {composed.shadowed === 1 ? "key shows" : "keys show"}{" "}
+                  their last value — the one the server loads. Source shows every line.
+                </p>
+              ) : null}
+              {composed.uneditable > 0 ? (
+                <p className={styles.composeNote}>
+                  Comments, blank lines, and keyless pairs are preserved exactly — Source shows and
+                  edits them.
                 </p>
               ) : null}
             </div>
@@ -698,12 +731,16 @@ export function FilesView({ serverId }: { serverId: string }) {
                               className={styles.name}
                               onClick={() => {
                                 if (hit.kind === "file") {
-                                  setOpenPath(null);
-                                  openFile(hit.path, hit.sizeBytes);
+                                  leaveEditor(() => {
+                                    setOpenPath(null);
+                                    openFile(hit.path, hit.sizeBytes);
+                                  });
                                 } else {
                                   setSearchBox("");
-                                  setOpenPath(null);
-                                  refresh(hit.path);
+                                  leaveEditor(() => {
+                                    setOpenPath(null);
+                                    refresh(hit.path);
+                                  });
                                 }
                               }}
                             >
@@ -849,6 +886,24 @@ export function FilesView({ serverId }: { serverId: string }) {
               danger
               onConfirm={runSaveAndRestart}
               onClose={() => setAsk(null)}
+            />
+          ) : null}
+          {ask?.kind === "discard" ? (
+            <ConfirmDialog
+              title={`Discard changes to ${ask.path}?`}
+              body="The editor holds unsaved changes — leaving now loses them. Save first if you want to keep them."
+              confirmLabel="Discard"
+              danger
+              onConfirm={() => {
+                setAsk(null);
+                const nav = pendingNav;
+                setPendingNav(null);
+                nav?.run();
+              }}
+              onClose={() => {
+                setAsk(null);
+                setPendingNav(null);
+              }}
             />
           ) : null}
           {ask?.kind === "delete" ? (

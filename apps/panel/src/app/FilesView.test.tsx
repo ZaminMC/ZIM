@@ -359,4 +359,90 @@ describe("FilesView", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     expect(screen.getByRole("alert").textContent).toContain("FS_NOT_FOUND");
   });
+
+  it("a failed verb shows the daemon's own sentence, never a template placeholder", async () => {
+    listFilesMock.mockResolvedValue(listing([entryOf("old.txt", "file", { sizeBytes: 3 })]));
+    deleteEntryMock.mockRejectedValueOnce(
+      new ProtocolRequestError({
+        code: "FS_IS_DIRECTORY",
+        message: "the path is a directory",
+        remediation: [],
+      }),
+    );
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "old.txt" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" })); // the dialog's confirm
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    const alert = screen.getByRole("alert").textContent ?? "";
+    // The interpolated sentence carries the daemon's message — the old
+    // bug printed the literal text "described.title" to operators.
+    expect(alert).toContain("the path is a directory");
+    expect(alert).not.toContain("described.title");
+  });
+
+  it("compose shows a duplicated key once, as its last value, and edits the winner", async () => {
+    const raw = ["motd=first", "motd=second", "plain=1"].join("\n");
+    listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: raw.length })]));
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode(raw));
+    writeWholeFileMock.mockResolvedValue(undefined);
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: "Compose" }));
+
+    // ONE row carries the key, holding the LAST value — the one the
+    // server's own loader reads (Java's properties semantics).
+    await waitFor(() => expect(screen.getByDisplayValue("second")).toBeTruthy());
+    expect(screen.queryByDisplayValue("first")).toBeNull();
+    // The honest note says the duplicate exists.
+    expect(screen.getByText(/duplicated key shows/)).toBeTruthy();
+
+    // The edit lands on the winning line; the shadowed copy keeps its
+    // bytes for Source to show.
+    fireEvent.change(screen.getByDisplayValue("second"), { target: { value: "third" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(writeWholeFileMock).toHaveBeenCalled());
+    const savedBytes = vi.mocked(writeWholeFile).mock.calls[0]?.[2];
+    if (!savedBytes) throw new Error("the save never wrote the file");
+    const saved = new TextDecoder().decode(savedBytes);
+    expect(saved).toBe(["motd=first", "motd=third", "plain=1"].join("\n"));
+  });
+
+  it("closing a dirty editor asks before discarding; cancel keeps the draft", async () => {
+    const raw = "motd=hello\n";
+    listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: raw.length })]));
+    readWholeFileMock.mockResolvedValue(new TextEncoder().encode(raw));
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+
+    // A clean close goes straight back to the listing — no interrogation.
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // A dirty close asks; cancel keeps the editor and the draft.
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+    fireEvent.change(screen.getByLabelText(/Editing server.properties/), { target: { value: "motd=changed\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    expect(screen.getByRole("dialog").textContent).toContain("unsaved changes");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy();
+    expect(screen.getByText("unsaved changes")).toBeTruthy();
+
+    // Confirm discards: the listing returns, the draft is gone.
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    expect(screen.queryByLabelText(/Editing/)).toBeNull();
+  });
 });
