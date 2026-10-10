@@ -25,7 +25,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,
@@ -1293,7 +1293,7 @@ pub async fn shell_omnibox_commit(
     state: State<'_, ShellState>,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
-    use crate::shell::omnibox::{Landing, land};
+    use crate::shell::omnibox::{land, Landing};
     let window_name = window_label_of(&window);
     // An omnibox commit is an interaction: any open popup yields.
     dismiss_popup(&app, &state, &window_name);

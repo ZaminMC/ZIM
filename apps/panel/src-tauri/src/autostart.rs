@@ -112,8 +112,8 @@ pub mod linux {
 
 #[cfg(windows)]
 pub mod windows {
-    use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+    use winreg::RegKey;
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const RUN_VALUE_NAME: &str = "ZIM";

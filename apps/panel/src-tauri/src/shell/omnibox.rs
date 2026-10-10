@@ -430,7 +430,11 @@ pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
 /// starts_with outranks contains — Chromium's relevance instinct, ours
 /// is alphabetical inside a rank (deterministic, no counters).
 fn rank_match(needle: &str, haystack: &str) -> u8 {
-    if haystack.starts_with(needle) { 0 } else { 1 }
+    if haystack.starts_with(needle) {
+        0
+    } else {
+        1
+    }
 }
 
 fn server_row(server: &FleetServer) -> Suggestion {
@@ -769,25 +773,21 @@ mod tests {
         strip.selection.clear();
         strip.anchor = None;
         // Alt-Enter never refuses — the fresh tab exists to take it.
-        assert!(
-            land(
-                &mut strip,
-                AddressRequest::Internal(Destination::Settings),
-                true
-            )
-            .is_some()
-        );
+        assert!(land(
+            &mut strip,
+            AddressRequest::Internal(Destination::Settings),
+            true
+        )
+        .is_some());
         strip.tabs.clear();
         strip.active = None;
         // The plain commit has no hand to land in — the caller's refusal.
-        assert!(
-            land(
-                &mut strip,
-                AddressRequest::Internal(Destination::Settings),
-                false
-            )
-            .is_none()
-        );
+        assert!(land(
+            &mut strip,
+            AddressRequest::Internal(Destination::Settings),
+            false
+        )
+        .is_none());
         assert!(land(&mut strip, AddressRequest::Query("x".into()), false).is_none());
     }
 
