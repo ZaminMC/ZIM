@@ -9,7 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   asProtocolError,
   INITIAL_FEED,
+  MAX_FEED_LINES,
   PAGE_LINES,
+  rowKey,
   stripLiveOverlap,
   useLogFeed,
 } from "./logFeed";
@@ -305,8 +307,116 @@ describe("useLogFeed — the lifecycle", () => {
 
   it("the initial state is the honest blank — null lines, no fake empty console", () => {
     expect(INITIAL_FEED.lines).toBeNull();
+    expect(INITIAL_FEED.keys).toBeNull();
     expect(INITIAL_FEED.historyAvailable).toBe(true);
     expect(INITIAL_FEED.missed).toBe(0);
     expect(INITIAL_FEED.newCount).toBe(0);
+  });
+});
+
+describe("the row-key law — §30's cheap rows at the React layer", () => {
+  it("rowKey reads the minted identity, not the shifting index", () => {
+    const feed = {
+      ...INITIAL_FEED,
+      lines: [line("a"), line("b")],
+      keys: ["r7", "r8"],
+    };
+    expect(rowKey(feed, 0)).toBe("r7");
+    expect(rowKey(feed, 1)).toBe("r8");
+    // The honest fallback when keys have not been minted yet.
+    expect(rowKey(INITIAL_FEED, 3)).toBe("3");
+  });
+
+  it("an append mints fresh keys and never re-keys a survivor", async () => {
+    rangeMock.mockResolvedValue({
+      file: "logs/latest.log", lines: [line("h")], olderAvailable: false, startOffset: 10, historyAvailable: true,
+    });
+    const { result } = renderHook(() => useLogFeed("keys"));
+    await waitFor(() => expect(result.current.state.lines).not.toBeNull());
+    const seedKeys = [...(result.current.state.keys ?? [])];
+    pushLogs([line("live 1"), line("live 2")]);
+    await waitFor(() => expect(result.current.state.lines?.length).toBe(3));
+    const after = result.current.state;
+    // The seed row kept its key; the new rows minted their own — all
+    // unique, none re-keyed.
+    expect(after.keys?.slice(0, 1)).toEqual(seedKeys);
+    expect(new Set(after.keys).size).toBe(3);
+  });
+
+  it("loadOlder's prepend never re-keys a survivor — the page rides in with its own keys", async () => {
+    rangeMock
+      .mockResolvedValueOnce({
+        file: "logs/latest.log",
+        lines: [line("h1"), line("h2")],
+        olderAvailable: true,
+        startOffset: 4096,
+        historyAvailable: true,
+      })
+      .mockResolvedValueOnce({
+        file: "logs/latest.log",
+        lines: [line("h0a"), line("h0b")],
+        olderAvailable: false,
+        startOffset: 1024,
+        historyAvailable: true,
+      });
+    const { result } = renderHook(() => useLogFeed("prepend"));
+    await waitFor(() => expect(result.current.state.cursor).toBe(4096));
+    const keysBefore = [...(result.current.state.keys ?? [])];
+    await act(async () => {
+      result.current.loadOlder();
+    });
+    await waitFor(() => expect(result.current.state.cursor).toBe(1024));
+    const after = result.current.state;
+    // The survivors moved down two seats; their keys moved with them.
+    expect(after.keys?.slice(2)).toEqual(keysBefore);
+    expect(new Set(after.keys).size).toBe(4);
+    // The page layout the cap's trim will walk.
+    expect(after.pages).toEqual([
+      { start: 1024, rows: 2 },
+      { start: 4096, rows: 2 },
+    ]);
+  });
+
+  it("the cap's trim drops whole history pages — the cursor lands on a boundary the feed can name, and survivors keep their keys", async () => {
+    rangeMock.mockResolvedValue({
+      file: "logs/latest.log",
+      lines: [line("h1"), line("h2")],
+      olderAvailable: true,
+      startOffset: 100,
+      historyAvailable: true,
+    });
+    const { result } = renderHook(() => useLogFeed("cap"));
+    await waitFor(() => expect(result.current.state.lines).not.toBeNull());
+
+    // Fill to exactly the cap: 2 history rows + MAX-2 live rows. No trim
+    // yet — the buffer is at, not over.
+    const under = Array.from({ length: MAX_FEED_LINES - 2 }, (_, i) =>
+      line(`flood ${i}`),
+    );
+    pushLogs(under);
+    await waitFor(() => expect(result.current.state.lines?.length).toBe(MAX_FEED_LINES));
+    const before = result.current.state;
+    const firstFloodKey = before.keys?.[2];
+
+    // One more line crosses the cap: the whole seed page (2 rows) falls
+    // off — page-granular, never a half page the byte cursor cannot
+    // name. The removal may overshoot the cap by the page's remainder;
+    // bounded is bounded.
+    pushLogs([line("edge")]);
+    await waitFor(() =>
+      expect(result.current.state.lines?.length).toBeLessThan(MAX_FEED_LINES),
+    );
+    const after = result.current.state;
+    expect(after.lines?.[0]?.line).toBe("flood 0");
+    // The survivor kept its minted key across the trim — the index
+    // moved, the identity did not.
+    expect(after.keys?.[0]).toBe(firstFloodKey);
+    expect(after.liveStart).toBe(0);
+    expect(after.pages).toEqual([]);
+    // The cursor is the dropped page's own start: the next loadOlder
+    // fetches the page ending exactly there — abutting the buffer,
+    // never a gap over the rows the trim dropped.
+    expect(after.cursor).toBe(100);
+    expect(new Set(after.keys).size).toBe(after.lines?.length);
   });
 });

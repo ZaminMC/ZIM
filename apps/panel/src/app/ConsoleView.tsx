@@ -12,13 +12,14 @@
 //   §30  the engine's bounds: paged history, live buffer, cheap rows —
 //        the console UI is never the bottleneck.
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendStdin } from "../state/actions";
 import { useServers } from "../state/servers";
-import { useLogFeed } from "../state/logFeed";
+import { rowKey, useLogFeed } from "../state/logFeed";
 import type { LogLine, LogLevel } from "../protocol/types";
 import { Button } from "../ui/Button";
 import { IconCopy, IconOpenInNew } from "../ui/icons";
+import { LogRow } from "./LogRow";
 import styles from "./ConsoleView.module.css";
 
 type ConsoleFilter = "all" | LogLevel;
@@ -122,16 +123,21 @@ export function ConsoleView({
   const { lines, liveStart, cursor, loadingOlder, error, newCount, historyAvailable, missed } = state;
 
   // §29: filtering is a view over the intact buffer — the feed keeps every
-  // line, the chips only choose which rows render.
-  const visible = useMemo(() => {
-    if (lines === null) return null;
-    return lines
+  // line, the chips only choose which rows render. The non-seam count rides
+  // the same pass so the empty state stops re-filtering 20 000 rows on
+  // every render (§30's cheap-rows law).
+  const { visible, nonSeamCount } = useMemo(() => {
+    if (lines === null) return { visible: null, nonSeamCount: 0 };
+    const kept = lines
       .map((line, index) => ({ line, index }))
       .filter(({ line, index }) => {
         if (index === liveStart) return true; // the seam marker row
         if (filter !== "all" && line.level !== filter) return false;
         return true;
       });
+    let nonSeamCount = 0;
+    for (const { index } of kept) if (index !== liveStart) nonSeamCount += 1;
+    return { visible: kept, nonSeamCount };
   }, [lines, filter, liveStart]);
 
   const doCopy = useCallback(
@@ -294,7 +300,7 @@ export function ConsoleView({
             {!error && cursor === 0 && historyAvailable && lines !== null && lines.length > 0 ? (
               <p className={styles.startOfLog}>beginning of the log file</p>
             ) : null}
-            {visible.filter(({ index }) => index !== liveStart).length === 0 && !error ? (
+            {nonSeamCount === 0 && !error ? (
               <p className={styles.empty}>
                 {filter !== "all"
                   ? "No lines match the current filter — the stream itself is untouched."
@@ -302,16 +308,12 @@ export function ConsoleView({
               </p>
             ) : null}
             {visible.map(({ line, index }) => (
-              <Fragment key={`${index}-${line.line}`}>
-                {index === liveStart ? <p className={styles.seam}>— live —</p> : null}
-                <div className={styles.row}>
-                  <span className={`${styles.level} ${styles[`level${capitalize(line.level)}`] ?? ""}`}>
-                    {line.level}
-                  </span>
-                  {line.thread ? <span className={styles.thread}>[{line.thread}]</span> : null}
-                  <span className={styles.message}>{line.line}</span>
-                </div>
-              </Fragment>
+              <LogRow
+                key={rowKey(state, index)}
+                line={line}
+                seam={index === liveStart}
+                styles={styles}
+              />
             ))}
           </>
         )}
@@ -344,8 +346,4 @@ export function ConsoleView({
       </form>
     </section>
   );
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }

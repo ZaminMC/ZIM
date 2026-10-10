@@ -8,9 +8,10 @@
 // the console so both views play identical rules; this component owns the
 // logs-specific presentation (search, level chips, the seam).
 
-import { Fragment, useMemo, useState } from "react";
-import { useLogFeed } from "../state/logFeed";
+import { useMemo, useState } from "react";
+import { rowKey, useLogFeed } from "../state/logFeed";
 import type { LogLevel } from "../protocol/types";
+import { LogRow } from "./LogRow";
 import styles from "./LogViewer.module.css";
 
 // The feed engine's re-export keeps the historical test import path stable.
@@ -34,10 +35,13 @@ export function LogViewer({ serverId }: { serverId: string }) {
   const { lines, liveStart, cursor, loadingOlder, error, newCount, historyAvailable, missed } =
     state;
 
-  const visible = useMemo(() => {
-    if (lines === null) return null;
+  // The non-seam count rides the same pass as the filter — the empty
+  // state stops re-walking every row on each render (§30's law, the same
+  // one the console answers).
+  const { visible, nonSeamCount } = useMemo(() => {
+    if (lines === null) return { visible: null, nonSeamCount: 0 };
     const needle = search.trim().toLowerCase();
-    return lines
+    const kept = lines
       .map((line, index) => ({ line, index }))
       .filter(({ line, index }) => {
         if (index === liveStart) return true; // the seam marker row
@@ -48,6 +52,9 @@ export function LogViewer({ serverId }: { serverId: string }) {
           : line.line.toLowerCase();
         return haystack.includes(needle);
       });
+    let nonSeamCount = 0;
+    for (const { index } of kept) if (index !== liveStart) nonSeamCount += 1;
+    return { visible: kept, nonSeamCount };
   }, [lines, levelFilter, search, liveStart]);
 
   return (
@@ -114,7 +121,7 @@ export function LogViewer({ serverId }: { serverId: string }) {
             {!error && cursor === 0 && historyAvailable && lines !== null && lines.length > 0 ? (
               <p className={styles.startOfLog}>beginning of the log file</p>
             ) : null}
-            {visible.filter(({ index }) => index !== liveStart).length === 0 && !error ? (
+            {nonSeamCount === 0 && !error ? (
               <p className={styles.empty}>
                 {search !== "" || levelFilter !== "all"
                   ? "No lines match the current filters."
@@ -122,16 +129,12 @@ export function LogViewer({ serverId }: { serverId: string }) {
               </p>
             ) : null}
             {visible.map(({ line, index }) => (
-              <Fragment key={`${index}-${line.line}`}>
-                {index === liveStart ? <p className={styles.seam}>— live —</p> : null}
-                <div className={styles.row}>
-                  <span className={`${styles.level} ${styles[`level${capitalize(line.level)}`] ?? ""}`}>
-                    {line.level}
-                  </span>
-                  {line.thread ? <span className={styles.thread}>[{line.thread}]</span> : null}
-                  <span className={styles.message}>{line.line}</span>
-                </div>
-              </Fragment>
+              <LogRow
+                key={rowKey(state, index)}
+                line={line}
+                seam={index === liveStart}
+                styles={styles}
+              />
             ))}
           </>
         )}
@@ -144,8 +147,4 @@ export function LogViewer({ serverId }: { serverId: string }) {
       ) : null}
     </section>
   );
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }

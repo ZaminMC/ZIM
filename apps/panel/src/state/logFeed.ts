@@ -11,6 +11,16 @@
 // The file (logs/latest.log, written by the server) is only the DEEP
 // history: paged in on scroll-up, consulted on reconnect, and its
 // absence is a stated state (historyAvailable: false), not an error.
+//
+// §30's cheap-rows law reaches the React layer here: every row carries a
+// MINTED identity (keys), so appends, prepends, and cap-trims never
+// re-key a surviving row — the old index-derived keys remounted the
+// whole list on every prepend and on every trim at the buffer cap. And
+// the cap's trim is PAGE-GRANULAR in the history: the byte cursor only
+// ever lands on a page boundary it can name exactly (a row-count trim
+// cannot advance a byte cursor — the rows' byte sizes are unknown — and
+// the stale cursor it left behind made the next loadOlder re-open a GAP:
+// the page it fetched skipped the rows the trim had dropped).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { rangeLogs, subscribeLogs } from "./actions";
@@ -55,8 +65,8 @@ export function asProtocolError(error: unknown): ProtocolErrorObject {
  * window is "lines ingested between the subscribe and the tail read", so
  * it is always a PREFIX of the live buffer matching a SUFFIX of history —
  * matched by line text (levels/tsMs legitimately differ across sources).
- * No match keeps every live line: showing a rare duplicate beats losing
- * a line.
+ * No match keeps every live line: showing a rare duplicate beats losing a
+ * line.
  */
 export function stripLiveOverlap(history: LogLine[], live: LogLine[]): LogLine[] {
   const max = Math.min(history.length, live.length);
@@ -75,13 +85,38 @@ export function stripLiveOverlap(history: LogLine[], live: LogLine[]): LogLine[]
   return live;
 }
 
+/** One loaded history page's footprint in the buffer: where it starts in
+ *  the file and how many rows it contributed. The cap's trim walks these
+ *  — a page is dropped whole or not at all, so the byte cursor only ever
+ *  advances to an offset the feed can name exactly. */
+export interface PageSpan {
+  /** The page's first row's byte offset in the log file. */
+  start: number;
+  /** Rows the page holds in the buffer's history section. */
+  rows: number;
+}
+
 export interface LogFeedState {
   /** History pages + live lines, in order. Null until the seed resolves. */
   lines: LogLine[] | null;
+  /** One stable React key per row of `lines` — null exactly when `lines`
+   *  is. Minted at ingestion from a monotonic counter (never inside a
+   *  state updater — updaters stay pure), so a row keeps its identity
+   *  across appends, prepends, and cap-trims. Index-derived keys used to
+   *  remount the entire list on every prepend and on every trim at the
+   *  cap — and duplicate texts in one batch could collide; minted keys
+   *  can neither shift nor collide. */
+  keys: string[] | null;
   /** Index in `lines` where the live section begins (the seam marker). */
   liveStart: number;
-  /** startOffset of the oldest loaded page; 0 = no older history pages. */
+  /** The byte offset the next older page continues from: the oldest
+   *  retained page's first row while any history is held; otherwise the
+   *  last dropped page's start. 0 = the beginning of the file is loaded
+   *  (or there is no file): no older pages exist. */
   cursor: number;
+  /** The loaded history's page layout, oldest first. Invariant:
+   *  `pages.reduce(rows) === liveStart`; every page has rows > 0. */
+  pages: PageSpan[];
   /** False when the server has written no log file yet: the console is
    *  live output alone, and the view says so once instead of failing. */
   historyAvailable: boolean;
@@ -96,8 +131,10 @@ export interface LogFeedState {
 
 export const INITIAL_FEED: LogFeedState = {
   lines: null,
+  keys: null,
   liveStart: 0,
   cursor: 0,
+  pages: [],
   historyAvailable: true,
   loadingOlder: false,
   error: null,
@@ -105,8 +142,14 @@ export const INITIAL_FEED: LogFeedState = {
   missed: 0,
 };
 
+/** The stable identity of the row at `index` — the views' one access
+ *  point, so the parallel-array bookkeeping never leaks into JSX. */
+export function rowKey(feed: LogFeedState, index: number): string {
+  return feed.keys?.[index] ?? `${index}`;
+}
+
 /** The feed every structured log view renders from. Owns the stream, the
- *  seam, paging, and the follow gesture; the view owns only presentation. */
+ * seam, paging, and the follow gesture; the view owns only presentation. */
 export function useLogFeed(serverId: string) {
   const [state, setState] = useState<LogFeedState>(INITIAL_FEED);
 
@@ -119,6 +162,16 @@ export function useLogFeed(serverId: string) {
   const atBottomRef = useRef(true);
   const pagingRef = useRef(false);
 
+  // The row-key minter. One counter per feed, never rewound: keys stay
+  // unique across re-seeds (a re-seed replaces the list, so reuse would
+  // be safe — but uniqueness costs nothing and reads honestly).
+  const keySeq = useRef(0);
+  const mintKeys = useCallback((count: number): string[] => {
+    const minted: string[] = new Array<string>(count);
+    for (let i = 0; i < count; i += 1) minted[i] = `r${keySeq.current++}`;
+    return minted;
+  }, []);
+
   const markBottom = useCallback(() => {
     const el = listRef.current;
     const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -128,26 +181,54 @@ export function useLogFeed(serverId: string) {
     }
   }, []);
 
-  const appendLive = useCallback((batch: LogLine[]) => {
-    if (batch.length === 0) return;
-    setState((s) => {
-      if (s.lines === null) return s; // pre-seam lines buffer in `pending`
-      const newCount = atBottomRef.current ? 0 : s.newCount + batch.length;
-      let lines = [...s.lines, ...batch];
-      let liveStart = s.liveStart;
-      if (lines.length > MAX_FEED_LINES) {
-        // Trim oldest HISTORY first; only when history is gone do live
-        // lines fall off the head (a console pinned to the tail keeps its
-        // exact view either way — atBottom scroll position is anchored to
-        // the bottom, not an offset).
-        const excess = lines.length - MAX_FEED_LINES;
-        const fromHistory = Math.min(excess, liveStart);
-        liveStart -= fromHistory;
-        lines = lines.slice(excess);
-      }
-      return { ...s, lines, liveStart, newCount };
-    });
-  }, []);
+  const appendLive = useCallback(
+    (batch: LogLine[]) => {
+      if (batch.length === 0) return;
+      // Keys are minted OUTSIDE the updater: state updaters must stay
+      // pure (StrictMode double-invokes them to prove it).
+      const minted = mintKeys(batch.length);
+      setState((s) => {
+        if (s.lines === null || s.keys === null) return s; // pre-seam lines buffer in `pending`
+        const newCount = atBottomRef.current ? 0 : s.newCount + batch.length;
+        let lines = [...s.lines, ...batch];
+        let keys = [...s.keys, ...minted];
+        let liveStart = s.liveStart;
+        let cursor = s.cursor;
+        let pages = s.pages;
+        if (lines.length > MAX_FEED_LINES) {
+          // Trim oldest HISTORY first; only when history is gone do live
+          // lines fall off the head (a console pinned to the tail keeps its
+          // exact view either way — atBottom scroll position is anchored to
+          // the bottom, not an offset). History drops in WHOLE PAGES: the
+          // trim's job is to keep the byte cursor on a boundary it can
+          // name, so the next loadOlder fetches a page that abuts the
+          // buffer instead of re-opening a gap over the dropped rows. A
+          // page-granular trim may overshoot the cap by up to one page —
+          // bounded is bounded, and history is one click away.
+          const excess = lines.length - MAX_FEED_LINES;
+          let cut = 0;
+          let dropped = 0;
+          let lastDroppedStart: number | null = null;
+          for (const page of pages) {
+            if (dropped >= excess) break;
+            dropped += page.rows;
+            lastDroppedStart = page.start;
+            cut += 1;
+          }
+          if (cut > 0) pages = pages.slice(cut);
+          // Live rows only fall when the pages are exhausted (dropped
+          // stalls below excess); the removal covers the cap either way.
+          const removal = Math.max(dropped, excess);
+          liveStart = Math.max(0, liveStart - removal);
+          cursor = pages[0]?.start ?? lastDroppedStart ?? s.cursor;
+          lines = lines.slice(removal);
+          keys = keys.slice(removal);
+        }
+        return { ...s, lines, keys, liveStart, cursor, pages, newCount };
+      });
+    },
+    [mintKeys],
+  );
 
   // History seed: the file tail becomes the pages, the live section starts
   // after it, and the seam overlap is stripped. Reused by the mount effect
@@ -158,10 +239,16 @@ export function useLogFeed(serverId: string) {
       return rangeLogs({ serverId, maxLines: PAGE_LINES })
         .then((tail) => {
           const joined = stripLiveOverlap(tail.lines, pending);
+          const minted = mintKeys(tail.lines.length + joined.length);
           setState({
             lines: [...tail.lines, ...joined],
+            keys: minted,
             liveStart: tail.lines.length,
             cursor: tail.startOffset,
+            pages:
+              tail.lines.length > 0
+                ? [{ start: tail.startOffset, rows: tail.lines.length }]
+                : [],
             historyAvailable: tail.historyAvailable,
             loadingOlder: false,
             error: null,
@@ -171,17 +258,20 @@ export function useLogFeed(serverId: string) {
           return tail.lines;
         })
         .catch((error: unknown) => {
+          const minted = mintKeys(pending.length);
           setState((s) => ({
             ...s,
             lines: pending,
+            keys: minted,
             liveStart: 0,
             cursor: 0,
+            pages: [],
             loadingOlder: false,
             error: asProtocolError(error),
           }));
         });
     },
-    [serverId],
+    [serverId, mintKeys],
   );
 
   // Live stream first. Subscribing WITHOUT a cursor, the daemon replays
@@ -280,11 +370,20 @@ export function useLogFeed(serverId: string) {
 
     rangeLogs({ serverId, maxLines: PAGE_LINES, beforeOffset: snapshot.cursor })
       .then((page) => {
+        const minted = mintKeys(page.lines.length);
         setState((prev) => ({
           ...prev,
           lines: prev.lines === null ? null : [...page.lines, ...prev.lines],
+          keys: prev.keys === null ? null : [...minted, ...prev.keys],
           cursor: page.startOffset,
           liveStart: prev.liveStart + page.lines.length,
+          pages:
+            page.lines.length > 0
+              ? [
+                  { start: page.startOffset, rows: page.lines.length },
+                  ...prev.pages,
+                ]
+              : prev.pages,
           loadingOlder: false,
         }));
         // Keep the operator's viewport anchored on the same rows.
@@ -306,7 +405,7 @@ export function useLogFeed(serverId: string) {
       .finally(() => {
         pagingRef.current = false;
       });
-  }, [serverId, seedHistory]);
+  }, [serverId, seedHistory, mintKeys]);
 
   const jumpToLive = useCallback(() => {
     const el = listRef.current;
