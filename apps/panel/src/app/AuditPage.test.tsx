@@ -73,16 +73,22 @@ describe("AuditPage", () => {
     expect(screen.queryByText(/Nothing audited yet/)).toBeNull();
   });
 
-  it("paging asks for older entries by offset and appends them", async () => {
+  it("paging deepens the snapshot — one consistent read, never a duplicate row", async () => {
+    // The protocol's offset counts back from the NEWEST line, a basis that
+    // shifts by one per audited action. The old offset arithmetic paged by
+    // "rows already held" and re-delivered shifted rows (duplicates). The
+    // page now re-reads one snapshot one page deeper.
     const page1 = Array.from({ length: 100 }, (_, i) => entryOf(`op.new.${i}`));
-    const page2 = [entryOf("op.old")];
+    const deeper = [...Array.from({ length: 100 }, (_, i) => entryOf(`op.deep.${i}`)), entryOf("op.old")];
     listAuditMock
       .mockResolvedValueOnce({ entries: page1, hasMore: true, malformed: 0 })
-      .mockResolvedValueOnce({ entries: page2, hasMore: false, malformed: 0 });
+      .mockResolvedValueOnce({ entries: deeper, hasMore: false, malformed: 0 });
     render(<AuditPage />);
     const button = await screen.findByRole("button", { name: "Load older entries" });
     fireEvent.click(button);
-    await waitFor(() => expect(listAuditMock).toHaveBeenLastCalledWith({ limit: 100, offset: 100 }));
+    await waitFor(() => expect(listAuditMock).toHaveBeenLastCalledWith({ limit: 200, offset: 0 }));
+    // The deeper snapshot REPLACES the list — 101 rows, none duplicated
+    // even though the daemon answered two pages over a shifting basis.
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(101));
     // The older page leaves no "load older" behind — the trail is done.
     expect(screen.queryByRole("button", { name: "Load older entries" })).toBeNull();

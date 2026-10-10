@@ -32,16 +32,35 @@ export class WsTransport implements Transport {
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(this.url);
       this.socket = socket;
-      socket.addEventListener("open", () => resolve());
+      let opened = false;
+      let settled = false;
+      socket.addEventListener("open", () => {
+        opened = true;
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
       socket.addEventListener("error", () => {
-        if (socket.readyState === WebSocket.CONNECTING) {
+        if (!settled && !opened) {
+          settled = true;
           reject(new Error(`could not reach the dev bridge at ${this.url}`));
         }
       });
       socket.addEventListener("message", (event) => {
         if (typeof event.data === "string") sink([event.data]);
       });
-      socket.addEventListener("close", () => onDown());
+      socket.addEventListener("close", () => {
+        // stop() on a CONNECTING socket aborts the handshake and fires
+        // close without ever opening — settle the promise there, or the
+        // client's connectOnce awaits forever: no retry, no down, a dev
+        // wire that simply never speaks again.
+        if (!settled && !opened) {
+          settled = true;
+          reject(new Error("the dev bridge connection closed before it opened"));
+        }
+        onDown();
+      });
     });
   }
 
@@ -83,10 +102,18 @@ export interface TauriRemoteSpec {
 }
 
 export class TauriTransport implements Transport {
+  /** The down lane start() captured — a failed send speaks through it so
+   *  the client takes the standard down ladder (pending requests fail
+   *  now, the retry schedule spins up) instead of stalling every caller
+   *  for its full request budget. The client's generation guard makes the
+   *  double-down (send failure + the host's own down channel) idempotent. */
+  private onDown: (() => void) | null = null;
+
   constructor(private readonly remote: TauriRemoteSpec | null = null) {}
 
   async start(sink: (batch: IncomingBatch) => void, onDown: () => void): Promise<void> {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
+    this.onDown = onDown;
 
     const attempt = async (): Promise<void> => {
       // Fresh channels per attempt: a failed daemon_connect must never leave
@@ -133,7 +160,17 @@ export class TauriTransport implements Transport {
   send(frame: string): void {
     void (async () => {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("daemon_send", { frame });
+      try {
+        await invoke("daemon_send", { frame });
+      } catch {
+        // The host's daemon wire is broken: this frame (and every pending
+        // request behind it) must not wait out its full budget to learn.
+        // Speak the down lane — the client's handleDown rejects the
+        // pending set and starts the retry ladder immediately. The host's
+        // own down channel will speak too; the generation guard absorbs
+        // the echo.
+        this.onDown?.();
+      }
     })();
   }
 
@@ -145,6 +182,7 @@ export class TauriTransport implements Transport {
 
   async stop(): Promise<void> {
     const { invoke } = await import("@tauri-apps/api/core");
+    this.onDown = null;
     await invoke("daemon_close");
   }
 }

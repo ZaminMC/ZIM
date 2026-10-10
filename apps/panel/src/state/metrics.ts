@@ -128,8 +128,13 @@ export function forgetMetrics(serverId: string): void {
   useMetrics.getState().forget(serverId);
 }
 
+/** The stable empty: a fresh `[]` per render would break every memoized
+ *  consumer downstream (the identity changes while the value does not).
+ *  One frozen reference keeps "no samples yet" cheap to compare. */
+const NO_SAMPLES: MetricsSample[] = [];
+
 export function useServerMetrics(serverId: string): MetricsSample[] {
-  return useMetrics((s) => s.samples[serverId]) ?? [];
+  return useMetrics((s) => s.samples[serverId]) ?? NO_SAMPLES;
 }
 
 // --- formatting helpers shared by the chips and the metrics view ---

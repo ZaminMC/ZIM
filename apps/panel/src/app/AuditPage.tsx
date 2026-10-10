@@ -17,6 +17,18 @@ import styles from "./AuditPage.module.css";
 
 const PAGE_SIZE = 100;
 
+/** The audit protocol pages newest-first by an offset counted back from
+ *  the NEWEST line — a basis that SHIFTS by one every time the daemon
+ *  appends. Paging by "rows already held" (the old offset arithmetic)
+ *  re-delivers rows that shifted into the next page's window: duplicates
+ *  whenever anything was audited between clicks. The honest fix inside
+ *  the protocol as it stands: page by DEPTH — each "load older" re-reads
+ *  one consistent snapshot `depth + PAGE_SIZE` rows deep from the current
+ *  newest. No row can duplicate (one basis, one read), new lines simply
+ *  appear at the top (they were audited; the operator should see them),
+ *  and the cost is one bounded re-read of rows the page already priced. */
+const DEEPEST_SNAPSHOT = 2000;
+
 function formatWhen(tsMs: number): string {
   const date = new Date(tsMs);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
@@ -54,12 +66,12 @@ export function AuditPage() {
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
-  const load = (offset: number, append: boolean) => {
-    if (append) setLoadingOlder(true);
-    else setLoading(true);
-    listAudit({ limit: PAGE_SIZE, offset })
+  const load = (depth: number) => {
+    const limit = Math.min(depth, DEEPEST_SNAPSHOT);
+    setLoading(true);
+    listAudit({ limit, offset: 0 })
       .then((result) => {
-        setEntries((prev) => (append ? [...prev, ...result.entries] : result.entries));
+        setEntries(result.entries);
         setHasMore(result.hasMore);
         setMalformed(result.malformed);
         setError(null);
@@ -71,8 +83,12 @@ export function AuditPage() {
       });
   };
 
+  // The view's current depth: grows by one page per "load older", resets
+  // to the first page on mount.
+  const [depth, setDepth] = useState(PAGE_SIZE);
+
   useEffect(() => {
-    load(0, false);
+    load(PAGE_SIZE);
   }, []);
 
   const serverName = (serverId: string | undefined): string | undefined =>
@@ -88,7 +104,7 @@ export function AuditPage() {
             read only here.
           </p>
         </div>
-        <Button variant="ghost" onClick={() => load(0, false)} disabled={loading}>
+        <Button variant="ghost" onClick={() => load(depth)} disabled={loading}>
           Refresh
         </Button>
       </header>
@@ -121,7 +137,12 @@ export function AuditPage() {
             <div className={styles.more}>
               <Button
                 variant="ghost"
-                onClick={() => load(entries.length, true)}
+                onClick={() => {
+                  setLoadingOlder(true);
+                  const next = Math.min(depth + PAGE_SIZE, DEEPEST_SNAPSHOT);
+                  setDepth(next);
+                  load(next);
+                }}
                 disabled={loadingOlder}
               >
                 {loadingOlder ? "Reading…" : "Load older entries"}
