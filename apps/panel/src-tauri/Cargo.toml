@@ -33,11 +33,6 @@ zamin-protocol = { path = "../../../crates/zamin-protocol" }
 # seam, not new business logic.
 zamin-core = { path = "../../../crates/zamin-core" }
 
-# The stale-daemon heal's kill: SIGKILL to the wedged zamind's pid
-# (unix; the Windows path speaks taskkill). The daemon's own ipc crate
-# already pulls libc on unix — this declares the host's own use.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 tracing = "0.1"
 
 # Desktop notifications (freedesktop / Windows toast): the webview decides
@@ -74,3 +69,9 @@ winreg = "0.55"
 lto = true
 codegen-units = 1
 strip = true
+
+# The stale-daemon heal's kill: SIGKILL to the wedged zamind's pid
+# (unix; the Windows path speaks taskkill). The daemon's own ipc crate
+# already pulls libc on unix — this declares the host's own use.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
