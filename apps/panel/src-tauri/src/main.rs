@@ -102,6 +102,11 @@ pub fn drop_wire_window(app: &AppHandle, window_label: &str) {
     }
 }
 
+/// Ask the daemon's bridge for a wire on this webview's behalf. The
+/// argument list IS the wire's shape (endpoint + the remote profile's
+/// three fields + the two channels + state) — the count is the
+/// protocol's, not a design smell.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn daemon_connect(
     window: tauri::Webview,
@@ -451,8 +456,12 @@ fn main() {
                 // A tear-off (or any non-tray window) closed for real:
                 // its tabs' wires must not linger as dead sessions on
                 // the daemon.
-                tauri::RunEvent::WindowEvent { event, label, .. } => {
-                    if matches!(event, tauri::WindowEvent::Destroyed) && label != "main" {
+                tauri::RunEvent::WindowEvent {
+                    event: tauri::WindowEvent::Destroyed,
+                    label,
+                    ..
+                } => {
+                    if label != "main" {
                         drop_wire_window(app, &label);
                     }
                 }

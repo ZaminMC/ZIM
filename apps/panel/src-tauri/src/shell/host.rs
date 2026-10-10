@@ -1334,7 +1334,10 @@ pub async fn shell_bookmark_add(
 /// exactly one — EXCEPT the hover card: while any popup holds the lane
 /// the card is refused (ScopedHideHoverCardLock's law, enforced at the
 /// one-popup registry), and a menu opening kills a showing card by the
-/// same dismiss-first order as always.
+/// same dismiss-first order as always. The argument list is the popup
+/// protocol's own shape (kind + anchor + context + state) — the count
+/// is the surface's, not a design smell.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn shell_popup(
     window: tauri::Webview,
@@ -1580,7 +1583,7 @@ pub fn shell_popup_update(
             .into(),
         });
     }
-    let _ = app.emit_to(&popup_label(&window_name), "shell://popup-update", card);
+    let _ = app.emit_to(popup_label(&window_name), "shell://popup-update", card);
     Ok(true)
 }
 
@@ -1606,7 +1609,7 @@ pub fn shell_popup_fade(
         return Ok(false);
     }
     let _ = app.emit_to(
-        &popup_label(&window_name),
+        popup_label(&window_name),
         "shell://popup-fade",
         serde_json::json!({}),
     );

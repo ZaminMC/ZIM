@@ -1755,7 +1755,7 @@ mod tests {
     fn removing_the_last_member_destroys_the_group() {
         let (mut strip, a, group) = strip_with_group();
         strip.group_remove(a);
-        assert!(strip.groups.get(&group).is_none());
+        assert!(!strip.groups.contains_key(&group));
         let member = strip.tabs.iter().find(|t| t.id == a).unwrap();
         assert!(member.group.is_none());
     }
@@ -1782,7 +1782,7 @@ mod tests {
         let b = strip.append(Destination::Jobs, true);
         strip.group_add(group, b);
         assert!(strip.group_ungroup(group));
-        assert!(strip.groups.get(&group).is_none());
+        assert!(!strip.groups.contains_key(&group));
         assert!(strip.tabs.iter().all(|t| t.group.is_none()));
         // The tabs themselves survive.
         assert_eq!(strip.tabs.len(), 3);
