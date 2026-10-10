@@ -100,8 +100,17 @@ export function ScoreboardEditor({
         <div className={styles.field}>
           <span className={styles.label}>Lines</span>
           <ol className={styles.rows}>
+            {/* The row list is POSITIONAL by construction: the indexed
+                layout rewrites a row's own pair, and the single layout
+                (all rows are views of the one `lines` pair) rewrites the
+                one pair from the values in order — a move swaps values,
+                a remove drops a position. The React keys say exactly
+                that (position-stable): the single layout's rows would
+                otherwise all carry the SAME pair key ("lines"), and
+                React's reconciliation would drop or mismatch rows on
+                every add/remove/move. */}
             {rows.map((row, index) => (
-              <li key={row.key ?? `new-${index}`} className={styles.row}>
+              <li key={`${row.key ?? "new"}#${index}`} className={styles.row}>
                 <span className={styles.index}>{index + 1}</span>
                 <input
                   className={styles.input}
@@ -174,8 +183,9 @@ export function ScoreboardEditor({
               )}
             </div>
             <ul className={styles.boardLines}>
+              {/* Positional, the config list's own law (see above). */}
               {rows.map((row, index) => (
-                <PreviewLine key={row.key ?? `preview-${index}`} text={row.value} />
+                <PreviewLine key={`${row.key ?? "new"}#${index}`} text={row.value} />
               ))}
             </ul>
           </div>

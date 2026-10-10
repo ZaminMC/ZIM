@@ -94,4 +94,31 @@ describe("ScoreboardEditor", () => {
       true,
     );
   });
+
+  it("the single-pair layout edits rows without duplicate-key wreckage", () => {
+    // The single layout (`lines=a,b,c`) renders every row as a view of
+    // the ONE pair, so every row used to carry the same React key
+    // ("lines") — reconciliation dropped and mismatched rows on
+    // add/remove/move. The row list is positional now; this is the
+    // regression pin for both dialects staying editable.
+    const serialize = setup("title=T\nlines=A,B,C\n");
+    expect(screen.getByLabelText("Line 1")).toHaveProperty("value", "A");
+    expect(screen.getByLabelText("Line 3")).toHaveProperty("value", "C");
+
+    // A keystroke on the middle row rewrites the one pair, in order.
+    fireEvent.change(screen.getByLabelText("Line 2"), { target: { value: "b2" } });
+    expect(serialize()).toBe("title=T\nlines=A,b2,C\n");
+
+    // A remove drops the position, the pair closing up behind it.
+    fireEvent.click(screen.getByRole("button", { name: "Remove line 1" }));
+    expect(serialize()).toBe("title=T\nlines=b2,C\n");
+
+    // A move swaps the two values through the same one pair.
+    fireEvent.click(screen.getByRole("button", { name: "Move line 2 up" }));
+    expect(serialize()).toBe("title=T\nlines=C,b2\n");
+
+    // An add appends the joined value's next position.
+    fireEvent.click(screen.getByRole("button", { name: /Add line/ }));
+    expect(serialize()).toBe("title=T\nlines=C,b2,\n");
+  });
 });
