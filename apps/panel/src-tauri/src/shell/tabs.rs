@@ -1052,8 +1052,8 @@ mod tests {
         // ctrl-walk: the active gains company.
         assert!(strip.toggle_selection(ids[2]));
         assert_eq!(strip.selection.len(), 2); // the active + the toggled
-        // A second ctrl-click on the ACTIVE deselects it — the first
-        // selected is promoted (DeselectTabAt's law, size > 1 branch).
+                                              // A second ctrl-click on the ACTIVE deselects it — the first
+                                              // selected is promoted (DeselectTabAt's law, size > 1 branch).
         assert!(strip.toggle_selection(ids[4]));
         assert_eq!(strip.selection, BTreeSet::from([ids[2]]));
         assert_eq!(strip.active, Some(ids[2]));
@@ -1445,15 +1445,13 @@ mod tests {
         strip.group_add(group, b);
         strip.group_remove(b);
         assert!(strip.groups.contains_key(&group));
-        assert!(
-            strip
-                .tabs
-                .iter()
-                .find(|t| t.id == a)
-                .unwrap()
-                .group
-                .is_some()
-        );
+        assert!(strip
+            .tabs
+            .iter()
+            .find(|t| t.id == a)
+            .unwrap()
+            .group
+            .is_some());
     }
 
     #[test]
