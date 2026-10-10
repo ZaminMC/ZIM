@@ -15,5 +15,10 @@ futures-util = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 
+# Unix daemon ownership: flock on the endpoint's lock file is the atomic
+# single-instance primitive (the Windows side has first_pipe_instance).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [lints]
 workspace = true

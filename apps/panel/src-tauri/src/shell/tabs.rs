@@ -849,6 +849,108 @@ impl Strip {
         Some((tab, index))
     }
 
+    /// The drag block — MaybeStartDrag's law at the model boundary: the
+    /// tab under the hand carries its whole selection when it stands in
+    /// a multi-selection, itself otherwise. The drop verdict
+    /// ([`Strip::reorder_drop`]) and the between-windows / tear-off
+    /// detach both speak through this one set, so a drag can never
+    /// disagree about WHAT is being carried (the audit's own case: the
+    /// old cross-window path detached one tab out of a selected block).
+    pub fn drag_block(&self, id: TabId) -> Vec<TabId> {
+        if self.selection.contains(&id) && self.selection.len() > 1 {
+            self.selection.iter().copied().collect()
+        } else {
+            vec![id]
+        }
+    }
+
+    /// Detach the whole block: every id leaves in STRIP ORDER as
+    /// DetachedTabs, ready to re-insert as a block in another window or
+    /// to boot a tear-off window with. The removal maintenance runs ONCE
+    /// for the block — per-tab `detach` calls would fire the neighbor
+    /// law and mint the empty-strip New tab between removals (a block
+    /// pulled from a 3-tab strip would leave TWO fresh New tabs). Groups
+    /// the moving tabs belonged to die on the source — the same law the
+    /// single [`Strip::detach`] speaks through `ungroup_all`. An emptied
+    /// strip gets its fresh New tab, foreground off: the next
+    /// activation belongs to the operator, not the model.
+    pub fn detach_block(&mut self, ids: &[TabId]) -> Vec<Tab> {
+        let wanted: std::collections::HashSet<TabId> = ids.iter().copied().collect();
+        let mut block = Vec::with_capacity(ids.len());
+        let mut survivors = Vec::with_capacity(self.tabs.len());
+        let mut first_removed_index: Option<usize> = None;
+        let mut groups: Vec<GroupId> = Vec::new();
+        for (index, tab) in std::mem::take(&mut self.tabs).into_iter().enumerate() {
+            if wanted.contains(&tab.id) {
+                if first_removed_index.is_none() {
+                    first_removed_index = Some(index);
+                }
+                if let Some(group) = tab.group {
+                    groups.push(group);
+                }
+                block.push(tab);
+            } else {
+                survivors.push(tab);
+            }
+        }
+        self.tabs = survivors;
+        groups.sort_unstable();
+        groups.dedup();
+        self.ungroup_all(&groups);
+        for id in ids {
+            self.selection.remove(id);
+        }
+        if self.active.is_some_and(|active| wanted.contains(&active)) {
+            // The active tab left with the block: the FIRST SELECTED
+            // survivor is promoted (close's multi-selection law); with
+            // no survivor left, the neighbor where the block stood is
+            // ACTIVATED — activate, not a raw active write, so the
+            // strip's own invariant (the active tab is always selected)
+            // survives the removal. Nothing left at all: the empty-strip
+            // New tab below takes the activation through append's rule.
+            if let Some(first) = self.selection.iter().next().copied() {
+                self.active = Some(first);
+                self.anchor = Some(first);
+            } else {
+                let at = first_removed_index.unwrap_or(0);
+                let next = self
+                    .tabs
+                    .get(at)
+                    .or_else(|| self.tabs.get(at.saturating_sub(1)))
+                    .map(|t| t.id);
+                match next {
+                    Some(next_id) => self.activate(next_id),
+                    None => {
+                        self.active = None;
+                        self.anchor = None;
+                    }
+                }
+            }
+        }
+        if self.anchor.is_some_and(|anchor| wanted.contains(&anchor)) {
+            self.anchor = self.active;
+        }
+        if self.tabs.is_empty() {
+            self.append(Destination::New, false);
+        }
+        block
+    }
+
+    /// The moved block's landing selection: the hand's tab activates and
+    /// anchors, the rest of the block rides selected — Chromium's moved
+    /// tabs arrive in the target window still selected, with the tab the
+    /// hand carried as the active one (tab_strip_model's insert law; the
+    /// single-tab case collapses to a plain activation).
+    pub fn select_block(&mut self, anchor: TabId, ids: &[TabId]) {
+        self.activate(anchor);
+        for id in ids {
+            if self.index_of(*id).is_some() {
+                self.selection.insert(*id);
+            }
+        }
+        self.anchor = Some(anchor);
+    }
+
     /// IDC_ADD_NEW_TAB_TO_GROUP — creating a group compacts its members
     /// contiguously (documented divergence from Chrome's drag-formed
     /// groups).
@@ -1820,5 +1922,136 @@ mod tests {
         assert_eq!(strip.tabs[a_index + 1].group, Some(group));
         assert_eq!(strip.tabs[a_index + 1].destination(), &Destination::New);
         assert_eq!(strip.active, Some(fresh));
+    }
+
+    // -- the drag block laws (MaybeStartDrag's carried set, the
+    //    between-windows move and the tear-off's whole-block landing) --
+
+    fn labeled_strip() -> (Strip, Vec<TabId>) {
+        let mut strip = Strip::new();
+        let mut ids = vec![strip.tabs[0].id];
+        for _ in 1..4 {
+            let id = strip.append(Destination::Settings, true);
+            // A second entry in the history so a moved tab's identity is
+            // provable (can_back stays true across a move).
+            strip.navigate(id, Destination::About);
+            ids.push(id);
+        }
+        (strip, ids)
+    }
+
+    #[test]
+    fn the_drag_block_is_the_selection_or_the_one_tab() {
+        let (mut strip, ids) = labeled_strip();
+        // No multi-selection: the hand's tab is the whole block.
+        assert_eq!(strip.drag_block(ids[1]), vec![ids[1]]);
+        // ctrl-walk A and B in (D stays the active member): the hand on
+        // A carries the whole selection — including the active it did
+        // not touch.
+        assert!(strip.toggle_selection(ids[0]));
+        assert!(strip.toggle_selection(ids[1]));
+        let mut block = strip.drag_block(ids[0]);
+        block.sort_unstable();
+        let mut expected = vec![ids[0], ids[1], ids[3]];
+        expected.sort_unstable();
+        assert_eq!(block, expected);
+    }
+
+    #[test]
+    fn detach_block_moves_the_whole_selection_once() {
+        let (mut strip, ids) = labeled_strip();
+        // The selection becomes A, B, C, D (everything); the hand drags
+        // C — the BLOCK is all four.
+        assert!(strip.toggle_selection(ids[0]));
+        assert!(strip.toggle_selection(ids[1]));
+        assert!(strip.toggle_selection(ids[2]));
+        let block = strip.detach_block(&strip.drag_block(ids[2]));
+        // The BLOCK left — in strip order — not one tab of it.
+        assert_eq!(
+            block.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![ids[0], ids[1], ids[2], ids[3]]
+        );
+        // The emptied strip: ONE fresh New tab (the per-tab-detach
+        // disease minted a new one per removal — three here).
+        assert_eq!(strip.tabs.len(), 1);
+        assert_eq!(strip.tabs[0].destination(), &Destination::New);
+        assert_eq!(strip.active, Some(strip.tabs[0].id));
+        assert!(strip.selection.contains(&strip.tabs[0].id));
+    }
+
+    #[test]
+    fn detach_block_promotes_a_selected_survivor_and_keeps_strays() {
+        let (mut strip, ids) = labeled_strip();
+        // A and B join the selection; then the active D steps out (the
+        // first selected — A — is promoted). The block is A+B; C and D
+        // stay.
+        assert!(strip.toggle_selection(ids[0]));
+        assert!(strip.toggle_selection(ids[1]));
+        assert!(strip.toggle_selection(ids[3]));
+        let block = strip.detach_block(&strip.drag_block(ids[0]));
+        assert_eq!(
+            block.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![ids[0], ids[1]]
+        );
+        assert_eq!(
+            strip.tabs.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![ids[2], ids[3]]
+        );
+        // The active left with the block and no selected survivor
+        // stayed — the neighbor where the block stood is promoted (C).
+        assert_eq!(strip.active, Some(ids[2]));
+        assert_eq!(strip.anchor, Some(ids[2]));
+        assert!(strip.selection.contains(&ids[2]));
+        // The moved tabs keep their ids and destinations.
+        assert_eq!(block[0].id, ids[0]);
+        assert_eq!(block[1].id, ids[1]);
+    }
+
+    #[test]
+    fn select_block_lands_the_moved_block_selected() {
+        let (mut source, ids) = labeled_strip();
+        // A and B join, D steps out; the hand drags B.
+        assert!(source.toggle_selection(ids[0]));
+        assert!(source.toggle_selection(ids[1]));
+        assert!(source.toggle_selection(ids[3]));
+        let block = source.detach_block(&source.drag_block(ids[1]));
+
+        let mut target = Strip::new();
+        let target_seed = target.tabs[0].id;
+        // The target re-inserts the block; ids mint fresh from ITS counter.
+        let mut new_ids = Vec::new();
+        for (offset, tab) in block.iter().enumerate() {
+            let id = target.insert(offset, tab.destination().clone(), false);
+            new_ids.push(id);
+        }
+        // The hand's tab (ids[1], second in the block) anchors.
+        let dragged_new = new_ids[1];
+        target.select_block(dragged_new, &new_ids);
+        assert_eq!(target.active, Some(dragged_new));
+        assert_eq!(target.anchor, Some(dragged_new));
+        assert_eq!(target.selection.len(), block.len());
+        // The seed tab is deselected but alive; the destinations rode
+        // over intact (the seed's New, the moved B's Settings).
+        assert!(target.selection.contains(&new_ids[0]));
+        assert!(target.selection.contains(&dragged_new));
+        assert!(target.tabs.iter().any(|t| t.id == target_seed));
+        assert_eq!(
+            target
+                .tabs
+                .iter()
+                .find(|t| t.id == new_ids[0])
+                .unwrap()
+                .destination(),
+            &Destination::New
+        );
+        assert_eq!(
+            target
+                .tabs
+                .iter()
+                .find(|t| t.id == new_ids[1])
+                .unwrap()
+                .destination(),
+            &Destination::About
+        );
     }
 }

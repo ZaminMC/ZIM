@@ -117,15 +117,52 @@ fn client_config(trust: &Trust) -> Result<ClientConfig, AgentError> {
 
 /// SNI name for the connection. With fingerprint pinning the name carries
 /// no trust — but TLS still requires a syntactically valid one.
+///
+/// The fallback slicing has one rule: never feed TLS a fragment of an
+/// address we could not understand. A bare (unbracketed) IPv6 literal with
+/// a port — `::1:7777` — used to slice into the nonsense SNI `::1`, whose
+/// failure surfaced as a confusing TLS hostname error. Such an address is
+/// refused here, with the fix spelled into the message.
 fn server_name(addr: &str) -> Result<ServerName<'static>, AgentError> {
     if let Ok(socket) = addr.parse::<SocketAddr>() {
         return Ok(ServerName::IpAddress(socket.ip().into()));
     }
-    let host = addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(addr);
+    // Bracketed literal `[::1]:7777` (or `[::1]`): the host is what the
+    // brackets hold. (The full form already parsed as SocketAddr above.)
+    if addr.starts_with('[') {
+        if let Some(end) = addr.find(']') {
+            let host = &addr[1..end];
+            return ip_or_dns(host, addr);
+        }
+    }
+    // `host:port` with a plain hostname (one colon, no v6 ambiguity).
+    if let Some((host, port)) = addr.rsplit_once(':') {
+        if !host.contains(':') && !host.contains(']') && port.bytes().all(|b| b.is_ascii_digit()) {
+            return ip_or_dns(host, addr);
+        }
+    }
+    // Everything else is not an address this client accepts — a bare
+    // IPv6 literal ("::1") has no port to connect to, and an unbracketed
+    // one with a port ("::1:7777") is ambiguous down to the hex digits
+    // (1:7777 is a legal v6 suffix). Both are refused HERE, with the fix
+    // spelled out, before TLS gets a chance to mispronounce a fragment
+    // of them (the old slicing fed SNI a nonsense host).
+    Err(AgentError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "invalid remote address {addr:?}: use host:port, or bracket an \
+             IPv6 literal like [::1]:7777"
+        ),
+    )))
+}
+
+/// The host string as a TLS ServerName: an IP literal when it parses as
+/// one, the DNS name otherwise.
+fn ip_or_dns(host: &str, addr: &str) -> Result<ServerName<'static>, AgentError> {
     ServerName::try_from(host.to_owned()).map_err(|e| {
         AgentError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            e.to_string(),
+            format!("remote address {addr:?}: {e}"),
         ))
     })
 }
@@ -254,4 +291,41 @@ fn hex_decode(hex: &str) -> Result<Vec<u8>, AgentError> {
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| AgentError::Fingerprint(hex.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::server_name;
+
+    #[test]
+    fn the_documented_host_port_forms() {
+        // The SocketAddr path: a full host:port parses whole.
+        let name = server_name("127.0.0.1:7443").unwrap();
+        assert_eq!(name.to_str(), "127.0.0.1");
+        // A plain hostname keeps its name (the old slicing's one true case).
+        let name = server_name("box.example:7443").unwrap();
+        assert_eq!(name.to_str(), "box.example");
+    }
+
+    #[test]
+    fn ipv6_literals_arrive_whole() {
+        // Bracketed with a port — the one correct IPv6 spelling.
+        let name = server_name("[2001:db8::1]:7443").unwrap();
+        assert_eq!(name.to_str(), "2001:db8::1");
+    }
+
+    #[test]
+    fn unbracketed_ipv6_is_refused_with_the_fix() {
+        // The old code sliced "::1:7443" into the nonsense SNI "::1" and
+        // let TLS produce the confusing error. Refused now, before any
+        // wire — and the bare literal with no port is refused too (the
+        // field is host:port; there is nothing to connect to).
+        for bad in ["::1:7443", "::1", "fe80::1%eth0:7443"] {
+            let error = server_name(bad).unwrap_err().to_string();
+            assert!(error.contains("bracket"), "{bad:?}: {error}");
+        }
+        // An ambiguous mess is refused the same way.
+        let error = server_name("not an address").unwrap_err().to_string();
+        assert!(error.contains("invalid remote address"), "{error}");
+    }
 }

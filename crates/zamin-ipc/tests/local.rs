@@ -81,6 +81,40 @@ async fn stale_socket_is_reclaimed() {
     let _ = server;
 }
 
+// The ownership primitive is the flock on <socket>.lock, held for the
+// server's lifetime — a controlled exit (Drop) releases it, so the next
+// daemon binds cleanly without touching the leftover socket file.
+#[cfg(unix)]
+#[tokio::test]
+async fn rebind_after_drop_succeeds() {
+    let endpoint = Endpoint::unique_for_test("rebind");
+    let path = match &endpoint {
+        Endpoint::UnixSocket(p) => p.clone(),
+        _ => unreachable!(),
+    };
+    {
+        let _server = IpcServer::bind(endpoint.clone()).await.expect("first bind");
+        // A second bind while the first lives is refused — the flock, not
+        // a probe, is the referee.
+        assert!(matches!(
+            IpcServer::bind(endpoint.clone()).await,
+            Err(IpcError::AlreadyRunning)
+        ));
+    }
+    // The drop removed our socket file; the LOCK FILE REMAINS by design
+    // (unlinking it would hand the name to whoever holds the dead inode).
+    // The rebind must succeed anyway — the flock died with the process
+    // (here: the explicit drop).
+    let rebound = IpcServer::bind(endpoint).await;
+    assert!(
+        rebound.is_ok(),
+        "a released lock must rebind: {:?}",
+        rebound.err()
+    );
+    let _ = rebound;
+    let _ = path;
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn default_endpoint_derives_a_name() {

@@ -296,6 +296,14 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 fn main() {
     tauri::Builder::default()
+        // ONE ZIM at a time — registered FIRST (the plugin's own law):
+        // the second process's only job is to raise the first window and
+        // exit, so it never becomes a second writer racing the first
+        // over the session and bookmark files (the persistence audit's
+        // P1 root).
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_notification::init())
         // The update lane (ADR-0024): the webview drives check/install/relaunch
         // through these plugins; the host adds no policy of its own.

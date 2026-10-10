@@ -82,8 +82,12 @@ impl Bookmarks {
         self.items.iter().any(|b| &b.destination == destination)
     }
 
-    pub fn remove(&mut self, id: &str) {
+    /// Removes one node by id; true when a node was actually removed —
+    /// the caller's persistence law saves on a real mutation only.
+    pub fn remove(&mut self, id: &str) -> bool {
+        let before = self.items.len();
         self.items.retain(|b| b.id != id);
+        self.items.len() != before
     }
 
     pub fn toggle_bar(&mut self) {

@@ -34,7 +34,7 @@ use tauri::{
 use crate::shell::bookmarks::Bookmarks;
 use crate::shell::commands as cmd;
 use crate::shell::layout::{self, Slot};
-use crate::shell::tabs::{Destination, GroupId, Strip, TabId};
+use crate::shell::tabs::{Destination, GroupId, Strip, Tab, TabId};
 
 // ---------------------------------------------------------------------------
 // Drag session (TabDragController, ported subset)
@@ -137,7 +137,14 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let tmp = path.with_extension("tmp");
+    // The temp name carries this process's id: two ZIM processes (a
+    // misbehaving launch, a stale copy) must never share one .tmp — the
+    // shared name let a rename fail ("already moved") or, worse, interleave
+    // two writers' bytes into one rename. With per-PID temps each
+    // process's rename lands its OWN whole file; the final rename is
+    // last-writer-wins on the json, which the single-instance plugin in
+    // main.rs makes a two-actors-at-most scenario instead of a protocol.
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     if std::fs::write(&tmp, bytes).is_ok() {
         let _ = std::fs::rename(&tmp, path);
     }
@@ -145,12 +152,21 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) {
 
 pub struct ShellState {
     inner: Arc<Mutex<ShellInner>>,
+    /// The ONE-writer-at-a-time lock: the save pump's coalesced write and
+    /// the exit path's synchronous flush both hold it across their whole
+    /// persist→write span, so their temp files and renames can never
+    /// interleave (the audit's P0: flush() and the pump both used the same
+    /// .tmp with no barrier — a shutdown could lose or corrupt the
+    /// session). The inner mutex stays the model's; this one is the disk's.
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl ShellState {
     /// A runtime window went away (tear-off closed): its strip dies with
     /// it. The primary window's strip IS the session — never dropped
-    /// here, or a quit would wipe the restore set.
+    /// here, or a quit would wipe the restore set. Tear-off strips are
+    /// not persisted (only "main" is), so this is a pure in-memory
+    /// removal — no dirty mark, no disk write.
     pub fn drop_strip(&self, window_label: &str) {
         if window_label == "main" {
             return;
@@ -158,7 +174,6 @@ impl ShellState {
         let mut inner = self.lock();
         inner.strips.remove(window_label);
         inner.strip_widths.remove(window_label);
-        inner.save();
     }
 
     fn lock(&self) -> MutexGuard<'_, ShellInner> {
@@ -166,8 +181,14 @@ impl ShellState {
     }
 
     /// Take the persistence snapshot now (the exit path's synchronous
-    /// flush; the pump owns the interactive path).
+    /// flush; the pump owns the interactive path). The write lock makes
+    /// this and the pump serial: no shared .tmp, no rename that finds
+    /// the other side already moved it.
     pub fn flush(&self) {
+        let _writer = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let persist = {
             let mut inner = self.lock();
             let persist = inner.persist();
@@ -186,15 +207,23 @@ impl ShellState {
         }
     }
 
-    fn spawn_pump(inner: Arc<Mutex<ShellInner>>, rx: mpsc::Receiver<()>) {
+    fn spawn_pump(
+        inner: Arc<Mutex<ShellInner>>,
+        write_lock: Arc<Mutex<()>>,
+        rx: mpsc::Receiver<()>,
+    ) {
         let _ = std::thread::Builder::new()
             .name("shell-save".into())
             .spawn(move || {
                 // Each poke opens a debounce window; the pokes that land
-                // inside it collapse into one write when it closes.
+                // inside it collapse into one write when it closes. The
+                // write lock is taken before the dirty check and held
+                // through the write: a flush() racing this window cannot
+                // slip between the snapshot and the rename.
                 while rx.recv().is_ok() {
                     std::thread::sleep(SAVE_DEBOUNCE);
                     while rx.try_recv().is_ok() {}
+                    let _writer = write_lock.lock().unwrap_or_else(PoisonError::into_inner);
                     let persist = {
                         let mut guard = inner.lock().unwrap_or_else(PoisonError::into_inner);
                         if !guard.dirty {
@@ -246,8 +275,11 @@ impl ShellState {
             strip_widths: HashMap::new(),
             popups: HashMap::new(),
         }));
-        Self::spawn_pump(Arc::clone(&inner), save_rx);
-        ShellState { inner }
+        Self::spawn_pump(Arc::clone(&inner), Arc::new(Mutex::new(())), save_rx);
+        ShellState {
+            inner,
+            write_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     /// Load the session (if any) and seed the bookmarks + the primary
@@ -492,8 +524,15 @@ fn popup_rect(
 // ---------------------------------------------------------------------------
 
 /// The one sync: layout the frame band, position/visibility for every
-/// tab webview, push snapshots, persist the session. Every mutation
-/// funnels here — the model changes, then this applies it.
+/// tab webview, push snapshots. Every mutation funnels here — the model
+/// changes, then this applies it.
+///
+/// THE PERSISTENCE LAW (the audit's own): a MODEL MUTATION saves, a sync
+/// does not. sync() runs on every resize, every boot, every relayout —
+/// geometry churn is not model churn, and the old unconditional save()
+/// here serialized and re-wrote the session for every pixel dragged.
+/// The verbs that mutate the model call `save()` themselves, right
+/// where they mutate.
 pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(), String> {
     let Some(host_window) = app.get_window(window_label) else {
         return Ok(()); // window gone mid-sync; nothing to lay out
@@ -530,7 +569,6 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
                 .map(|t| (t.id, t.destination().clone(), t.reload))
         };
         let snap = snapshot(&inner, window_label);
-        inner.save();
         (snap, header, create_tab)
     };
 
@@ -768,6 +806,8 @@ pub async fn shell_tab_navigate(
         let mut inner = state.lock();
         let strip = inner.strip(&window_name);
         strip.navigate(tab_id, destination);
+        // The mutation saves — not the sync that follows it.
+        inner.save();
     }
     emit_tab_state(&app, &state, &window_name);
     sync(&app, &state, &window_name)
@@ -802,6 +842,7 @@ pub async fn shell_tab_action(
             }
             _ => return Err(format!("unknown tab action {action}")),
         }
+        inner.save();
     }
     emit_tab_state(&app, &state, &window_name);
     sync(&app, &state, &window_name)
@@ -848,6 +889,7 @@ pub async fn shell_command(
     let arg_destination = arg.as_ref().and_then(|a| a.get("destination")).cloned();
 
     let mut window_verb: Option<u32> = None;
+    let mut mutated = false;
     {
         let mut inner = state.lock();
         match id {
@@ -866,10 +908,12 @@ pub async fn shell_command(
                 };
                 if let Some((destination, title)) = info {
                     inner.bookmarks.toggle(destination, title);
+                    mutated = true;
                 }
             }
             cmd::SHOW_BOOKMARK_BAR => {
                 inner.bookmarks.toggle_bar();
+                mutated = true;
             }
             // Window verbs touch the OS, not the model — deferred below.
             // NEW_WINDOW tears off a fresh window from the model too.
@@ -1120,8 +1164,15 @@ pub async fn shell_command(
                     }
                     other => return Err(format!("unknown command {other}")),
                 }
+                // Every arm above mutates the model (or honestly refused
+                // with an Err before reaching this line) — this is where
+                // the command surface's persistence lives.
+                mutated = true;
             }
         }
+    }
+    if mutated {
+        state.lock().save();
     }
     match window_verb {
         Some(cmd::WINDOW_MINIMIZE) => {
@@ -1265,7 +1316,10 @@ pub async fn shell_omnibox_commit(
                 let _ = app.emit_to(label, "shell://discover-query", &text);
                 serde_json::json!({ "kind": "query", "text": text })
             }
-        }
+        };
+        // The commit mutated the active tab's history — the mutation
+        // saves, here, not in the sync below.
+        inner.save();
     };
     emit_tab_state(&app, &state, &window_name);
     sync(&app, &state, &window_name)?;
@@ -1287,7 +1341,10 @@ pub async fn shell_bookmark_remove(
     app: AppHandle,
 ) -> Result<(), String> {
     let window_name = window_label_of(&window);
-    state.lock().bookmarks.remove(&id);
+    let removed = state.lock().bookmarks.remove(&id);
+    if removed {
+        state.lock().save();
+    }
     sync(&app, &state, &window_name)
 }
 
@@ -1321,6 +1378,10 @@ pub async fn shell_bookmark_add(
             AddressRequest::Query(_) => false,
         }
     };
+    if added {
+        // The bar's model changed — the mutation saves.
+        state.lock().save();
+    }
     sync(&app, &state, &window_name)?;
     Ok(added)
 }
@@ -1390,29 +1451,38 @@ pub async fn shell_popup(
     };
     dismiss_popup(&app, &state, &window_name);
     let label = popup_label(&window_name);
-    host_window
-        .add_child(
-            tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
-                .transparent(true),
-            position,
-            popup_size,
-        )
-        .map_err(|e| format!("could not open the popup: {e}"))?;
+    // THE BOOT ORDER LAW (the audit's P0): the state lands FIRST, the
+    // webview second. `shell_popup_boot` reads `popups[window]` from the
+    // popup's own load path — a webview created before its PopupState
+    // existed could boot into kind="unknown" whenever its page loaded
+    // fast enough to win the race against the insert. With the state
+    // established before `add_child`, no boot can arrive early; if the
+    // webview itself fails to open, the state is rolled back so the
+    // registry never holds a popup with no widget behind it.
+    let is_card = kind == "hover-card";
+    state.lock().popups.insert(
+        window_name.clone(),
+        PopupState {
+            kind: kind.clone(),
+            tab: tab_id,
+            group: group_id.map(|g| g as GroupId),
+            card: if is_card { card.clone() } else { None },
+            meta: meta.clone(),
+        },
+    );
+    if let Err(e) = host_window.add_child(
+        tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
+            .transparent(true),
+        position,
+        popup_size,
+    ) {
+        state.lock().popups.remove(&window_name);
+        return Err(format!("could not open the popup: {e}"));
+    }
     let _ = app.emit_to(
         &label,
         "shell://popup-boot",
         serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id, "meta": meta }),
-    );
-    let is_card = kind == "hover-card";
-    state.lock().popups.insert(
-        window_name,
-        PopupState {
-            kind,
-            tab: tab_id,
-            group: group_id.map(|g| g as GroupId),
-            card: if is_card { card } else { None },
-            meta,
-        },
     );
     // Focus follows the popup: Escape and the arrow keys work from the
     // first keystroke, exactly like a freshly opened OS menu. The hover
@@ -1702,11 +1772,11 @@ pub async fn shell_drag(
             if detached {
                 // DetachIntoNewBrowserAndRunMoveLoop, drop-based
                 // adaptation: first hit-test the OTHER windows' strip
-                // bands — a drop over one of them MOVES the tab there
-                // (drag between windows).
+                // bands — a drop over one of them MOVES the drag's block
+                // there (drag between windows).
                 if let Some((target, local_x)) = window_strip_at(&app, &state, &window_name, sx, sy)
                 {
-                    return move_tab_between_windows(
+                    return move_block_between_windows(
                         &app,
                         &state,
                         &window_name,
@@ -1725,12 +1795,26 @@ pub async fn shell_drag(
                 if window_contains(&app, &window_name, sx, sy) {
                     return reorder_in_strip(&app, &state, &window_name, id, x);
                 }
-                let tab = {
+                // The tear-off carries the WHOLE BLOCK the drag carried
+                // (drag_block's law): the selected tabs leave together —
+                // never the one-tab-under-the-hand of the audit's own
+                // "selected B,C, arrived B" — and the hand's tab
+                // activates in the new window.
+                let block = {
                     let mut inner = state.lock();
                     let strip = inner.strip(&window_name);
-                    strip.detach(id).ok_or("tab vanished")?.0
+                    let ids = strip.drag_block(id);
+                    let block = strip.detach_block(&ids);
+                    // The source strip just lost real tabs — the
+                    // mutation saves (the tear-off's own strip is not
+                    // persisted; nothing saves for it).
+                    inner.save();
+                    block
                 };
-                spawn_tearoff(&app, &state, tab.destination().clone(), sx, sy)
+                if block.is_empty() {
+                    return Err("tab vanished".into());
+                }
+                spawn_tearoff_block(&app, &state, block, id, sx, sy)
             } else {
                 reorder_in_strip(&app, &state, &window_name, id, x)
             }
@@ -1817,6 +1901,8 @@ fn reorder_in_strip(
             inner.strip(window_name).reorder_drop(id, index);
         }
     }
+    // The drop re-ordered the model — the mutation saves.
+    state.lock().save();
     emit_tab_state(app, state, window_name);
     sync(app, state, window_name)
 }
@@ -1903,27 +1989,41 @@ fn window_strip_at(
     None
 }
 
-/// The between-windows move: the tab leaves the source strip as a
-/// DetachedTab and re-inserts at the drop point of the target strip
-/// (the pinned block law rides insert/set_pinned; the history travels
-/// intact). No second server process is possible — destinations are
-/// views; the daemon owns the processes.
-fn move_tab_between_windows(
+/// The between-windows move — of the WHOLE DRAG BLOCK (the audit's P0:
+/// the old path detached one tab out of a selected block, so dragging
+/// B+C landed only B). The block leaves the source in strip order
+/// (detach_block's single-pass removal) and re-inserts as a block at
+/// the drop point of the target strip; the pinned members re-pin at the
+/// target's pinned edge (insert never pins — set_pinned owns the
+/// relocation), and the landing selection is the block with the hand's
+/// tab active and anchoring (select_block). Group membership does not
+/// survive a window change — detach_block already ungrouped, the same
+/// documented divergence the single detach speaks. History, muted,
+/// zoom ride intact; the ids mint fresh from the TARGET's own counter
+/// (window id spaces are independent). No second server process is
+/// possible — destinations are views; the daemon owns the processes.
+fn move_block_between_windows(
     app: &AppHandle,
     state: &ShellState,
     source: &str,
     target: &str,
-    id: TabId,
+    dragged: TabId,
     local_axis: f32,
 ) -> Result<(), String> {
-    let tab = {
+    let block = {
         let mut inner = state.lock();
         let strip = inner
             .strips
             .get_mut(source)
             .ok_or("source strip vanished")?;
-        strip.detach(id).ok_or("tab vanished")?.0
+        let ids = strip.drag_block(dragged);
+        let block = strip.detach_block(&ids);
+        inner.save();
+        block
     };
+    if block.is_empty() {
+        return Err("tab vanished".into());
+    }
     {
         let mut inner = state.lock();
         let vertical = inner
@@ -1958,18 +2058,36 @@ fn move_tab_between_windows(
         };
         let strip = inner.strip(target);
         let at = drop_index.min(strip.tabs.len());
-        let new_id = strip.insert(at, tab.destination().clone(), true);
-        // The insert minted a fresh tab id (the model's own business);
-        // carry the DetachedTab's history, posture, and pinned-ness.
-        if let Some(inserted) = strip.tabs.iter_mut().find(|t| t.id == new_id) {
-            inserted.history = tab.history;
-            inserted.history_index = tab.history_index;
-            inserted.muted = tab.muted;
-            inserted.zoom = tab.zoom;
+        let mut new_ids: Vec<TabId> = Vec::with_capacity(block.len());
+        let mut pinned_ids: Vec<TabId> = Vec::new();
+        for (offset, tab) in block.iter().enumerate() {
+            let new_id = strip.insert(at + offset, tab.destination().clone(), false);
+            // The insert minted a fresh tab id (the model's own business);
+            // carry the DetachedTab's history, posture, and zoom.
+            if let Some(inserted) = strip.tabs.iter_mut().find(|t| t.id == new_id) {
+                inserted.history = tab.history.clone();
+                inserted.history_index = tab.history_index;
+                inserted.muted = tab.muted;
+                inserted.zoom = tab.zoom;
+            }
+            if tab.pinned {
+                pinned_ids.push(new_id);
+            }
+            new_ids.push(new_id);
         }
-        if tab.pinned {
+        for new_id in pinned_ids {
             strip.set_pinned(new_id, true);
         }
+        // The hand's tab anchors the landing selection: its position in
+        // the strip-order block maps onto the fresh ids one for one.
+        let dragged_new = block
+            .iter()
+            .position(|t| t.id == dragged)
+            .and_then(|i| new_ids.get(i).copied())
+            .unwrap_or_else(|| *new_ids.last().expect("non-empty block above"));
+        strip.select_block(dragged_new, &new_ids);
+        // Both strips changed — the mutations save.
+        inner.save();
     }
     emit_tab_state(app, state, source);
     emit_tab_state(app, state, target);
@@ -1977,11 +2095,16 @@ fn move_tab_between_windows(
     sync(app, state, target)
 }
 
-/// A tear-off: a new window with its own frame and the detached tab.
-fn spawn_tearoff(
+/// A tear-off: a new window with its own frame and the detached BLOCK.
+/// The tabs land with their identities intact (ids preserved — the
+/// window label is fresh, so the `tab-{window}-{id}` space cannot
+/// collide); the hand's tab activates, the rest of the block stays
+/// selected. `dragged` is the tab the hand carried at release.
+fn spawn_tearoff_block(
     app: &AppHandle,
     state: &ShellState,
-    destination: Destination,
+    block: Vec<Tab>,
+    dragged: TabId,
     screen_x: f32,
     screen_y: f32,
 ) -> Result<(), String> {
@@ -1991,7 +2114,18 @@ fn spawn_tearoff(
         inner.next_window += 1;
         let label = format!("win-{n}");
         let mut strip = Strip::new();
-        strip.tabs[0].history = vec![destination];
+        // The seed New tab steps aside; the block replaces it whole.
+        strip.tabs.clear();
+        strip.selection.clear();
+        strip.anchor = None;
+        strip.active = None;
+        let mut max_id = 0;
+        for tab in block {
+            max_id = max_id.max(tab.id);
+            strip.tabs.push(tab);
+        }
+        strip.next_tab = max_id + 1;
+        strip.select_block(dragged, &[]);
         inner.strips.insert(label.clone(), strip);
         label
     };
@@ -2014,9 +2148,26 @@ fn spawn_tearoff(
             LogicalSize::new(1100.0, 83.0),
         )
         .map_err(|e| format!("tear-off frame failed: {e}"))?;
-    // The content webview is created by sync() once the tear-off's frame
-    // reports its size (shell_boot).
+    // The content webviews are created by sync() once the tear-off's
+    // frame reports its size (shell_boot) — the active tab first, the
+    // rest of the block stays cold until selected, exactly the
+    // restore-session law.
     sync(app, state, &label)
+}
+
+/// A NEW_WINDOW tear-off: one fresh tab, minted by the model's own
+/// Strip::new, then the same block path the drag speaks.
+fn spawn_tearoff(
+    app: &AppHandle,
+    state: &ShellState,
+    destination: Destination,
+    screen_x: f32,
+    screen_y: f32,
+) -> Result<(), String> {
+    let mut strip = Strip::new();
+    strip.tabs[0].history = vec![destination];
+    let dragged = strip.tabs[0].id;
+    spawn_tearoff_block(app, state, strip.tabs, dragged, screen_x, screen_y)
 }
 
 /// The frame layer reports its window size on resize (belt and braces

@@ -1,12 +1,22 @@
 //! Unix domain socket transport (ADR-0008 seam, zamin-ipc side).
 //!
-//! Single-instance and stale-socket handling: if the socket file exists, a
-//! successful connect probe proves another daemon owns it; a failed probe
-//! means the file is stale and is removed before binding.
+//! Daemon ownership is ATOMIC, not probed: the endpoint's lock file
+//! (`<socket>.lock`) is held under an exclusive `flock` for the server's
+//! whole lifetime. `flock` is decided by the kernel in one step — two
+//! daemons racing the bind cannot both win, no matter how their startup
+//! interleaves. The probe/delete/bind dance this used to run had a
+//! TOCTOU hole instead: A and B both probed a dead socket, both removed
+//! it, both bound — two live daemons on one name, and a third daemon
+//! could lose its socket out from under it between its own probe and
+//! remove. The lock file is never unlinked (an unlink would hand the
+//! name to a process holding the dead inode); it simply stays, one tiny
+//! empty file, exactly like the named pipe's kernel-side ownership on
+//! Windows (`first_pipe_instance`).
 
-use std::fs::Permissions;
+use std::fs::{File, Permissions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::net::{UnixListener, UnixStream};
 
@@ -17,15 +27,49 @@ use crate::error::IpcError;
 pub struct PlatformServer {
     path: PathBuf,
     listener: UnixListener,
+    /// The ownership proof, held open (and therefore locked) until drop.
+    /// Dropping the file releases the flock — a dead daemon's OS cleanup
+    /// is the recovery path, which is precisely why no stale lock can
+    /// wedge the endpoint shut.
+    _lock: File,
+    /// Guards the Drop cleanup against double-run (Drop + explicit).
+    cleaned: AtomicBool,
 }
 
 impl Drop for PlatformServer {
     fn drop(&mut self) {
-        // Best-effort cleanup of our own socket file on a controlled exit.
-        // A SIGKILLed daemon leaves it behind; the stale-reclaim path in
-        // bind() handles that case.
-        let _ = std::fs::remove_file(&self.path);
+        // Remove OUR socket file on a controlled exit. The lock file
+        // stays (see the module doc — unlinking it would break the very
+        // atomicity the lock exists for). A SIGKILLed daemon leaves the
+        // socket behind; the next bind reclaims it safely UNDER the
+        // flock it will then own.
+        if !self.cleaned.swap(true, Ordering::SeqCst) {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
+}
+
+/// Take the exclusive flock on `path`'s lock file, or fail with
+/// [`IpcError::AlreadyRunning`] when a live daemon owns it. The kernel
+/// releases the lock if the owner dies, so the only way this fails is
+/// "another live process holds it" — there is no stale case.
+fn acquire_lock(path: &std::path::Path) -> Result<File, IpcError> {
+    use std::os::unix::io::AsRawFd;
+    let lock_path = lock_path_for(path);
+    let file = File::create(&lock_path)?;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        return Err(IpcError::AlreadyRunning);
+    }
+    Ok(file)
+}
+
+fn lock_path_for(socket_path: &std::path::Path) -> PathBuf {
+    // `zamind.sock` -> `zamind.lock` (the extension swap keeps the pair
+    // visually paired in `ls`; the name is otherwise arbitrary).
+    let mut owned = socket_path.as_os_str().to_owned();
+    owned.push(".lock");
+    PathBuf::from(owned)
 }
 
 impl PlatformServer {
@@ -52,18 +96,26 @@ impl PlatformServer {
             }
         }
 
+        // THE OWNERSHIP STEP, first and atomic: whoever holds the flock
+        // owns the endpoint's name. Everything below runs under it.
+        let lock = acquire_lock(&path)?;
+
+        // We own the name, so anything at the socket path is by
+        // definition a leftover of a dead process (a live daemon would
+        // still hold the lock). Reclaim it — socket file or not.
         if path.exists() {
-            if UnixStream::connect(&path).await.is_ok() {
-                return Err(IpcError::AlreadyRunning);
-            }
-            // Stale socket from a dead daemon: safe to reclaim.
             std::fs::remove_file(&path)?;
         }
 
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, Permissions::from_mode(0o600))?;
 
-        Ok(PlatformServer { path, listener })
+        Ok(PlatformServer {
+            path,
+            listener,
+            _lock: lock,
+            cleaned: AtomicBool::new(false),
+        })
     }
 
     pub async fn accept(&mut self) -> Result<Connection, IpcError> {

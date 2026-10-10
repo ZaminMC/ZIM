@@ -20,7 +20,13 @@
 
 // --- Linux: XDG autostart ----------------------------------------------------
 
-#[cfg(unix)]
+// EXPLICITLY Linux: the XDG autostart spec is the freedesktop mechanism
+// GNOME and KDE honor, and `target_os = "linux"` is what builds it. The
+// `cfg(unix)` this used to wear also compiled the module on macOS — where
+// there is no XDG autostart and the entry would simply be ignored. Other
+// unixes get the honest "unavailable" from the dispatch below until a
+// platform answer (LaunchAgents on macOS) is actually wired.
+#[cfg(target_os = "linux")]
 pub mod linux {
     use std::path::{Path, PathBuf};
 
@@ -29,6 +35,25 @@ pub mod linux {
     /// The autostart entry path for a config home (`$XDG_CONFIG_HOME`).
     pub fn autostart_file(config_home: &Path) -> PathBuf {
         config_home.join("autostart").join(APP_DESKTOP)
+    }
+
+    /// The Exec value for a command path, quoted per the Desktop Entry
+    /// Spec: the argument is wrapped in double quotes, and the characters
+    /// that are reserved inside double quotes (backslash, double quote,
+    /// backtick, dollar sign) are backslash-escaped. A path like
+    /// "/home/zamin/My Apps/ZIM/zim" used to land raw — one space in the
+    /// install path and the entry parsed as two arguments, or worse.
+    pub fn exec_field(exec: &str) -> String {
+        let mut quoted = String::with_capacity(exec.len() + 2);
+        quoted.push('"');
+        for c in exec.chars() {
+            if matches!(c, '\\' | '"' | '`' | '$') {
+                quoted.push('\\');
+            }
+            quoted.push(c);
+        }
+        quoted.push('"');
+        quoted
     }
 
     /// The entry content. `exec` is the panel launch path — inside an
@@ -40,10 +65,11 @@ pub mod linux {
              Type=Application\n\
              Name=ZIM\n\
              Comment=ZIM starts with your session so the daemon is ready\n\
-             Exec={exec}\n\
+             Exec={}\n\
              Icon=mc.zamin.zim\n\
              Terminal=false\n\
-             X-GNOME-Autostart-enabled=true\n"
+             X-GNOME-Autostart-enabled=true\n",
+            exec_field(exec)
         )
     }
 
@@ -128,7 +154,9 @@ pub mod windows {
 
 // --- platform dispatch ---------------------------------------------------------
 
-#[cfg(unix)]
+// The XDG config resolution belongs to the Linux mechanism only — a
+// macOS build has no use for XDG_CONFIG_HOME's autostart subdirectory.
+#[cfg(target_os = "linux")]
 fn config_home() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
@@ -140,7 +168,7 @@ fn config_home() -> Option<std::path::PathBuf> {
 /// `Some(enabled)` when the platform's autostart state is knowable; the
 /// webview renders `None` as "unavailable".
 pub fn get() -> Option<bool> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     return linux::get(&config_home()?);
     // The Windows half answers Result<Option<bool>>: the outer Result is
     // the registry probe ("cannot be determined"), the inner Option is the
@@ -148,19 +176,28 @@ pub fn get() -> Option<bool> {
     // reads as "unavailable" and an absent key reads as "off".
     #[cfg(windows)]
     return windows::get().ok().flatten();
+    // macOS and every other unix: no mechanism is wired (see the module
+    // gate above) — the honest answer is "unavailable", never Linux's.
+    #[cfg(not(any(target_os = "linux", windows)))]
+    return None;
 }
 
 pub fn set(enabled: bool) -> Result<(), String> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     return linux::set(
         &config_home().ok_or_else(|| "neither XDG_CONFIG_HOME nor HOME is set".to_owned())?,
         enabled,
     );
     #[cfg(windows)]
     return windows::set(enabled);
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = enabled;
+        Err("autostart is not supported on this platform yet".to_owned())
+    }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     use std::fs;
@@ -210,6 +247,35 @@ mod tests {
         linux::set(&home, true).expect("autostart on with fresh dirs");
         assert!(linux::autostart_file(&home).is_file());
         fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn exec_field_quotes_paths_with_spaces() {
+        // The audit's own case: a valid install path with a space used to
+        // produce an entry whose command line split into two arguments.
+        assert_eq!(
+            linux::exec_field("/home/zamin/My Apps/ZIM/zim"),
+            "\"/home/zamin/My Apps/ZIM/zim\""
+        );
+    }
+
+    #[test]
+    fn exec_field_escapes_the_reserved_characters() {
+        // Inside double quotes the spec reserves backslash, double quote,
+        // backtick, and dollar sign — each must ride a backslash.
+        assert_eq!(
+            linux::exec_field(r"/opt/wei\rd"),
+            "\"/opt/wei\\\\rd\"",
+            "a backslash in the path doubles"
+        );
+        let escaped = linux::exec_field("/a\"b`c$d");
+        assert_eq!(escaped, "\"/a\\\"b\\`c\\$d\"");
+        // And the entry embeds the quoted form where Exec= sits.
+        let content = linux::entry_content("/home/z/My Apps/zim");
+        assert!(
+            content.contains("Exec=\"/home/z/My Apps/zim\"\n"),
+            "{content}"
+        );
     }
 }
 

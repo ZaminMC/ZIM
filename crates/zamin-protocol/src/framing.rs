@@ -12,10 +12,18 @@ pub enum FrameError {
     TooLarge(usize, usize),
 }
 
-/// Append one framed message to `out`.
-pub fn encode_frame(payload: &[u8], out: &mut Vec<u8>) {
+/// Append one framed message to `out`. The length prefix is the payload's
+/// byte count — a value the decoder would reject past [`MAX_FRAME_LENGTH`],
+/// so the encoder refuses to write a frame the other side must drop (and
+/// past `u32::MAX` the cast itself would truncate). The protocol's own
+/// contract, enforced at both ends of the wire.
+pub fn encode_frame(payload: &[u8], out: &mut Vec<u8>) -> Result<(), FrameError> {
+    if payload.len() > MAX_FRAME_LENGTH {
+        return Err(FrameError::TooLarge(payload.len(), MAX_FRAME_LENGTH));
+    }
     out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     out.extend_from_slice(payload);
+    Ok(())
 }
 
 /// Incremental decoder over a byte stream.
@@ -62,7 +70,7 @@ mod tests {
     #[test]
     fn round_trip_single_frame() {
         let mut wire = Vec::new();
-        encode_frame(b"hello", &mut wire);
+        encode_frame(b"hello", &mut wire).unwrap();
         let mut decoder = FrameDecoder::new();
         decoder.push(&wire);
         assert_eq!(decoder.next_frame().unwrap(), Some(b"hello".to_vec()));
@@ -72,7 +80,7 @@ mod tests {
     #[test]
     fn partial_delivery_reassembles() {
         let mut wire = Vec::new();
-        encode_frame(b"abcdef", &mut wire);
+        encode_frame(b"abcdef", &mut wire).unwrap();
         let mut decoder = FrameDecoder::new();
         let total = wire.len();
         for (i, chunk) in wire.chunks(2).enumerate() {
@@ -89,8 +97,8 @@ mod tests {
     #[test]
     fn multiple_frames_in_one_push() {
         let mut wire = Vec::new();
-        encode_frame(b"one", &mut wire);
-        encode_frame(b"two", &mut wire);
+        encode_frame(b"one", &mut wire).unwrap();
+        encode_frame(b"two", &mut wire).unwrap();
         let mut decoder = FrameDecoder::new();
         decoder.push(&wire);
         assert_eq!(decoder.next_frame().unwrap(), Some(b"one".to_vec()));
@@ -98,9 +106,26 @@ mod tests {
     }
 
     #[test]
+    fn encoder_enforces_the_protocol_maximum() {
+        let mut wire = Vec::new();
+        // A payload past the cap never reaches the buffer — the length
+        // prefix the decoder reads and the payload the decoder keeps must
+        // never disagree about who is oversized.
+        let error = encode_frame(&[0u8; MAX_FRAME_LENGTH + 1], &mut wire).unwrap_err();
+        assert_eq!(
+            error,
+            FrameError::TooLarge(MAX_FRAME_LENGTH + 1, MAX_FRAME_LENGTH)
+        );
+        assert!(wire.is_empty(), "no bytes of a rejected frame may land");
+        // Exactly at the cap is still a legal frame.
+        encode_frame(&[0u8; MAX_FRAME_LENGTH], &mut wire).unwrap();
+        assert_eq!(wire.len(), 4 + MAX_FRAME_LENGTH);
+    }
+
+    #[test]
     fn oversized_frame_is_rejected_and_buffer_cleared() {
         let mut wire = Vec::new();
-        encode_frame(&[0u8; 8], &mut wire);
+        encode_frame(&[0u8; 8], &mut wire).unwrap();
         // corrupt the length field
         wire[0] = 0xff;
         wire[1] = 0xff;

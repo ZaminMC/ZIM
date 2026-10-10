@@ -82,9 +82,16 @@ impl FrameBatcher {
 /// drops the wire (clean close or error), `on_down` fires exactly once and
 /// the task ends.
 ///
-/// The batch channel is bounded like every other queue in this daemon: a
-/// stalled webview consumer degrades with dropped batches rather than
-/// stalling the daemon (ADR-0006); the client re-snapshots after gaps.
+/// The batch channel is bounded like every other queue in this daemon — and
+/// the bound is BACKPRESSURE, not a drop valve: `send().await` waits for
+/// capacity, so a stalled webview consumer stalls this pump, and a stalled
+/// pump eventually stalls the daemon's session queue behind it. That is the
+/// honest contract and the preferable one: these frames are CORRELATED
+/// protocol traffic (responses match requests, notifications follow
+/// subscriptions), so silently dropping a batch would hang the webview's
+/// pending call rather than degrade it — the gap-recovery story ("re-snapshot
+/// after gaps") has no gaps to recover from here. A consumer that slow
+/// should be seen as slow, not fed lies.
 pub fn spawn_read(
     mut read: ConnectionReadHalf,
     incoming: mpsc::Sender<Vec<String>>,
