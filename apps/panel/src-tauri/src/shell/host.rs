@@ -1469,7 +1469,10 @@ pub fn shell_popup_close(
 /// Slide or refresh the LIVE hover card: the frame's new dressed payload
 /// replaces the stored one and rides to the overlay. False means no
 /// card is alive (the fade won the race) — the frame's next show
-/// recreates the widget.
+/// recreates the widget. The payload's BAND is the carrier's own rect
+/// (hoverCardBand's corridor law) — when it moved, the overlay re-bounds
+/// before the content lands, so the slide's anchors stay covered and the
+/// rest of the window keeps its own pointer.
 #[tauri::command]
 pub fn shell_popup_update(
     window: tauri::Webview,
@@ -1484,6 +1487,31 @@ pub fn shell_popup_update(
             Some(popup) if popup.kind == "hover-card" => popup.card = Some(card.clone()),
             _ => return Ok(false),
         }
+    }
+    // The band moved → the carrier follows it (the popup re-bases its
+    // render against the band's origin, PopupApp's coordinate law).
+    let band = card.get("band").cloned().unwrap_or(serde_json::Value::Null);
+    let field = |key: &str| {
+        band.get(key)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+            .max(0.0)
+    };
+    if let Some(popup) = app.get_webview(&popup_label(&window_name)) {
+        let window = window_for(&app, &window_name)?;
+        let size: LogicalSize<f64> = window
+            .inner_size()
+            .map_err(|e| e.to_string())?
+            .to_logical(window.scale_factor().unwrap_or(1.0));
+        let (bx, by, bw, bh) = (field("x"), field("y"), field("w"), field("h"));
+        let _ = popup.set_bounds(Rect {
+            position: LogicalPosition::new(bx, by).into(),
+            size: LogicalSize::new(
+                bw.max(1.0).min((size.width - bx).max(1.0)),
+                bh.max(1.0).min((size.height - by).max(1.0)),
+            )
+            .into(),
+        });
     }
     let _ = app.emit_to(&popup_label(&window_name), "shell://popup-update", card);
     Ok(true)

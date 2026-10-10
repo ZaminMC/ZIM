@@ -6,6 +6,10 @@
 import { useEffect, useState } from "react";
 import { useConnection } from "../../state/connection";
 import { activeProfile, useConnections } from "../../state/connections";
+import {
+  faviconDotsEnabled,
+  setFaviconDotsEnabled,
+} from "../../state/faviconPrefs";
 import { useFeedback } from "../../state/feedback";
 import { updatesSentence, useUpdates } from "../../state/updates";
 import { useUi } from "../../state/ui";
@@ -18,10 +22,19 @@ import { Button } from "../../ui/Button";
 import styles from "./SettingsPage.module.css";
 
 const RESERVED: Array<{ name: string; note: string }> = [
-  { name: "Dutchmen", note: "The agent side of the panel — its rooms (new tab, chats) are reserved." },
+  {
+    name: "Dutchmen",
+    note: "The agent side of the panel — its rooms (new tab, chats) are reserved.",
+  },
   { name: "Tab groups", note: "Collapsible groups in the strip." },
-  { name: "Extensions", note: "Typed addons with declared permissions — the inventory is live at zim://extensions/; contributions are reserved." },
-  { name: "Publishing", note: "Package and publish a server through provider APIs." },
+  {
+    name: "Extensions",
+    note: "Typed addons with declared permissions — the inventory is live at zim://extensions/; contributions are reserved.",
+  },
+  {
+    name: "Publishing",
+    note: "Package and publish a server through provider APIs.",
+  },
 ];
 
 /** The feedback account rows (ADR-0028): the machine-local GitHub token
@@ -53,7 +66,8 @@ function FeedbackAccountSection() {
           <span className={styles.rowName}>GitHub token for feedback</span>
           <span className={styles.rowDetail}>{status}</span>
           <span className={styles.rowDetail}>
-            Stays on this machine; sent only to api.github.com. The browser route needs none.
+            Stays on this machine; sent only to api.github.com. The browser
+            route needs none.
           </span>
         </div>
         <div className={styles.tokenStack}>
@@ -189,9 +203,9 @@ function DiscoveryRootsSection() {
             </Button>
           </div>
           <p className={styles.rowDetail}>
-            Empty by default — ZIM always scans its own instances folder. Extra roots
-            are folders of servers kept elsewhere; the scan never follows symlinks and skips
-            hidden and staging folders.
+            Empty by default — ZIM always scans its own instances folder. Extra
+            roots are folders of servers kept elsewhere; the scan never follows
+            symlinks and skips hidden and staging folders.
           </p>
         </>
       ) : null}
@@ -200,6 +214,40 @@ function DiscoveryRootsSection() {
           {note}
         </p>
       ) : null}
+    </section>
+  );
+}
+
+/** The tab favicon's dot switch (the founder's "option in setting to
+ *  disable it"). The write lands in localStorage; the frame's realm
+ *  hears the storage event and re-renders its glyphs live. */
+function TabsSection() {
+  const [dots, setDots] = useState(faviconDotsEnabled);
+  return (
+    <section className={styles.section} aria-label="Tabs">
+      <h2 className={styles.sectionTitle}>Tabs</h2>
+      <div className={styles.row}>
+        <div className={styles.rowMain}>
+          <span className={styles.rowName}>Server status dots in tabs</span>
+          <span className={styles.rowDetail}>
+            Each server tab's favicon carries a dot — green online, yellow
+            starting or warning, red errors or a crash, blue stopped — and the
+            glyph is the server software's mark (Paper, Folia, Purpur, Fabric,
+            Vanilla).
+          </span>
+        </div>
+        <Button
+          variant="ghost"
+          aria-pressed={dots}
+          onClick={() => {
+            const next = !dots;
+            setDots(next);
+            setFaviconDotsEnabled(next);
+          }}
+        >
+          {dots ? "On" : "Off"}
+        </Button>
+      </div>
     </section>
   );
 }
@@ -263,7 +311,9 @@ function UpdatesSection() {
 
       <div className={styles.row}>
         <div className={styles.rowMain}>
-          <span className={styles.rowName}>Check for updates automatically</span>
+          <span className={styles.rowName}>
+            Check for updates automatically
+          </span>
           <span className={styles.rowDetail}>
             On boot and every six hours, against the development channel.
           </span>
@@ -281,8 +331,8 @@ function UpdatesSection() {
         <div className={styles.rowMain}>
           <span className={styles.rowName}>Download updates automatically</span>
           <span className={styles.rowDetail}>
-            Fetch an offered update without asking. Applying it is the restart — and the restart
-            is always yours to make.
+            Fetch an offered update without asking. Applying it is the restart —
+            and the restart is always yours to make.
           </span>
         </div>
         <Button
@@ -298,8 +348,7 @@ function UpdatesSection() {
         <div className={styles.rowMain}>
           <span className={styles.rowName}>Channel — Development</span>
           <span className={styles.rowDetail}>
-            Installers and the update manifest live on this project's
-            public{" "}
+            Installers and the update manifest live on this project's public{" "}
             <a
               className={styles.channelLink}
               href="https://github.com/ZaminMC/ZIM/releases"
@@ -326,14 +375,20 @@ export function SettingsPage() {
   const setConnectionsOpen = useUi((s) => s.setConnectionsOpen);
   const profile = activeProfile({ remotes, activeId });
   const statusLabel =
-    status === "ready" ? "Online" : status === "connecting" ? "Connecting…" : "Offline";
+    status === "ready"
+      ? "Online"
+      : status === "connecting"
+        ? "Connecting…"
+        : "Offline";
 
   return (
     <div className={styles.page}>
       <div className={styles.column}>
         <header className={styles.head}>
           <h1 className={styles.title}>Settings</h1>
-          <p className={styles.subtitle}>Settings for this panel. Server settings live with each server.</p>
+          <p className={styles.subtitle}>
+            Settings for this panel. Server settings live with each server.
+          </p>
         </header>
 
         <section className={styles.section} aria-label="Connections">
@@ -389,6 +444,8 @@ export function SettingsPage() {
         </section>
 
         <DiscoveryRootsSection />
+
+        <TabsSection />
 
         <UpdatesSection />
 

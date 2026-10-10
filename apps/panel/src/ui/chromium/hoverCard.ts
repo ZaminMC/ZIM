@@ -5,7 +5,11 @@
 // (chromiumTabs.ts) — the card is sized BY the strip's own widths.
 // See PROVENANCE.md for the file ledger and the documented deltas.
 
-import { STANDARD_SLOT_WIDTH, PINNED_WIDTH, TAB_STRIP_PADDING } from "./chromiumTabs";
+import {
+  STANDARD_SLOT_WIDTH,
+  PINNED_WIDTH,
+  TAB_STRIP_PADDING,
+} from "./chromiumTabs";
 
 // tab_hover_card_bubble_view.h: the one duration every card transition
 // rides — the show fade, the between-tab slide, the text crossfade.
@@ -39,12 +43,16 @@ export const GROUP_CARD_MAX_TABS = 5;
 // generated_resources.grd: IDS_LIST_BULLET is the bullet, two spaces,
 // the text; IDS_TAB_GROUPS_HOVER_CARD_FOOTER is "+ N More".
 export const GROUP_CARD_BULLET = "\u2022  ";
-export const groupCardFooterText = (excess: number): string => `+ ${excess} More`;
+export const groupCardFooterText = (excess: number): string =>
+  `+ ${excess} More`;
 
 // The group card's header law (IDS_TAB_GROUPS_HOVER_CARD_HEADER, the
 // sentence-case variant, plus the unnamed variant): "name (1 tab)" /
 // "name (N tabs)"; an unnamed group's header is just the count.
-export const groupCardHeader = (label: string | null, tabCount: number): string => {
+export const groupCardHeader = (
+  label: string | null,
+  tabCount: number,
+): string => {
   const count = tabCount === 1 ? "1 tab" : `${tabCount} tabs`;
   return label != null && label !== "" ? `${label} (${count})` : count;
 };
@@ -127,7 +135,9 @@ export const hoverCardAnchor = (
 // rest of the address — "server/survival", "join/localhost:25565",
 // "settings/". An empty remainder hides the label, exactly upstream's
 // should_display_url=false posture.
-export const hoverCardDomain = (url: string | null | undefined): string | null => {
+export const hoverCardDomain = (
+  url: string | null | undefined,
+): string | null => {
   if (url == null) return null;
   const scheme = "zim://";
   const rest = url.startsWith(scheme) ? url.slice(scheme.length) : url;
@@ -139,28 +149,60 @@ export const hoverCardDomain = (url: string | null | undefined): string | null =
 // the delay. Header slots are chips, not tabs.
 export const largestTabSlotWidth = (
   slots: Array<{ header?: boolean; width: number }>,
-): number => slots.reduce((max, s) => (s.header ? max : Math.max(max, s.width)), 0);
+): number =>
+  slots.reduce((max, s) => (s.header ? max : Math.max(max, s.width)), 0);
 
-// The slide band's law: the window rectangle the card may roam while it
-// lives — the carrier webview is sized to exactly this rect, so slides
-// stay inside it and the rest of the window keeps its own pointer. A
-// horizontal strip slides across the whole width BELOW the strip band
-// (the anchor's y is shared by every tab there); the rail slides down
-// its column plus the card's reach into the content (the frame cannot
-// see the window's width — the reach is the card's own width plus
-// margins; the host clamps the band to the window). The demo carrier is
-// a full-page layer, so its band stays {0,0} and the payload's window
-// coordinates render as-is.
-export const HOVER_CARD_RAIL_REACH_MARGIN = 64; // the card's width + side margins
+// The slide band's law: the window rectangle the carrier webview covers
+// while the card lives. UPSTREAM the bubble is an input-transparent
+// Widget (SetCanActivate(false) — presses pass through); a webview
+// carrier has no click-through, so the band must NEVER be bigger than
+// the card's own corridor: the union of the current and previous anchors
+// (the slide roams exactly that far) plus a small roam margin, and the
+// card's own height plus the bottom margin. The first law ("everything
+// below the strip") covered the toolbar and the whole content area — a
+// showing card ate the operator's first click anywhere under the strip.
+// The carrier is re-bounded on every slide (shell_popup_update), and a
+// press ON the card yields it (PopupApp's law — the documented delta).
+export const HOVER_CARD_BAND_ROAM_MARGIN = 24; // the slide's breathing room per side
+export const HOVER_CARD_BAND_BOTTOM_MARGIN = 12; // the shadow's reach below the card
+/** The card's painted height: the tab card is title (≤2 lines) + domain;
+ *  the group card adds up to five member lines and a footer. The law is
+ *  per kind because the band's height is the card's own reach. */
+export const hoverCardHeightFor = (kind: "tab" | "group"): number =>
+  kind === "tab"
+    ? HOVER_CARD_TEXT_MARGINS.v * 2 +
+      HOVER_CARD_TITLE_MAX_LINES * 18 +
+      HOVER_CARD_TITLE_DOMAIN_SPACING +
+      16
+    : GROUP_CARD_BORDER_MARGINS.v * 2 +
+      18 +
+      GROUP_CARD_MAX_TABS * (18 + GROUP_CARD_ITEM_MARGINS.v) +
+      18 +
+      HOVER_CARD_TITLE_DOMAIN_SPACING;
 export const hoverCardBand = (
-  vertical: boolean,
-  anchorY: number,
-  railWidth: number,
+  kind: "tab" | "group",
+  current: { x: number; y: number },
+  previous: { x: number; y: number } | null,
   viewport: { w: number; h: number },
-): { x: number; y: number; w: number; h: number } =>
-  vertical
-    ? { x: 0, y: 0, w: railWidth + HOVER_CARD_WIDTH + HOVER_CARD_RAIL_REACH_MARGIN, h: viewport.h }
-    : { x: 0, y: anchorY, w: viewport.w, h: Math.max(viewport.h - anchorY, 1) };
+): { x: number; y: number; w: number; h: number } => {
+  const height = hoverCardHeightFor(kind);
+  const left =
+    Math.min(current.x, previous?.x ?? current.x) - HOVER_CARD_BAND_ROAM_MARGIN;
+  const right =
+    Math.max(
+      current.x + HOVER_CARD_WIDTH,
+      (previous?.x ?? current.x) + HOVER_CARD_WIDTH,
+    ) + HOVER_CARD_BAND_ROAM_MARGIN;
+  return {
+    x: Math.max(0, left),
+    y: Math.max(0, current.y),
+    w: Math.min(viewport.w, right) - Math.max(0, left),
+    h: Math.min(
+      Math.max(viewport.h - current.y, 1),
+      height + HOVER_CARD_BAND_BOTTOM_MARGIN,
+    ),
+  };
+};
 
 // The card's display payload: the frame dresses it (the laws run there —
 // one home, no twin to drift), the overlay only paints it.
@@ -169,11 +211,12 @@ export interface HoverCardPayload {
   /** The card's top-left corner in WINDOW coordinates. */
   x: number;
   y: number;
-  /** The slide band: the window rectangle the card may roam while it
-   *  lives (horizontal strips: everything below the strip band; the
-   *  rail: its column plus the card's reach into the content). The
-   *  carrier webview is sized to exactly this rect — slides stay
-   *  inside it, and the rest of the window keeps its own pointer. */
+  /** The slide band: the carrier's window rectangle — the union of the
+   *  current and previous anchors plus the roam margin, as tall as the
+   *  card itself (hoverCardBand's law). The host re-bounds the carrier
+   *  to this rect on every slide; the rest of the window keeps its own
+   *  pointer (upstream's bubble is input-transparent; the carrier is
+   *  not, so the band stays the card's corridor). */
   band: { x: number; y: number; w: number; h: number };
   /** Tab cards: the tab's title. Group cards: the composed header line. */
   title: string;

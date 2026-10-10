@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn();
 const listenMock = vi.fn();
+const webviewListenMock = vi.fn();
 const openUrlMock = vi.fn();
 const writeImageMock = vi.fn();
 const fromBytesMock = vi.fn();
@@ -20,9 +21,18 @@ const unlisten = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: listenMock }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  // The seam's SCOPING LAW: the subscription rides the current webview's
+  // target — the mock stands in for `getCurrentWebview().listen`.
+  getCurrentWebview: () => ({ listen: webviewListenMock }),
+}));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: openUrlMock }));
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeImage: writeImageMock }));
-vi.mock("@tauri-apps/api/image", () => ({ Image: { fromBytes: fromBytesMock } }));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeImage: writeImageMock,
+}));
+vi.mock("@tauri-apps/api/image", () => ({
+  Image: { fromBytes: fromBytesMock },
+}));
 
 function setTauriFlag(on: boolean): void {
   const w = window as unknown as Record<string, unknown>;
@@ -34,6 +44,7 @@ beforeEach(() => {
   vi.resetModules();
   invokeMock.mockReset();
   listenMock.mockReset();
+  webviewListenMock.mockReset();
   openUrlMock.mockReset();
   writeImageMock.mockReset();
   fromBytesMock.mockReset();
@@ -50,7 +61,9 @@ describe("the browser lane (no __TAURI_INTERNALS__)", () => {
 
   it("invokeIfTauri answers null and never reaches the desktop", async () => {
     const { invokeIfTauri } = await import("./tauri");
-    await expect(invokeIfTauri("server.start", { id: "a" })).resolves.toBeNull();
+    await expect(
+      invokeIfTauri("server.start", { id: "a" }),
+    ).resolves.toBeNull();
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
@@ -72,7 +85,9 @@ describe("the desktop lane (__TAURI_INTERNALS__ stubbed)", () => {
     setTauriFlag(true);
     invokeMock.mockResolvedValue({ version: "0.4.34" });
     const { invokeIfTauri } = await import("./tauri");
-    await expect(invokeIfTauri<{ version: string }>("daemon.identity")).resolves.toEqual({
+    await expect(
+      invokeIfTauri<{ version: string }>("daemon.identity"),
+    ).resolves.toEqual({
       version: "0.4.34",
     });
     expect(invokeMock).toHaveBeenCalledWith("daemon.identity", undefined);
@@ -94,16 +109,26 @@ describe("the desktop lane (__TAURI_INTERNALS__ stubbed)", () => {
     await expect(invokeHost("the.answer")).rejects.toThrow("boom");
   });
 
-  it("listenHost unwraps the event envelope: the handler takes the payload itself", async () => {
+  it("listenHost unwraps the event envelope on the WEBVIEW-SCOPED lane", async () => {
     setTauriFlag(true);
-    listenMock.mockResolvedValue(unlisten);
+    webviewListenMock.mockResolvedValue(unlisten);
     const { listenHost } = await import("./tauri");
     const seen: unknown[] = [];
-    const off = await listenHost<{ state: string }>("server://state", (p) => seen.push(p));
-    const registered = listenMock.mock.calls[0]!;
+    const off = await listenHost<{ state: string }>("server://state", (p) =>
+      seen.push(p),
+    );
+    // The subscription rode the current webview's listen — the global
+    // pool would hear every webview's events (the cross-tab leak).
+    expect(webviewListenMock).toHaveBeenCalledTimes(1);
+    expect(listenMock).not.toHaveBeenCalled();
+    const registered = webviewListenMock.mock.calls[0]!;
     expect(registered[0]).toBe("server://state");
     const handler = registered[1] as (e: { payload: unknown }) => void;
-    handler({ event: "server://state", id: 1, payload: { state: "running" } } as unknown as {
+    handler({
+      event: "server://state",
+      id: 1,
+      payload: { state: "running" },
+    } as unknown as {
       payload: unknown;
     });
     expect(seen).toEqual([{ state: "running" }]);
@@ -114,12 +139,15 @@ describe("the desktop lane (__TAURI_INTERNALS__ stubbed)", () => {
 
   it("the api seam loads once — the second call reuses the memoized import", async () => {
     setTauriFlag(true);
-    listenMock.mockResolvedValue(unlisten);
+    webviewListenMock.mockResolvedValue(unlisten);
     const { listenHost } = await import("./tauri");
     await listenHost("a", () => {});
     await listenHost("b", () => {});
-    expect(listenMock).toHaveBeenCalledTimes(2);
-    expect(listenMock.mock.calls.map((c) => c[0] as string)).toEqual(["a", "b"]);
+    expect(webviewListenMock).toHaveBeenCalledTimes(2);
+    expect(webviewListenMock.mock.calls.map((c) => c[0] as string)).toEqual([
+      "a",
+      "b",
+    ]);
   });
 });
 
@@ -130,11 +158,15 @@ describe("the real feedback backend (desktop lane)", () => {
     const { realFeedbackBackend } = await import("./feedbackBridge");
     const backend = await realFeedbackBackend();
     expect(backend).not.toBeNull();
-    await expect(backend!.openUrl("https://github.com/ZaminMC/ZIM/issues")).resolves.toEqual({
+    await expect(
+      backend!.openUrl("https://github.com/ZaminMC/ZIM/issues"),
+    ).resolves.toEqual({
       ok: true,
       value: null,
     });
-    expect(openUrlMock).toHaveBeenCalledWith("https://github.com/ZaminMC/ZIM/issues");
+    expect(openUrlMock).toHaveBeenCalledWith(
+      "https://github.com/ZaminMC/ZIM/issues",
+    );
   });
 
   it("a refused open is a visible Result failure, never a throw", async () => {
@@ -144,7 +176,8 @@ describe("the real feedback backend (desktop lane)", () => {
     const backend = await realFeedbackBackend();
     const result = await backend!.openUrl("https://example.org");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.message).toContain("the browser did not open: no handler");
+    if (!result.ok)
+      expect(result.message).toContain("the browser did not open: no handler");
   });
 
   it("copyImage converts the PNG through the Image seam and hands it to the clipboard", async () => {
@@ -154,7 +187,10 @@ describe("the real feedback backend (desktop lane)", () => {
     const { realFeedbackBackend } = await import("./feedbackBridge");
     const backend = await realFeedbackBackend();
     const png = new Uint8Array([137, 80, 78, 71]);
-    await expect(backend!.copyImage(png)).resolves.toEqual({ ok: true, value: null });
+    await expect(backend!.copyImage(png)).resolves.toEqual({
+      ok: true,
+      value: null,
+    });
     expect(fromBytesMock).toHaveBeenCalledWith(png);
     expect(writeImageMock).toHaveBeenCalledWith({ kind: "tauri-image" });
   });
@@ -166,6 +202,9 @@ describe("the real feedback backend (desktop lane)", () => {
     const backend = await realFeedbackBackend();
     const result = await backend!.copyImage(new Uint8Array([1]));
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.message).toContain("the screenshot could not be copied: junk bytes");
+    if (!result.ok)
+      expect(result.message).toContain(
+        "the screenshot could not be copied: junk bytes",
+      );
   });
 });

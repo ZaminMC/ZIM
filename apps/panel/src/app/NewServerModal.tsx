@@ -19,10 +19,14 @@ import {
 import { describeError } from "../state/errors";
 import type { DescribedError } from "../state/errors";
 import { useJobs } from "../state/jobs";
-import { useServers } from "../state/servers";
+import { sortedServers, useServers, type ServerEntry } from "../state/servers";
 import { useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
-import type { CatalogBuild, CatalogEntry, JavaRuntime } from "../protocol/types";
+import type {
+  CatalogBuild,
+  CatalogEntry,
+  JavaRuntime,
+} from "../protocol/types";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import styles from "./NewServerModal.module.css";
@@ -51,10 +55,56 @@ export function satisfyingRuntime(
   return runtimes.find((r) => r.major >= required);
 }
 
+/** The port occupancy map: every registered server that owns a port —
+ *  running, stopped, crashed, all states are valid owners (the registry
+ *  is the truth, not the liveness). The new-server form refuses an
+ *  occupied port and names the owner, the way the id field refuses a
+ *  taken name. */
+export function portOwners(entries: ServerEntry[]): Map<number, ServerEntry[]> {
+  const owners = new Map<number, ServerEntry[]>();
+  for (const server of entries) {
+    if (server.port == null) continue;
+    const list = owners.get(server.port) ?? [];
+    list.push(server);
+    owners.set(server.port, list);
+  }
+  return owners;
+}
+
+/** The first free port at or after `start` (the 25565 ladder). */
+export function firstFreePort(
+  owners: Map<number, unknown>,
+  start = 25565,
+): number {
+  let port = start;
+  while (owners.has(port)) port += 1;
+  return port;
+}
+
+/** The free-port suggestions for the picker's datalist: the first few
+ *  rungs of the ladder that no registered server owns. */
+export function freePortSuggestions(
+  owners: Map<number, unknown>,
+  count = 8,
+): number[] {
+  const suggestions: number[] = [];
+  let port = firstFreePort(owners);
+  while (suggestions.length < count) {
+    suggestions.push(port);
+    port = firstFreePort(owners, port + 1);
+  }
+  return suggestions;
+}
+
 export function NewServerModal() {
   const close = useUi((s) => s.setNewServerOpen);
   const navigate = useTabs((s) => s.navigate);
   const upsert = useServers((s) => s.upsert);
+  const serverMap = useServers((s) => s.servers);
+  // The port picker's occupancy: the registry's own truth, every state a
+  // valid owner (the founder's law — like choosing a username, taken is
+  // taken whether the server is running or not).
+  const owners = portOwners(sortedServers(serverMap));
 
   const [mode, setMode] = useState<"download" | "register">("download");
 
@@ -100,8 +150,12 @@ export function NewServerModal() {
   const [createJobId, setCreateJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const installJob = useJobs((s) => (installJobId ? s.jobs[installJobId] : undefined));
-  const createJob = useJobs((s) => (createJobId ? s.jobs[createJobId] : undefined));
+  const installJob = useJobs((s) =>
+    installJobId ? s.jobs[installJobId] : undefined,
+  );
+  const createJob = useJobs((s) =>
+    createJobId ? s.jobs[createJobId] : undefined,
+  );
 
   // The catalog is small and static per session: load once.
   useEffect(() => {
@@ -198,7 +252,10 @@ export function NewServerModal() {
         // Auto-select the freshly fetched runtime once the list lands.
         return current === "auto" ? "auto" : current;
       });
-    } else if (installJob.state === "failed" || installJob.state === "cancelled") {
+    } else if (
+      installJob.state === "failed" ||
+      installJob.state === "cancelled"
+    ) {
       setInstallJobId(null);
       setSubmitError({
         title: installJob.error?.message ?? "The Java fetch did not finish.",
@@ -217,7 +274,10 @@ export function NewServerModal() {
         .catch(() => {}); // the registered event reconciles anyway
       navigate({ kind: "server", serverId });
       close(false);
-    } else if (createJob.state === "failed" || createJob.state === "cancelled") {
+    } else if (
+      createJob.state === "failed" ||
+      createJob.state === "cancelled"
+    ) {
       setCreateJobId(null);
       setBusy(false);
       setSubmitError({
@@ -234,20 +294,53 @@ export function NewServerModal() {
 
   const installing = installJobId !== null;
   const needsJava =
-    javaMajor !== null && runtimes !== null && !satisfyingRuntime(runtimes, javaMajor);
+    javaMajor !== null &&
+    runtimes !== null &&
+    !satisfyingRuntime(runtimes, javaMajor);
+
+  // The port field's live verdict: a parseable port that a registered
+  // server owns is refused with the owner's name — occupied is occupied
+  // whether the owner is active, inactive, or stopped.
+  const portNum =
+    portText.trim() === "" || !/^\d+$/.test(portText.trim())
+      ? null
+      : Number(portText);
+  const portConflict =
+    portNum !== null && portNum >= 1 && portNum <= 65535
+      ? (owners.get(portNum) ?? null)
+      : null;
+  const portConflictNames = (portConflict ?? [])
+    .map((s) => s.displayName)
+    .join(", ");
 
   const submitDownload = () => {
     const invalid = validateServerId(serverId);
     setIdError(invalid);
     if (invalid) return;
+    if (portConflict) {
+      setSubmitError({
+        title: `Port ${portNum} is already owned by ${portConflictNames}.`,
+        remediation: [
+          `Pick a free port — ${firstFreePort(owners)} is the nearest one.`,
+        ],
+      });
+      return;
+    }
     const port = portText.trim().length > 0 ? Number(portText) : undefined;
-    if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
-      setSubmitError({ title: "Port must be a whole number between 1 and 65535.", remediation: [] });
+    if (
+      port !== undefined &&
+      (!Number.isInteger(port) || port < 1 || port > 65535)
+    ) {
+      setSubmitError({
+        title: "Port must be a whole number between 1 and 65535.",
+        remediation: [],
+      });
       return;
     }
     // The Fabric family pins a loader instead of a numeric build.
     const isFabric =
-      (entries ?? []).find((entry) => entry.id === project)?.source === "fabric-meta";
+      (entries ?? []).find((entry) => entry.id === project)?.source ===
+      "fabric-meta";
     setBusy(true);
     setSubmitError(null);
     void createServer({
@@ -295,17 +388,25 @@ export function NewServerModal() {
       });
   };
 
-  const submit = () => (mode === "download" ? submitDownload() : submitRegister());
+  const submit = () =>
+    mode === "download" ? submitDownload() : submitRegister();
 
   const createProgress = createJob?.progress;
   const percent =
     createProgress && createProgress.total && createProgress.total > 0
-      ? Math.min(100, Math.round((createProgress.current / createProgress.total) * 100))
+      ? Math.min(
+          100,
+          Math.round((createProgress.current / createProgress.total) * 100),
+        )
       : null;
 
   return (
     <Modal title="New server" onClose={() => close(false)}>
-      <div className={styles.modeSwitch} role="tablist" aria-label="Creation mode">
+      <div
+        className={styles.modeSwitch}
+        role="tablist"
+        aria-label="Creation mode"
+      >
         <button
           role="tab"
           aria-selected={mode === "download"}
@@ -345,11 +446,13 @@ export function NewServerModal() {
               >
                 {(entries ?? []).map((entry) => (
                   <option key={entry.id} value={entry.id}>
-                    {entry.name} — {entry.description}
+                    {entry.name}
                   </option>
                 ))}
               </select>
-              {entries === null ? <span className={styles.hint}>Loading the catalog…</span> : null}
+              {entries === null ? (
+                <span className={styles.hint}>Loading the catalog…</span>
+              ) : null}
             </div>
 
             <div className={styles.fieldRow}>
@@ -403,7 +506,9 @@ export function NewServerModal() {
                       id="new-server-build"
                       className={styles.input}
                       value={buildId === null ? "" : String(buildId)}
-                      onChange={(event) => setBuildId(Number(event.target.value))}
+                      onChange={(event) =>
+                        setBuildId(Number(event.target.value))
+                      }
                     >
                       {(builds ?? []).map((b) => (
                         <option key={b.id} value={b.id}>
@@ -431,7 +536,9 @@ export function NewServerModal() {
                   onChange={(event) => setServerId(event.target.value)}
                   placeholder="survival"
                 />
-                {idError ? <span className={styles.alert}>{idError}</span> : null}
+                {idError ? (
+                  <span className={styles.alert}>{idError}</span>
+                ) : null}
               </div>
               <div className={styles.field}>
                 <label className={styles.label} htmlFor="new-server-port">
@@ -442,9 +549,40 @@ export function NewServerModal() {
                   className={styles.input}
                   value={portText}
                   onChange={(event) => setPortText(event.target.value)}
-                  placeholder="25565"
+                  placeholder={String(firstFreePort(owners))}
                   inputMode="numeric"
+                  list="new-server-port-free"
+                  aria-invalid={portConflict ? true : undefined}
                 />
+                {/* The picker's free rungs: a datalist offers ONLY the
+                    ports nobody owns — the dropdown can never suggest a
+                    collision (the username-picker law). */}
+                <datalist id="new-server-port-free">
+                  {freePortSuggestions(owners).map((free) => (
+                    <option key={free} value={free} />
+                  ))}
+                </datalist>
+                {portConflict ? (
+                  <span className={styles.alert}>
+                    Owned by {portConflictNames} — choose a free port.
+                  </span>
+                ) : null}
+                {owners.size > 0 ? (
+                  <span className={styles.hint}>
+                    {owners.size} port{owners.size === 1 ? "" : "s"} taken:{" "}
+                    {[...owners.entries()]
+                      .map(
+                        ([port, serverList]) =>
+                          `:${port} ${serverList.map((s) => s.displayName).join(", ")}`,
+                      )
+                      .join(", ")}
+                  </span>
+                ) : (
+                  <span className={styles.hint}>
+                    Every registered port is free — {firstFreePort(owners)} is
+                    yours.
+                  </span>
+                )}
               </div>
             </div>
 
@@ -465,7 +603,10 @@ export function NewServerModal() {
               <label className={styles.label} htmlFor="new-server-java">
                 Java runtime
                 {javaMajor !== null ? (
-                  <span className={styles.javaChip}> this version needs Java {javaMajor}</span>
+                  <span className={styles.javaChip}>
+                    {" "}
+                    this version needs Java {javaMajor}
+                  </span>
                 ) : null}
               </label>
               <select
@@ -500,7 +641,9 @@ export function NewServerModal() {
                           useJobs.getState().started(result.job);
                           setInstallJobId(result.job.jobId);
                         })
-                        .catch((error: unknown) => setSubmitError(describeError(error)));
+                        .catch((error: unknown) =>
+                          setSubmitError(describeError(error)),
+                        );
                     }}
                   >
                     Fetch Java {javaMajor} (Eclipse Temurin)
@@ -510,9 +653,9 @@ export function NewServerModal() {
             </div>
 
             <span className={styles.hint}>
-              ZIM downloads and verifies the server jar, writes the starter files, and
-              registers the server. The first start asks for EULA acceptance — nothing else is
-              manual.
+              ZIM downloads and verifies the server jar, writes the starter
+              files, and registers the server. The first start asks for EULA
+              acceptance — nothing else is manual.
             </span>
           </>
         ) : (
@@ -533,7 +676,10 @@ export function NewServerModal() {
             </div>
 
             <div className={styles.field}>
-              <label className={styles.label} htmlFor="new-server-name-register">
+              <label
+                className={styles.label}
+                htmlFor="new-server-name-register"
+              >
                 Display name <span title="optional">(optional)</span>
               </label>
               <input
@@ -557,8 +703,9 @@ export function NewServerModal() {
                 placeholder="/home/you/servers/survival"
               />
               <span className={styles.hint}>
-                The directory holding server.jar and eula.txt. This is the one path the protocol
-                accepts at registration; afterwards the server is referenced by its id only.
+                The directory holding server.jar and eula.txt. This is the one
+                path the protocol accepts at registration; afterwards the server
+                is referenced by its id only.
               </span>
             </div>
           </>
@@ -571,7 +718,10 @@ export function NewServerModal() {
             </span>
             {percent !== null ? (
               <div className={styles.progressTrack}>
-                <div className={styles.progressFill} style={{ width: `${percent}%` }} />
+                <div
+                  className={styles.progressFill}
+                  style={{ width: `${percent}%` }}
+                />
               </div>
             ) : (
               <span className={styles.hint}>Working…</span>
@@ -602,6 +752,7 @@ export function NewServerModal() {
             disabled={
               createJobId !== null ||
               serverId.length === 0 ||
+              portConflict != null ||
               (mode === "register" && rootPath.length === 0) ||
               // Download mode needs something to install: a build (the
               // Fill family) or a loader (the Fabric family) — an empty
@@ -609,7 +760,8 @@ export function NewServerModal() {
               (mode === "download" &&
                 (!project ||
                   !version ||
-                  ((builds?.length ?? 0) === 0 && (loaders?.length ?? 0) === 0)))
+                  ((builds?.length ?? 0) === 0 &&
+                    (loaders?.length ?? 0) === 0)))
             }
           >
             {mode === "download" ? "Download & create" : "Register"}

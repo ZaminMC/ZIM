@@ -41,7 +41,12 @@ import {
   type Snapshot,
 } from "./frameIpc";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
-import { startUpdates, stopUpdates, updatesSentence, useUpdates } from "../state/updates";
+import {
+  startUpdates,
+  stopUpdates,
+  updatesSentence,
+  useUpdates,
+} from "../state/updates";
 import { CMD } from "../commandIds";
 import {
   GROUP_LINE_STROKE_INSET,
@@ -67,6 +72,9 @@ import {
   type HoverCardPayload,
 } from "../ui/chromium/hoverCard";
 import { HoverCard } from "../ui/chromium/hoverCardView";
+import { seedFaviconsForDemo, startFaviconLane, useFavicons } from "./favicon";
+import { FAVICON_DOT_COLORS, SOFTWARE_GLYPHS, faviconDot } from "./faviconLaw";
+import { useFaviconDots } from "../state/faviconPrefs";
 import {
   IconBack,
   IconForward,
@@ -109,7 +117,9 @@ const groupVars = (colorIndex: number): Record<string, string> => {
 // The favicon lane: the frame knows each destination's kind from its
 // zim:// URL, so a glyph stands where the site's icon will ride later.
 // Pure view mapping — the model stays unaware of pictures.
-type IconComponent = (props: React.SVGProps<SVGSVGElement>) => React.JSX.Element;
+type IconComponent = (
+  props: React.SVGProps<SVGSVGElement>,
+) => React.JSX.Element;
 
 const DEST_GLYPHS: Record<string, IconComponent> = {
   servers: IconServer,
@@ -130,7 +140,43 @@ function destinationGlyph(url: string): IconComponent {
   return (kind && DEST_GLYPHS[kind]) || IconGlobe;
 }
 
+// The favicon law's render: server and console tabs wear their server
+// software's mark and the dot (faviconLaw.ts); every other destination
+// keeps its glyph. The settings switch (faviconPrefs) silences the dot
+// — the mark stays, the liveness color is the disableable part.
+const SERVER_TAB_URL = /^zim:\/\/(?:server|console)\/([^/?#]+)/;
+
 function Glyph({ url }: { url: string }) {
+  const serverId = SERVER_TAB_URL.exec(url)?.[1];
+  // The selector returns the STORED entry (a stable reference until the
+  // lane writes it — zustand v5's snapshot law forbids fresh objects);
+  // the dot derivation stays a render-time pure call.
+  const entry = useFavicons((s) =>
+    serverId ? s.servers[decodeURIComponent(serverId)] : undefined,
+  );
+  const dots = useFaviconDots();
+  if (serverId && entry && dots) {
+    const glyph = SOFTWARE_GLYPHS[entry.software];
+    const dot = faviconDot(entry.state, entry.severity);
+    return (
+      <span
+        className="favicon"
+        role="img"
+        aria-label={`${glyph.name} — ${dot}`}
+      >
+        <span
+          className="favicon-mark"
+          style={{ background: glyph.bg, color: glyph.fg }}
+        >
+          {glyph.label}
+        </span>
+        <span
+          className="favicon-dot"
+          style={{ background: FAVICON_DOT_COLORS[dot] }}
+        />
+      </span>
+    );
+  }
   const Icon = destinationGlyph(url);
   return <Icon />;
 }
@@ -143,8 +189,17 @@ export function FrameApp() {
   const restart = useUpdates((s) => s.restart);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const omniboxRef = useRef<HTMLInputElement | null>(null);
-  const dragRef = useRef<{ tab: number; start_x: number; start_y: number; moved: boolean } | null>(null);
-  const [menu, setMenu] = useState<{ tab: number; x: number; y: number } | null>(null);
+  const dragRef = useRef<{
+    tab: number;
+    start_x: number;
+    start_y: number;
+    moved: boolean;
+  } | null>(null);
+  const [menu, setMenu] = useState<{
+    tab: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const [omniboxText, setOmniboxText] = useState<string | null>(null);
   const [joinNote, setJoinNote] = useState<string | null>(null);
   // The boot must never fail silently: a white window teaches nothing.
@@ -168,7 +223,10 @@ export function FrameApp() {
   // The live drag session's pointer (frame coordinates), non-null only
   // once the drag crosses its threshold — the render reads it to lift
   // the dragged tab and place the insertion indicator.
-  const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
+  const [dragPointer, setDragPointer] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   // When a drag session released: its pointerup also dispatches a click,
   // and the release must never select the tab it just dragged.
   const dragJustEnded = useRef(0);
@@ -206,6 +264,8 @@ export function FrameApp() {
   // decision time (the strip re-lays-out under a pending timer — a stale
   // rect would park the card where the tab used to stand), the content
   // comes dressed from the laws (hoverCard.ts — one home, no twin).
+  // The band is the corridor from the LIVE card's last anchor to the new
+  // one — the carrier never covers more than the card's own reach.
   const buildCardPayload = (target: HoverTarget): HoverCardPayload | null => {
     const current = cardSnap.current;
     if (!current) return null;
@@ -220,6 +280,11 @@ export function FrameApp() {
       { left: rect.left, width: rect.width, bottom: rect.bottom },
       document.documentElement.clientWidth,
     );
+    const previous = cardPayload.current;
+    const viewport = {
+      w: document.documentElement.clientWidth,
+      h: document.documentElement.clientHeight,
+    };
     if (target.kind === "tab") {
       const tab = current.tabs.find((t) => t.id === target.id);
       if (!tab) return null;
@@ -227,10 +292,14 @@ export function FrameApp() {
         kind: "tab",
         x: anchor.x,
         y: anchor.y,
-        band: hoverCardBand(current.vertical, anchor.y, railW, {
-          w: document.documentElement.clientWidth,
-          h: document.documentElement.clientHeight,
-        }),
+        band: hoverCardBand(
+          "tab",
+          anchor,
+          previous && previous.kind === "tab"
+            ? { x: previous.x, y: previous.y }
+            : null,
+          viewport,
+        ),
         title: tab.title,
         domain: hoverCardDomain(tab.url),
         members: [],
@@ -241,16 +310,22 @@ export function FrameApp() {
     if (!group) return null;
     // The member list walks the MODEL order (snap.tabs is the model's
     // array, the view's interleave never touches it).
-    const memberTitles = current.tabs.filter((t) => t.group === target.id).map((t) => t.title);
+    const memberTitles = current.tabs
+      .filter((t) => t.group === target.id)
+      .map((t) => t.title);
     const { members, excess } = groupCardMembers(memberTitles);
     return {
       kind: "group",
       x: anchor.x,
       y: anchor.y,
-      band: hoverCardBand(current.vertical, anchor.y, railW, {
-          w: document.documentElement.clientWidth,
-          h: document.documentElement.clientHeight,
-        }),
+      band: hoverCardBand(
+        "group",
+        anchor,
+        previous && previous.kind === "group"
+          ? { x: previous.x, y: previous.y }
+          : null,
+        viewport,
+      ),
       title: groupCardHeader(group.label, memberTitles.length),
       domain: null,
       members,
@@ -258,7 +333,11 @@ export function FrameApp() {
     };
   };
 
-  const carry = (payload: HoverCardPayload, target: HoverTarget, via: "show" | "update"): void => {
+  const carry = (
+    payload: HoverCardPayload,
+    target: HoverTarget,
+    via: "show" | "update",
+  ): void => {
     cardAlive.current = true;
     cardTarget.current = target;
     cardPayload.current = payload;
@@ -273,21 +352,21 @@ export function FrameApp() {
           payload as unknown as Record<string, unknown>,
         );
       } else {
-        void shellPopupUpdate(payload as unknown as Record<string, unknown>).then(
-          (delivered) => {
-            if (!delivered) {
-              // The overlay lost the race with its own fade — recreate.
-              void shellPopup(
-                "hover-card",
-                target.kind === "tab" ? target.id : null,
-                payload.x,
-                payload.y,
-                target.kind === "group" ? target.id : null,
-                payload as unknown as Record<string, unknown>,
-              );
-            }
-          },
-        );
+        void shellPopupUpdate(
+          payload as unknown as Record<string, unknown>,
+        ).then((delivered) => {
+          if (!delivered) {
+            // The overlay lost the race with its own fade — recreate.
+            void shellPopup(
+              "hover-card",
+              target.kind === "tab" ? target.id : null,
+              payload.x,
+              payload.y,
+              target.kind === "group" ? target.id : null,
+              payload as unknown as Record<string, unknown>,
+            );
+          }
+        });
       }
     } else {
       setDemoCardFading(false);
@@ -336,7 +415,8 @@ export function FrameApp() {
     }
     if (updateType !== "data") {
       const current = cardTarget.current ?? pendingTarget.current;
-      if (current && current.kind === target.kind && current.id === target.id) return;
+      if (current && current.kind === target.kind && current.id === target.id)
+        return;
     }
     clearShowTimer();
     if (cardAlive.current) {
@@ -412,7 +492,8 @@ export function FrameApp() {
       if (
         tab &&
         payload &&
-        (tab.title !== payload.title || hoverCardDomain(tab.url) !== payload.domain)
+        (tab.title !== payload.title ||
+          hoverCardDomain(tab.url) !== payload.domain)
       ) {
         hoverApi.current.update(target, "data");
       }
@@ -444,101 +525,121 @@ export function FrameApp() {
   // the tab, and places the insertion indicator over a drop-index
   // mirror. Drop: view x converts to model x (the lane's scroll), then
   // the host reorders — or tears off when the pointer left the window.
-  const startDragSession = useCallback((event: React.PointerEvent, tabId: number) => {
-    if (event.button !== 0) return;
-    // A press on the close button never arms a drag — upstream's
-    // MaybeStartDrag refuses non-tab presses; the click belongs to the
-    // button and nothing may retarget it.
-    if ((event.target as HTMLElement | null)?.closest(".tab-close")) return;
-    const element = event.currentTarget as HTMLElement;
-    const pointerId = event.pointerId;
-    const startX = event.clientX;
-    const startY = event.clientY;
-    let moved = false;
-    let done = false;
-    let raf = 0;
-    let last = { x: event.clientX, y: event.clientY, sx: event.screenX, sy: event.screenY };
-    dragRef.current = { tab: tabId, start_x: startX, start_y: startY, moved: false };
-    const onMove = (ev: PointerEvent) => {
-      last = { x: ev.clientX, y: ev.clientY, sx: ev.screenX, sy: ev.screenY };
-      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10) {
-        moved = true;
-        if (dragRef.current) dragRef.current.moved = true;
-        // The threshold is where the drag begins: capture the pointer
-        // (the session must survive the pointer leaving the webview — a
-        // tear-off drop lands past the window's edge) and announce the
-        // session to the host. The drag is kAnimating to the hover
-        // card: it hides, its exit timestamp untouched.
-        hoverApi.current.update(null, "animating");
-        try {
-          element.setPointerCapture(pointerId);
-        } catch {
-          // A failed capture still drags inside the window; the drop just
-          // loses its beyond-the-edge reach.
+  const startDragSession = useCallback(
+    (event: React.PointerEvent, tabId: number) => {
+      if (event.button !== 0) return;
+      // A press on the close button never arms a drag — upstream's
+      // MaybeStartDrag refuses non-tab presses; the click belongs to the
+      // button and nothing may retarget it.
+      if ((event.target as HTMLElement | null)?.closest(".tab-close")) return;
+      const element = event.currentTarget as HTMLElement;
+      const pointerId = event.pointerId;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let moved = false;
+      let done = false;
+      let raf = 0;
+      let last = {
+        x: event.clientX,
+        y: event.clientY,
+        sx: event.screenX,
+        sy: event.screenY,
+      };
+      dragRef.current = {
+        tab: tabId,
+        start_x: startX,
+        start_y: startY,
+        moved: false,
+      };
+      const onMove = (ev: PointerEvent) => {
+        last = { x: ev.clientX, y: ev.clientY, sx: ev.screenX, sy: ev.screenY };
+        if (
+          !moved &&
+          Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10
+        ) {
+          moved = true;
+          if (dragRef.current) dragRef.current.moved = true;
+          // The threshold is where the drag begins: capture the pointer
+          // (the session must survive the pointer leaving the webview — a
+          // tear-off drop lands past the window's edge) and announce the
+          // session to the host. The drag is kAnimating to the hover
+          // card: it hides, its exit timestamp untouched.
+          hoverApi.current.update(null, "animating");
+          try {
+            element.setPointerCapture(pointerId);
+          } catch {
+            // A failed capture still drags inside the window; the drop just
+            // loses its beyond-the-edge reach.
+          }
+          void shellDrag("start", {
+            tab_id: tabId,
+            screen_x: last.sx,
+            screen_y: last.sy,
+          });
         }
-        void shellDrag("start", { tab_id: tabId, screen_x: last.sx, screen_y: last.sy });
-      }
-      if (!moved) return;
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        setDragPointer({ x: last.x, y: last.y });
-        void shellDrag("move", {
-          tab_id: tabId,
-          x: last.x,
-          y: last.y,
-          screen_x: last.sx,
-          screen_y: last.sy,
+        if (!moved) return;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          setDragPointer({ x: last.x, y: last.y });
+          void shellDrag("move", {
+            tab_id: tabId,
+            x: last.x,
+            y: last.y,
+            screen_x: last.sx,
+            screen_y: last.sy,
+          });
         });
-      });
-    };
-    const finish = (commit: boolean) => {
-      if (done) return;
-      done = true;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-      window.removeEventListener("keydown", onKey);
-      element.removeEventListener("lostpointercapture", onLost);
-      cancelAnimationFrame(raf);
-      dragRef.current = null;
-      setDragPointer(null);
-      if (commit && moved) dragJustEnded.current = performance.now();
-      if (!moved) return; // a press that never became a drag: nothing to tell the host
-      if (commit) {
-        // The drop carries the coordinate along the strip's OWN axis
-        // (pointer X in the band, pointer Y in the rail), the lane's
-        // scroll shift included — the host's drop law consumes it in the
-        // matching orientation.
-        const axis = verticalRef.current
-          ? last.y + scrollRef.current
-          : last.x + scrollRef.current;
-        void shellDrag("drop", {
-          tab_id: tabId,
-          x: axis,
-          y: last.y,
-          screen_x: last.sx,
-          screen_y: last.sy,
-        });
-      } else {
-        void shellDrag("cancel", { tab_id: tabId });
-      }
-    };
-    const onUp = () => finish(true);
-    const onCancel = () => finish(false);
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") finish(false);
-    };
-    // A lost capture (alt-tab, an OS gesture swallowing the pointer)
-    // must never hang the session: the tab settles back and the next
-    // press starts fresh. The normal release fires this too — after
-    // finish() already ran, and the done guard makes it a no-op.
-    const onLost = () => finish(false);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    window.addEventListener("keydown", onKey);
-    element.addEventListener("lostpointercapture", onLost);
-  }, []);
+      };
+      const finish = (commit: boolean) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        window.removeEventListener("keydown", onKey);
+        element.removeEventListener("lostpointercapture", onLost);
+        cancelAnimationFrame(raf);
+        dragRef.current = null;
+        setDragPointer(null);
+        if (commit && moved) dragJustEnded.current = performance.now();
+        if (!moved) return; // a press that never became a drag: nothing to tell the host
+        if (commit) {
+          // The drop carries the coordinate along the strip's OWN axis
+          // (pointer X in the band, pointer Y in the rail), the lane's
+          // scroll shift included — the host's drop law consumes it in the
+          // matching orientation.
+          const axis = verticalRef.current
+            ? last.y + scrollRef.current
+            : last.x + scrollRef.current;
+          void shellDrag("drop", {
+            tab_id: tabId,
+            x: axis,
+            y: last.y,
+            screen_x: last.sx,
+            screen_y: last.sy,
+          });
+        } else {
+          void shellDrag("cancel", { tab_id: tabId });
+        }
+      };
+      const onUp = () => finish(true);
+      const onCancel = () => finish(false);
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key === "Escape") finish(false);
+      };
+      // A lost capture (alt-tab, an OS gesture swallowing the pointer)
+      // must never hang the session: the tab settles back and the next
+      // press starts fresh. The normal release fires this too — after
+      // finish() already ran, and the done guard makes it a no-op.
+      const onLost = () => finish(false);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
+      window.addEventListener("keydown", onKey);
+      element.addEventListener("lostpointercapture", onLost);
+    },
+    [],
+  );
 
   const boot = useCallback((attempt = 0) => {
     bootFrame()
@@ -575,6 +676,18 @@ export function FrameApp() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     boot();
+    // The favicon lane: the frame's own fleet projection (Tauri only —
+    // the demo dresses its fixture instead, below).
+    startFaviconLane();
+    if (!isTauri() && new URLSearchParams(window.location.search).has("demo")) {
+      seedFaviconsForDemo({
+        survival: { software: "paper", state: "running", severity: "ok" },
+        creative: { software: "folia", state: "starting" },
+        events: { software: "purpur", state: "not-running" },
+        modded: { software: "fabric", state: "running", severity: "warn" },
+        legacy: { software: "vanilla", state: "crashed" },
+      });
+    }
     void onSnapshot((next) => {
       if (disposed) return;
       setSnap(next);
@@ -630,7 +743,9 @@ export function FrameApp() {
   useEffect(() => {
     if (!snap) return;
     const { max } = stripScroll(snap.slots, snap.strip_width, 0);
-    const activeSlot = snap.slots.find((s) => !s.header && s.id === snap.active);
+    const activeSlot = snap.slots.find(
+      (s) => !s.header && s.id === snap.active,
+    );
     setScroll((cur) => {
       const clamped = Math.min(cur, max);
       return revealSlot(activeSlot, snap.strip_width, clamped, max) === clamped
@@ -712,13 +827,16 @@ export function FrameApp() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (hoverApi.current.alive()) hoverApi.current.update(null, "event");
-      const target = event.target as (HTMLElement & { isContentEditable: boolean }) | null;
+      const target = event.target as
+        (HTMLElement & { isContentEditable: boolean }) | null;
       const api: BrowserKeyApi = {
         newTab: () => void shellCommand(CMD.NEW_TAB),
         reopenClosedTab: () => void shellCommand(CMD.RESTORE_TAB),
         closeActiveTab: () => void shellCommand(CMD.CLOSE_TAB),
         cycleTab: (step) =>
-          void shellCommand(step >= 0 ? CMD.SELECT_NEXT_TAB : CMD.SELECT_PREVIOUS_TAB),
+          void shellCommand(
+            step >= 0 ? CMD.SELECT_NEXT_TAB : CMD.SELECT_PREVIOUS_TAB,
+          ),
         selectTabIndex: (index) =>
           void shellCommand(
             index === "last" ? CMD.SELECT_LAST_TAB : CMD.SELECT_TAB_0 + index,
@@ -745,7 +863,8 @@ export function FrameApp() {
         event,
         {
           isContentEditable: target?.isContentEditable ?? false,
-          tagIsInput: target?.tagName === "INPUT" || target?.tagName === "TEXTAREA",
+          tagIsInput:
+            target?.tagName === "INPUT" || target?.tagName === "TEXTAREA",
         },
         api,
       );
@@ -775,7 +894,13 @@ export function FrameApp() {
         <div className="frame-error-box">
           <p className="frame-error-title">The shell did not boot</p>
           <p className="frame-error-detail">{bootError}</p>
-          <button className="frame-error-retry" onClick={() => { setBootError(null); boot(); }}>
+          <button
+            className="frame-error-retry"
+            onClick={() => {
+              setBootError(null);
+              boot();
+            }}
+          >
             Try again
           </button>
         </div>
@@ -856,12 +981,21 @@ export function FrameApp() {
         snap.tabs
           .filter((t) => t.id !== dragTabId)
           .map((t) => ({ id: t.id, pinned: t.pinned, group: t.group })),
-        { id: draggedTab.id, pinned: draggedTab.pinned, group: draggedTab.group },
+        {
+          id: draggedTab.id,
+          pinned: draggedTab.pinned,
+          group: draggedTab.group,
+        },
         preview,
       );
       visualSlots = vertical
         ? demoLayoutStripVertical(
-            { strip_width: snap.strip_width, tabs: withDragged, groups: snap.groups, active: snap.active ?? 0 },
+            {
+              strip_width: snap.strip_width,
+              tabs: withDragged,
+              groups: snap.groups,
+              active: snap.active ?? 0,
+            },
             railW,
           )
         : demoLayoutStrip({
@@ -941,530 +1075,676 @@ export function FrameApp() {
       <div
         className={vertical ? "frame vertical" : "frame"}
         style={vertical ? { width: railW } : { height: snap.header_height }}
-    >
-      {/* Tab strip row / §54 rail — Chromium's 35+6 band horizontal, the
+      >
+        {/* Tab strip row / §54 rail — Chromium's 35+6 band horizontal, the
           stacked rows vertical; drag region on the bare ground either
           way, tabs above it. */}
-      <div
-        className="strip"
-        ref={stripRef}
-        data-tauri-drag-region
-        aria-orientation={vertical ? "vertical" : "horizontal"}
-        data-declutter={
-          snap.tabs.length >= TAB_STRIP_DECLUTTER_MIN_TABS_FOR_SEPARATOR_HIDE || undefined
-        }
-        onMouseLeave={() => {
-          // Leaving the strip entirely: the buffer starts here
-          // (ShouldShowImmediately's kShowWithoutDelayTimeBuffer).
-          hoverApi.current.update(null, "hover");
-        }}
-        onMouseMove={(e) => {
-          // Bare strip under the pointer is no hover target either —
-          // the card hides as if the strip were left (TabStrip's own
-          // mousemove re-evaluation).
-          const el = e.target as HTMLElement | null;
-          if (el?.closest("[data-tab],[data-group-chip]")) return;
-          hoverApi.current.update(null, "hover");
-        }}
-        onDoubleClick={(e) => {
-          if ((e.target as HTMLElement).dataset.tab === undefined) {
-            // Windows titlebar law: a bare-strip double click asks about
-            // the window, never about tabs (the + button and Ctrl+T
-            // make tabs).
-            void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE);
+        <div
+          className="strip"
+          ref={stripRef}
+          data-tauri-drag-region
+          aria-orientation={vertical ? "vertical" : "horizontal"}
+          data-declutter={
+            snap.tabs.length >=
+              TAB_STRIP_DECLUTTER_MIN_TABS_FOR_SEPARATOR_HIDE || undefined
           }
-        }}
-      >
-        {/* The overflow lane — the model's slots translate inside it
+          onMouseLeave={() => {
+            // Leaving the strip entirely: the buffer starts here
+            // (ShouldShowImmediately's kShowWithoutDelayTimeBuffer).
+            hoverApi.current.update(null, "hover");
+          }}
+          onMouseMove={(e) => {
+            // Bare strip under the pointer is no hover target either —
+            // the card hides as if the strip were left (TabStrip's own
+            // mousemove re-evaluation).
+            const el = e.target as HTMLElement | null;
+            if (el?.closest("[data-tab],[data-group-chip]")) return;
+            hoverApi.current.update(null, "hover");
+          }}
+          onDoubleClick={(e) => {
+            if ((e.target as HTMLElement).dataset.tab === undefined) {
+              // Windows titlebar law: a bare-strip double click asks about
+              // the window, never about tabs (the + button and Ctrl+T
+              // make tabs).
+              void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE);
+            }
+          }}
+        >
+          {/* The overflow lane — the model's slots translate inside it
             while the strip's own chrome stays put. The lane is
             pointer-transparent: bare areas remain the window's drag
             region and the double-click maximize law keeps working. */}
-        <div
-          className="strip-lane"
-          style={{
-            transform: vertical ? `translateY(${-scrollValue}px)` : `translateX(${-scrollValue}px)`,
-            // The separator's color is the foreground blended over the strip
-            // until 2.5 contrast (tab_style.cc's GetContrastRatioValues).
-            ["--tab-separator-color" as string]: separatorColor(
-              STRIP_COLORS.light.frame,
-              STRIP_COLORS.light.tabFg,
-            ),
-          }}
-          onWheel={(e) => {
-            // The strip moved under a stationary pointer — the hover
-            // target changed without any boundary crossing. The card
-            // yields (kAnimating); the next crossing re-arms the law.
-            if (cardAlive.current) hideCard();
-            if (maxScroll === 0) return;
-            const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-            setScroll(
-              vertical
-                ? stripScrollVertical(snap.slots, railHeight, scrollRef.current + delta).value
-                : stripScroll(snap.slots, snap.strip_width, scrollRef.current + delta).value,
-            );
-          }}
-        >
-          {visualSlots.flatMap((slot, idx) => {
-            const parts: React.JSX.Element[] = [];
-            // Separators: the VIEW owns the adjacency truth — an
-            // explicit 2×20 mark between two adjacent inactive tab
-            // slots (the old CSS sibling selector could not see across
-            // a chip or an absolutely-positioned run). The span sits
-            // BETWEEN the tab divs in DOM order so hover of either
-            // neighbor hides it through the sibling/:has() rules.
-            const prevSlot = idx > 0 ? visualSlots[idx - 1] : undefined;
-            // §54: the rail has no separators — rows separate themselves
-            // (the marks are the horizontal chain's boundary law).
-            if (!vertical && prevSlot && !slot.header && !prevSlot.header && !slot.closing && !prevSlot.closing) {
-              const prevTab = snap.tabs.find((t) => t.id === prevSlot.id);
-              const curTab = snap.tabs.find((t) => t.id === slot.id);
-              // Same-group members never carry a separator between them:
-              // the group's underline band is the connector (upstream's
-              // TabStyleViews draws no divider inside a group's run).
-              const sameGroup =
-                prevTab != null &&
-                curTab != null &&
-                prevTab.group != null &&
-                prevTab.group === curTab.group;
-              if (prevTab && curTab && !sameGroup && !prevTab.active && !curTab.active) {
-                parts.push(
-                  <span
-                    key={`sep-${slot.id}`}
-                    className="tab-separator"
-                    style={{ left: slot.x - 1 }}
-                  />,
-                );
+          <div
+            className="strip-lane"
+            style={{
+              transform: vertical
+                ? `translateY(${-scrollValue}px)`
+                : `translateX(${-scrollValue}px)`,
+              // The separator's color is the foreground blended over the strip
+              // until 2.5 contrast (tab_style.cc's GetContrastRatioValues).
+              ["--tab-separator-color" as string]: separatorColor(
+                STRIP_COLORS.light.frame,
+                STRIP_COLORS.light.tabFg,
+              ),
+            }}
+            onWheel={(e) => {
+              // The strip moved under a stationary pointer — the hover
+              // target changed without any boundary crossing. The card
+              // yields (kAnimating); the next crossing re-arms the law.
+              if (cardAlive.current) hideCard();
+              if (maxScroll === 0) return;
+              const delta =
+                Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+              setScroll(
+                vertical
+                  ? stripScrollVertical(
+                      snap.slots,
+                      railHeight,
+                      scrollRef.current + delta,
+                    ).value
+                  : stripScroll(
+                      snap.slots,
+                      snap.strip_width,
+                      scrollRef.current + delta,
+                    ).value,
+              );
+            }}
+          >
+            {visualSlots.flatMap((slot, idx) => {
+              const parts: React.JSX.Element[] = [];
+              // Separators: the VIEW owns the adjacency truth — an
+              // explicit 2×20 mark between two adjacent inactive tab
+              // slots (the old CSS sibling selector could not see across
+              // a chip or an absolutely-positioned run). The span sits
+              // BETWEEN the tab divs in DOM order so hover of either
+              // neighbor hides it through the sibling/:has() rules.
+              const prevSlot = idx > 0 ? visualSlots[idx - 1] : undefined;
+              // §54: the rail has no separators — rows separate themselves
+              // (the marks are the horizontal chain's boundary law).
+              if (
+                !vertical &&
+                prevSlot &&
+                !slot.header &&
+                !prevSlot.header &&
+                !slot.closing &&
+                !prevSlot.closing
+              ) {
+                const prevTab = snap.tabs.find((t) => t.id === prevSlot.id);
+                const curTab = snap.tabs.find((t) => t.id === slot.id);
+                // Same-group members never carry a separator between them:
+                // the group's underline band is the connector (upstream's
+                // TabStyleViews draws no divider inside a group's run).
+                const sameGroup =
+                  prevTab != null &&
+                  curTab != null &&
+                  prevTab.group != null &&
+                  prevTab.group === curTab.group;
+                if (
+                  prevTab &&
+                  curTab &&
+                  !sameGroup &&
+                  !prevTab.active &&
+                  !curTab.active
+                ) {
+                  parts.push(
+                    <span
+                      key={`sep-${slot.id}`}
+                      className="tab-separator"
+                      style={{ left: slot.x - 1 }}
+                    />,
+                  );
+                }
               }
-            }
-            // A header slot is the group's chip — not a tab. Clicking it
-            // toggles the group's collapse (the chip IS the collapsed
-            // group, tab_group_views.cc).
-            if (slot.header) {
-              const group = snap.groups.find((g) => g.id === slot.id);
-              if (!group) return parts;
+              // A header slot is the group's chip — not a tab. Clicking it
+              // toggles the group's collapse (the chip IS the collapsed
+              // group, tab_group_views.cc).
+              if (slot.header) {
+                const group = snap.groups.find((g) => g.id === slot.id);
+                if (!group) return parts;
+                parts.push(
+                  <button
+                    key={`group-${group.id}`}
+                    data-group-chip
+                    data-group-chip-id={group.id}
+                    className="group-chip"
+                    style={{
+                      left: slot.x,
+                      width: slot.width,
+                      ...(vertical ? { top: slot.y, height: slot.height } : {}),
+                      ...groupVars(group.color),
+                    }}
+                    aria-label={`Toggle group ${group.label}`}
+                    onMouseEnter={() =>
+                      updateHoverCard({ kind: "group", id: group.id }, "hover")
+                    }
+                    onClick={() =>
+                      void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, {
+                        group_id: group.id,
+                      })
+                    }
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      // The chip's editor law (tab_group_header_view.cc's
+                      // OnMouseReleased): LEFT click toggles collapse, RIGHT
+                      // click opens the editor bubble — the chip IS the
+                      // collapsed group, the editor shapes it.
+                      void shellPopup(
+                        "group-editor",
+                        null,
+                        e.clientX,
+                        e.clientY,
+                        group.id,
+                      );
+                    }}
+                  >
+                    <span className="group-chip-label">{group.label}</span>
+                  </button>,
+                );
+                return parts;
+              }
+              const tab = snap.tabs.find((t) => t.id === slot.id);
+              if (!tab) return parts;
+              const group =
+                tab.group != null
+                  ? snap.groups.find((g) => g.id === tab.group)
+                  : null;
+              // The underline's continuity law (TabStyleViews' group band):
+              // toward a SAME-GROUP neighbor the underline runs to the slot
+              // edge — the neighbor's own underline overlaps it in the 18px
+              // paint zone, one color, one band. Toward anyone else the
+              // 22px containment inset holds (row 27: a line must never
+              // cross into a tab outside the group).
+              const nextSlot = visualSlots[idx + 1];
+              const prevVisibleTab =
+                prevSlot && !prevSlot.header && !prevSlot.closing
+                  ? snap.tabs.find((t) => t.id === prevSlot.id)
+                  : undefined;
+              const nextVisibleTab =
+                nextSlot && !nextSlot.header && !nextSlot.closing
+                  ? snap.tabs.find((t) => t.id === nextSlot.id)
+                  : undefined;
+              const memberLeft =
+                group != null &&
+                prevVisibleTab != null &&
+                prevVisibleTab.group != null &&
+                prevVisibleTab.group === tab.group;
+              const memberRight =
+                group != null &&
+                nextVisibleTab != null &&
+                nextVisibleTab.group != null &&
+                nextVisibleTab.group === tab.group;
+              // The drag session's lift: the moved tab follows the pointer
+              // (clamped to the window) with the settle transitions off.
+              // The translate's base is the MODEL slot — the visual layout
+              // reshuffles under the session, and a hypothetical base
+              // would compound the pointer delta into a drift.
+              const dragging = dragTabId === tab.id;
+              const modelSlot = dragging
+                ? snap.slots.find((s) => !s.header && s.id === tab.id)
+                : null;
+              const dx =
+                dragging && modelSlot
+                  ? dragDx(modelSlot.x, modelSlot.width)
+                  : null;
+              const dy =
+                dragging && modelSlot
+                  ? dragDy(modelSlot.y, modelSlot.height)
+                  : null;
+              // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
+              // cannot fit beside a glyph — the slot shows its glyph alone,
+              // centered in the visible span, the way Chromium's minimum
+              // tabs render (min_inactive_width, interior 16).
+              const tight = slot.width < 64;
               parts.push(
-                <button
-                  key={`group-${group.id}`}
-                  data-group-chip
-                  data-group-chip-id={group.id}
-                  className="group-chip"
+                <div
+                  key={tab.id}
+                  data-tab
+                  data-tab-id={tab.id}
+                  className={[
+                    "tab",
+                    tab.active ? "tab-active" : "tab-inactive",
+                    slot.pinned ? "tab-pinned" : "",
+                    tight ? "tab-tight" : "",
+                    dragging ? "tab-dragging tab-dragging-live" : "",
+                    slot.closing ? "tab-closing" : "",
+                  ].join(" ")}
                   style={{
-                    left: slot.x,
+                    // The dragged tab renders from its MODEL slot — the
+                    // translate is expressed against that base, and the
+                    // visual layout's hypothetical x would compound into
+                    // a double offset (tab flung off-window).
+                    left: dragging && modelSlot ? modelSlot.x : slot.x,
                     width: slot.width,
-                    ...(vertical ? { top: slot.y, height: slot.height } : {}),
-                    ...groupVars(group.color),
+                    // The rail's rows position by their top edge; the band
+                    // pins to the strip's floor (the CSS default).
+                    ...(vertical
+                      ? {
+                          top: dragging && modelSlot ? modelSlot.y : slot.y,
+                          height: slot.height,
+                        }
+                      : {}),
+                    ...(dx != null
+                      ? {
+                          transform: `translateX(${dx}px)`,
+                          transition: "none",
+                          willChange: "transform",
+                        }
+                      : {}),
+                    ...(dy != null
+                      ? {
+                          transform: `translateY(${dy}px)`,
+                          transition: "none",
+                          willChange: "transform",
+                        }
+                      : {}),
+                    // The top radius shrinks with the slot (GetTopCorner RadiusForWidth);
+                    // both the active path and the squarcle hover consume it.
+                    ["--tab-top-radius" as string]: `${topCornerRadiusForWidth(slot.width)}px`,
+                    ...(group
+                      ? {
+                          ...groupVars(group.color),
+                          // The underline's boundary law (tab_group_underline.cc's
+                          // GetInsetsForUnderline): member boundaries run the
+                          // band continuously (0); a group's edge insets the
+                          // stroke (18); an ACTIVE tab at the edge pokes the
+                          // stroke out past its bounds (−2).
+                          ["--ul-left" as string]: memberLeft
+                            ? "0px"
+                            : tab.active
+                              ? "-2px"
+                              : `${GROUP_LINE_STROKE_INSET}px`,
+                          ["--ul-right" as string]: memberRight
+                            ? "0px"
+                            : tab.active
+                              ? "-2px"
+                              : `${GROUP_LINE_STROKE_INSET}px`,
+                        }
+                      : {}),
                   }}
-                  aria-label={`Toggle group ${group.label}`}
+                  aria-label={`Tab ${tab.title}`}
                   onMouseEnter={() =>
-                    updateHoverCard({ kind: "group", id: group.id }, "hover")
+                    updateHoverCard({ kind: "tab", id: tab.id }, "hover")
                   }
-                  onClick={() =>
-                    void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, { group_id: group.id })
-                  }
+                  onClick={() => {
+                    // A drag session's release also dispatches a click —
+                    // the just-ended drag never selects.
+                    if (performance.now() - dragJustEnded.current < 200) return;
+                    selectTab(tab.id);
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
+                    }
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    // The chip's editor law (tab_group_header_view.cc's
-                    // OnMouseReleased): LEFT click toggles collapse, RIGHT
-                    // click opens the editor bubble — the chip IS the
-                    // collapsed group, the editor shapes it.
-                    void shellPopup("group-editor", null, e.clientX, e.clientY, group.id);
+                    // The application-owned popup overlay (a transparent
+                    // child webview) — the native gray menu is gone. In
+                    // the browser demo the DOM stand-in still serves.
+                    if (isTauri()) {
+                      void shellPopup("tab-menu", tab.id, e.clientX, e.clientY);
+                    } else {
+                      setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
+                    }
                   }}
+                  onPointerDown={(e) => startDragSession(e, tab.id)}
                 >
-                  <span className="group-chip-label">{group.label}</span>
-                </button>,
-              );
-              return parts;
-            }
-            const tab = snap.tabs.find((t) => t.id === slot.id);
-            if (!tab) return parts;
-            const group = tab.group != null ? snap.groups.find((g) => g.id === tab.group) : null;
-            // The underline's continuity law (TabStyleViews' group band):
-            // toward a SAME-GROUP neighbor the underline runs to the slot
-            // edge — the neighbor's own underline overlaps it in the 18px
-            // paint zone, one color, one band. Toward anyone else the
-            // 22px containment inset holds (row 27: a line must never
-            // cross into a tab outside the group).
-            const nextSlot = visualSlots[idx + 1];
-            const prevVisibleTab =
-              prevSlot && !prevSlot.header && !prevSlot.closing
-                ? snap.tabs.find((t) => t.id === prevSlot.id)
-                : undefined;
-            const nextVisibleTab =
-              nextSlot && !nextSlot.header && !nextSlot.closing
-                ? snap.tabs.find((t) => t.id === nextSlot.id)
-                : undefined;
-            const memberLeft =
-              group != null &&
-              prevVisibleTab != null &&
-              prevVisibleTab.group != null &&
-              prevVisibleTab.group === tab.group;
-            const memberRight =
-              group != null &&
-              nextVisibleTab != null &&
-              nextVisibleTab.group != null &&
-              nextVisibleTab.group === tab.group;
-            // The drag session's lift: the moved tab follows the pointer
-            // (clamped to the window) with the settle transitions off.
-            // The translate's base is the MODEL slot — the visual layout
-            // reshuffles under the session, and a hypothetical base
-            // would compound the pointer delta into a drift.
-            const dragging = dragTabId === tab.id;
-            const modelSlot = dragging ? snap.slots.find((s) => !s.header && s.id === tab.id) : null;
-            const dx = dragging && modelSlot ? dragDx(modelSlot.x, modelSlot.width) : null;
-            const dy = dragging && modelSlot ? dragDy(modelSlot.y, modelSlot.height) : null;
-            // Favicon-only mode: below ~64 DIP the content insets (2 × 24)
-            // cannot fit beside a glyph — the slot shows its glyph alone,
-            // centered in the visible span, the way Chromium's minimum
-            // tabs render (min_inactive_width, interior 16).
-            const tight = slot.width < 64;
-            parts.push(
-              <div
-                key={tab.id}
-                data-tab
-                data-tab-id={tab.id}
-                className={[
-                  "tab",
-                  tab.active ? "tab-active" : "tab-inactive",
-                  slot.pinned ? "tab-pinned" : "",
-                  tight ? "tab-tight" : "",
-                  dragging ? "tab-dragging tab-dragging-live" : "",
-                  slot.closing ? "tab-closing" : "",
-                ].join(" ")}
-                style={{
-                  // The dragged tab renders from its MODEL slot — the
-                  // translate is expressed against that base, and the
-                  // visual layout's hypothetical x would compound into
-                  // a double offset (tab flung off-window).
-                  left: dragging && modelSlot ? modelSlot.x : slot.x,
-                  width: slot.width,
-                  // The rail's rows position by their top edge; the band
-                  // pins to the strip's floor (the CSS default).
-                  ...(vertical ? { top: dragging && modelSlot ? modelSlot.y : slot.y, height: slot.height } : {}),
-                  ...(dx != null
-                    ? { transform: `translateX(${dx}px)`, transition: "none", willChange: "transform" }
-                    : {}),
-                  ...(dy != null
-                    ? { transform: `translateY(${dy}px)`, transition: "none", willChange: "transform" }
-                    : {}),
-                  // The top radius shrinks with the slot (GetTopCorner RadiusForWidth);
-                  // both the active path and the squarcle hover consume it.
-                  ["--tab-top-radius" as string]: `${topCornerRadiusForWidth(slot.width)}px`,
-                  ...(group
-                    ? {
-                        ...groupVars(group.color),
-                        // The underline's boundary law (tab_group_underline.cc's
-                        // GetInsetsForUnderline): member boundaries run the
-                        // band continuously (0); a group's edge insets the
-                        // stroke (18); an ACTIVE tab at the edge pokes the
-                        // stroke out past its bounds (−2).
-                        ["--ul-left" as string]: memberLeft
-                          ? "0px"
-                          : tab.active
-                            ? "-2px"
-                            : `${GROUP_LINE_STROKE_INSET}px`,
-                        ["--ul-right" as string]: memberRight
-                          ? "0px"
-                          : tab.active
-                            ? "-2px"
-                            : `${GROUP_LINE_STROKE_INSET}px`,
-                      }
-                    : {}),
-                }}
-                aria-label={`Tab ${tab.title}`}
-                onMouseEnter={() => updateHoverCard({ kind: "tab", id: tab.id }, "hover")}
-                onClick={() => {
-                  // A drag session's release also dispatches a click —
-                  // the just-ended drag never selects.
-                  if (performance.now() - dragJustEnded.current < 200) return;
-                  selectTab(tab.id);
-                }}
-                onAuxClick={(e) => {
-                  if (e.button === 1) {
-                    e.preventDefault();
-                    void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
-                  }
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  // The application-owned popup overlay (a transparent
-                  // child webview) — the native gray menu is gone. In
-                  // the browser demo the DOM stand-in still serves.
-                  if (isTauri()) {
-                    void shellPopup("tab-menu", tab.id, e.clientX, e.clientY);
-                  } else {
-                    setMenu({ tab: tab.id, x: e.clientX, y: e.clientY });
-                  }
-                }}
-                onPointerDown={(e) => startDragSession(e, tab.id)}
-              >
-                {/* The active tab's body IS Chromium's GetPath() — the
+                  {/* The active tab's body IS Chromium's GetPath() — the
                     extension-armed chrome shape, drawn as SVG from the
                     backported law. A dragged tab paints as selected, so it
                     wears the same body. */}
-                {tab.active || dragging ? (
-                  <svg
-                    className="tab-body"
-                    viewBox={`0 0 ${Math.max(slot.width, 1)} ${TAB_HEIGHT}`}
-                    preserveAspectRatio="none"
-                    aria-hidden
-                  >
-                    <path d={activeTabPath(slot.width)} />
-                  </svg>
-                ) : null}
-                <span className="tab-glyph" aria-hidden>
-                  <Glyph url={tab.url} />
-                </span>
-                {!slot.pinned ? <span className="tab-title">{tab.title}</span> : null}
-                {tab.muted ? (
-                  <span className="tab-muted" aria-label="muted">
-                    <IconMuted />
+                  {tab.active || dragging ? (
+                    <svg
+                      className="tab-body"
+                      viewBox={`0 0 ${Math.max(slot.width, 1)} ${TAB_HEIGHT}`}
+                      preserveAspectRatio="none"
+                      aria-hidden
+                    >
+                      <path d={activeTabPath(slot.width)} />
+                    </svg>
+                  ) : null}
+                  <span className="tab-glyph" aria-hidden>
+                    <Glyph url={tab.url} />
                   </span>
-                ) : null}
-                {!slot.pinned ? (
-                  <button
-                    className="tab-close"
-                    aria-label={`Close ${tab.title}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
-                    }}
-                  >
-                    <IconClose />
-                  </button>
-                ) : null}
-                {group ? <span className="tab-group-underline" /> : null}
-              </div>,
-            );
-            return parts;
-          })}
-        </div>
-        {/* Scroll chevrons (tab_strip scrolling): only while the layout
+                  {!slot.pinned ? (
+                    <span className="tab-title">{tab.title}</span>
+                  ) : null}
+                  {tab.muted ? (
+                    <span className="tab-muted" aria-label="muted">
+                      <IconMuted />
+                    </span>
+                  ) : null}
+                  {!slot.pinned ? (
+                    <button
+                      className="tab-close"
+                      aria-label={`Close ${tab.title}`}
+                      onPointerDown={(e) => {
+                        // Chromium closes on the PRESS — TabStrip's close
+                        // runs from Tab::OnMousePressed, not the click. The
+                        // press also cannot lose a race with a later event
+                        // (the leak class of bugs never touches the close).
+                        // stopPropagation: the tab never sees the press, so
+                        // no drag arms and no selection fires. The pointer
+                        // type's button is `number`; jsdom's synthesized
+                        // press arrives without one — undefined rides the
+                        // same branch as the primary button (a right press
+                        // owns button 2 and closes nothing).
+                        e.stopPropagation();
+                        // jsdom's synthesized press carries no button — the
+                        // cast is the honest type of what reaches here.
+                        const pressed = e.button as number | undefined;
+                        if (pressed === 0 || pressed == null) {
+                          void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Keyboard activation (Enter/Space) arrives as a
+                        // click with detail 0 — the a11y path closes here.
+                        // A pointer click was already served above.
+                        if (e.detail === 0) {
+                          void shellCommand(CMD.CLOSE_TAB, { tab_id: tab.id });
+                        }
+                      }}
+                    >
+                      <IconClose />
+                    </button>
+                  ) : null}
+                  {group ? <span className="tab-group-underline" /> : null}
+                </div>,
+              );
+              return parts;
+            })}
+          </div>
+          {/* Scroll chevrons (tab_strip scrolling): only while the layout
             overflows its minimum run, riding the strip's right reserve.
             The rail scrolls by the wheel — no horizontal chevrons. */}
-        {!vertical && maxScroll > 0 ? (
-          <>
-            <button
-              className="strip-chev"
-              style={{ left: Math.max(snap.strip_width - 174 - 58, 0) }}
-              aria-label="Scroll tabs left"
-              disabled={scrollValue <= 0}
-              onClick={() =>
-                setScroll(stripScroll(snap.slots, snap.strip_width, scrollValue - 240).value)
-              }
-            >
-              <IconChevLeft />
-            </button>
-            <button
-              className="strip-chev"
-              style={{ left: Math.max(snap.strip_width - 174 - 30, 0) }}
-              aria-label="Scroll tabs right"
-              disabled={scrollValue >= maxScroll}
-              onClick={() =>
-                setScroll(stripScroll(snap.slots, snap.strip_width, scrollValue + 240).value)
-              }
-            >
-              <IconChevRight />
-            </button>
-          </>
-        ) : null}
-        <button
-          className="new-tab"
-          style={vertical ? { left: 6, top: newTabTop } : { left: newTabLeft }}
-          aria-label="New tab"
-          onClick={() => void shellCommand(CMD.NEW_TAB)}
-        >
-          <IconPlus />
-        </button>
-      </div>
+          {!vertical && maxScroll > 0 ? (
+            <>
+              <button
+                className="strip-chev"
+                style={{ left: Math.max(snap.strip_width - 174 - 58, 0) }}
+                aria-label="Scroll tabs left"
+                disabled={scrollValue <= 0}
+                onClick={() =>
+                  setScroll(
+                    stripScroll(snap.slots, snap.strip_width, scrollValue - 240)
+                      .value,
+                  )
+                }
+              >
+                <IconChevLeft />
+              </button>
+              <button
+                className="strip-chev"
+                style={{ left: Math.max(snap.strip_width - 174 - 30, 0) }}
+                aria-label="Scroll tabs right"
+                disabled={scrollValue >= maxScroll}
+                onClick={() =>
+                  setScroll(
+                    stripScroll(snap.slots, snap.strip_width, scrollValue + 240)
+                      .value,
+                  )
+                }
+              >
+                <IconChevRight />
+              </button>
+            </>
+          ) : null}
+          <button
+            className="new-tab"
+            style={
+              vertical ? { left: 6, top: newTabTop } : { left: newTabLeft }
+            }
+            aria-label="New tab"
+            onClick={() => void shellCommand(CMD.NEW_TAB)}
+          >
+            <IconPlus />
+          </button>
+        </div>
 
-      {/* The caption buttons — hoisted to the frame so both presentations
+        {/* The caption buttons — hoisted to the frame so both presentations
           own one instance: the band pins them top-right; the rail pins
           them over its toolbar row's right end. */}
-      <div className="window-controls">
-        <button aria-label="Minimize" onClick={() => void shellCommand(CMD.WINDOW_MINIMIZE)}>
-          <IconMinimize />
-        </button>
-        <button aria-label="Maximize" onClick={() => void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE)}>
-          <IconMaximize />
-        </button>
-        <button aria-label="Close" className="window-close" onClick={() => void shellCommand(CMD.WINDOW_CLOSE)}>
-          <IconWindowClose />
-        </button>
-      </div>
-
-      {/* Toolbar row — nav arrows, the omnibox, the star. */}
-      <div className="toolbar">
-        <button
-          className="tool"
-          aria-label="Back"
-          disabled={!snap.tabs.find((t) => t.id === snap.active)?.can_back}
-          onClick={() => void shellCommand(CMD.NAV_BACK)}
-        >
-          <IconBack />
-        </button>
-        <button
-          className="tool"
-          aria-label="Forward"
-          disabled={!snap.tabs.find((t) => t.id === snap.active)?.can_forward}
-          onClick={() => void shellCommand(CMD.NAV_FORWARD)}
-        >
-          <IconForward />
-        </button>
-        <button className="tool" aria-label="Reload" onClick={() => void shellCommand(CMD.RELOAD)}>
-          <IconReload />
-        </button>
-        <div className="omnibox-wrap">
-          <span className="omnibox-icon">
-            <Glyph url={snap.address} />
-          </span>
-          <input
-            ref={omniboxRef}
-            className="omnibox"
-            value={omniboxText ?? snap.address}
-            spellCheck={false}
-            placeholder="Search servers, or type an address"
-            onChange={(e) => {
-              setOmniboxText(e.target.value);
-              void classifyNow();
-            }}
-            onFocus={(e) => e.currentTarget.select()}
-            onBlur={() => {
-              setOmniboxText(null);
-              setJoinNote(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                void commitOmnibox();
-                omniboxRef.current?.blur();
-              } else if (e.key === "Escape") {
-                setOmniboxText(null);
-                omniboxRef.current?.blur();
-              }
-            }}
-          />
-          {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
-          {/* The bookmark star lives INSIDE the field's right end — the
-              placement the omnibox owns upstream; it never sits as a
-              stray button past the field. */}
+        <div className="window-controls">
           <button
-            className="omnibox-star"
-            aria-label="Bookmark this tab"
-            title="Bookmark this tab (Ctrl+D)"
-            onClick={() => void shellCommand(CMD.BOOKMARK_THIS_TAB)}
+            aria-label="Minimize"
+            onClick={() => void shellCommand(CMD.WINDOW_MINIMIZE)}
           >
-            <IconStar />
+            <IconMinimize />
+          </button>
+          <button
+            aria-label="Maximize"
+            onClick={() => void shellCommand(CMD.WINDOW_TOGGLE_MAXIMIZE)}
+          >
+            <IconMaximize />
+          </button>
+          <button
+            aria-label="Close"
+            className="window-close"
+            onClick={() => void shellCommand(CMD.WINDOW_CLOSE)}
+          >
+            <IconWindowClose />
           </button>
         </div>
-        {/* The update pill lives IN the toolbar's flow — it used to
-            float fixed over the toolbar's right side and read as an
-            overlap of the chrome it covered. A flex item cannot overlap
-            anything: the omnibox gives way, the dots stay clear. */}
-        {updatePhase.kind === "available" ? (
-          <button className="update-pill" onClick={() => void installNow()}>
-            {updatesSentence(updatePhase)}
-          </button>
-        ) : null}
-        {updatePhase.kind === "downloading" ? (
-          <span className="update-pill update-pill--busy">{updatesSentence(updatePhase)}</span>
-        ) : null}
-        {updatePhase.kind === "ready" ? (
-          <button className="update-pill" onClick={() => void restart()}>
-            {updatesSentence(updatePhase)}
-          </button>
-        ) : null}
-        {/* The three-dot menu — the browser-level actions live here and
-            nowhere else; server management stays in the server's own
-            views. The popup overlay anchors under the button. */}
-        <button
-          className="tool"
-          aria-label="Customize and control ZIM"
-          title="Customize and control ZIM"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            void shellPopup("app-menu", null, rect.left, rect.bottom + 4);
-          }}
-        >
-          <IconDots />
-        </button>
-      </div>
 
-      {/* Bookmarks bar (IDC_SHOW_BOOKMARK_BAR posture). */}
-      {snap.bookmarks_bar_visible ? (
-        <div className="bookmarks">
-          {snap.bookmarks.length === 0 ? (
-            <span className="bookmarks-empty">Ctrl+D bookmarks the tab you're on</span>
-          ) : (
-            snap.bookmarks.map((bookmark) => (
-              <button
-                key={bookmark.id}
-                className="bookmark"
-                title={bookmark.title}
-                onClick={() =>
-                  void shellCommand(CMD.NAVIGATE_ACTIVE, { destination: bookmark.destination })
-                }
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  void import("./frameIpc").then(({ isTauri }) => {
-                    if (isTauri()) {
-                      void import("@tauri-apps/api/core").then(({ invoke }) =>
-                        invoke("shell_bookmark_remove", { id: bookmark.id }),
-                      );
-                    }
-                  });
-                }}
-              >
-                {bookmark.title}
-              </button>
-            ))
-          )}
-        </div>
-      ) : null}
-
-      {/* The tab context menu — the DEMO stand-in only (in the demo the
-          group item grows the inline naming input; under the host this
-          whole surface is the popup overlay). */}
-      {menu ? (
-        <div className="context" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
-          <button onClick={() => { void shellCommand(CMD.TOGGLE_PINNED, { tab_id: menu.tab }); setMenu(null); }}>
-            Pin / unpin
+        {/* Toolbar row — nav arrows, the omnibox, the star. */}
+        <div className="toolbar">
+          <button
+            className="tool"
+            aria-label="Back"
+            disabled={!snap.tabs.find((t) => t.id === snap.active)?.can_back}
+            onClick={() => void shellCommand(CMD.NAV_BACK)}
+          >
+            <IconBack />
           </button>
-          <button onClick={() => { void shellCommand(CMD.TOGGLE_MUTE, { tab_id: menu.tab }); setMenu(null); }}>
-            Mute / unmute
+          <button
+            className="tool"
+            aria-label="Forward"
+            disabled={!snap.tabs.find((t) => t.id === snap.active)?.can_forward}
+            onClick={() => void shellCommand(CMD.NAV_FORWARD)}
+          >
+            <IconForward />
           </button>
-          <button onClick={() => { void shellCommand(CMD.DUPLICATE_TAB, { tab_id: menu.tab }); setMenu(null); }}>
-            Duplicate
+          <button
+            className="tool"
+            aria-label="Reload"
+            onClick={() => void shellCommand(CMD.RELOAD)}
+          >
+            <IconReload />
           </button>
-          {demoGroupFor === menu.tab ? (
+          <div className="omnibox-wrap">
+            <span className="omnibox-icon">
+              <Glyph url={snap.address} />
+            </span>
             <input
-              className="context-group-input"
-              autoFocus
-              placeholder="Group name"
-              maxLength={40}
+              ref={omniboxRef}
+              className="omnibox"
+              value={omniboxText ?? snap.address}
+              spellCheck={false}
+              placeholder="Search servers, or type an address"
+              onChange={(e) => {
+                setOmniboxText(e.target.value);
+                void classifyNow();
+              }}
+              onFocus={(e) => e.currentTarget.select()}
+              onBlur={() => {
+                setOmniboxText(null);
+                setJoinNote(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  const label = e.currentTarget.value.trim();
-                  if (label === "") return;
-                  void shellCommand(CMD.ADD_NEW_TAB_TO_GROUP, { tab_id: menu.tab, label });
-                  setDemoGroupFor(null);
-                  setMenu(null);
+                  void commitOmnibox();
+                  omniboxRef.current?.blur();
                 } else if (e.key === "Escape") {
-                  setDemoGroupFor(null);
-                  setMenu(null);
+                  setOmniboxText(null);
+                  omniboxRef.current?.blur();
                 }
               }}
             />
-          ) : (
-            <button onClick={() => setDemoGroupFor(menu.tab)}>
-              Add to new group
+            {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
+            {/* The bookmark star lives INSIDE the field's right end — the
+              placement the omnibox owns upstream; it never sits as a
+              stray button past the field. */}
+            <button
+              className="omnibox-star"
+              aria-label="Bookmark this tab"
+              title="Bookmark this tab (Ctrl+D)"
+              onClick={() => void shellCommand(CMD.BOOKMARK_THIS_TAB)}
+            >
+              <IconStar />
             </button>
-          )}
-          <button onClick={() => { void shellCommand(CMD.NEW_TAB); setMenu(null); }}>New tab</button>
-          <button onClick={() => { void shellCommand(CMD.TOGGLE_VERTICAL_STRIP); setMenu(null); }}>
-            {vertical ? "Use horizontal strip" : "Show tabs vertically"}
+          </div>
+          {/* The update pill lives IN the toolbar's flow — it used to
+            float fixed over the toolbar's right side and read as an
+            overlap of the chrome it covered. A flex item cannot overlap
+            anything: the omnibox gives way, the dots stay clear. */}
+          {updatePhase.kind === "available" ? (
+            <button className="update-pill" onClick={() => void installNow()}>
+              {updatesSentence(updatePhase)}
+            </button>
+          ) : null}
+          {updatePhase.kind === "downloading" ? (
+            <span className="update-pill update-pill--busy">
+              {updatesSentence(updatePhase)}
+            </span>
+          ) : null}
+          {updatePhase.kind === "ready" ? (
+            <button className="update-pill" onClick={() => void restart()}>
+              {updatesSentence(updatePhase)}
+            </button>
+          ) : null}
+          {/* The three-dot menu — the browser-level actions live here and
+            nowhere else; server management stays in the server's own
+            views. The popup overlay anchors under the button. */}
+          <button
+            className="tool"
+            aria-label="Customize and control ZIM"
+            title="Customize and control ZIM"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              void shellPopup("app-menu", null, rect.left, rect.bottom + 4);
+            }}
+          >
+            <IconDots />
           </button>
         </div>
-      ) : null}
 
+        {/* Bookmarks bar (IDC_SHOW_BOOKMARK_BAR posture). */}
+        {snap.bookmarks_bar_visible ? (
+          <div className="bookmarks">
+            {snap.bookmarks.length === 0 ? (
+              <span className="bookmarks-empty">
+                Ctrl+D bookmarks the tab you're on
+              </span>
+            ) : (
+              snap.bookmarks.map((bookmark) => (
+                <button
+                  key={bookmark.id}
+                  className="bookmark"
+                  title={bookmark.title}
+                  onClick={() =>
+                    void shellCommand(CMD.NAVIGATE_ACTIVE, {
+                      destination: bookmark.destination,
+                    })
+                  }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    void import("./frameIpc").then(({ isTauri }) => {
+                      if (isTauri()) {
+                        void import("@tauri-apps/api/core").then(({ invoke }) =>
+                          invoke("shell_bookmark_remove", { id: bookmark.id }),
+                        );
+                      }
+                    });
+                  }}
+                >
+                  {bookmark.title}
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
+
+        {/* The tab context menu — the DEMO stand-in only (in the demo the
+          group item grows the inline naming input; under the host this
+          whole surface is the popup overlay). */}
+        {menu ? (
+          <div
+            className="context"
+            style={{ left: menu.x, top: menu.y }}
+            onMouseLeave={() => setMenu(null)}
+          >
+            <button
+              onClick={() => {
+                void shellCommand(CMD.TOGGLE_PINNED, { tab_id: menu.tab });
+                setMenu(null);
+              }}
+            >
+              Pin / unpin
+            </button>
+            <button
+              onClick={() => {
+                void shellCommand(CMD.TOGGLE_MUTE, { tab_id: menu.tab });
+                setMenu(null);
+              }}
+            >
+              Mute / unmute
+            </button>
+            <button
+              onClick={() => {
+                void shellCommand(CMD.DUPLICATE_TAB, { tab_id: menu.tab });
+                setMenu(null);
+              }}
+            >
+              Duplicate
+            </button>
+            {demoGroupFor === menu.tab ? (
+              <input
+                className="context-group-input"
+                autoFocus
+                placeholder="Group name"
+                maxLength={40}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const label = e.currentTarget.value.trim();
+                    if (label === "") return;
+                    void shellCommand(CMD.ADD_NEW_TAB_TO_GROUP, {
+                      tab_id: menu.tab,
+                      label,
+                    });
+                    setDemoGroupFor(null);
+                    setMenu(null);
+                  } else if (e.key === "Escape") {
+                    setDemoGroupFor(null);
+                    setMenu(null);
+                  }
+                }}
+              />
+            ) : (
+              <button onClick={() => setDemoGroupFor(menu.tab)}>
+                Add to new group
+              </button>
+            )}
+            <button
+              onClick={() => {
+                void shellCommand(CMD.NEW_TAB);
+                setMenu(null);
+              }}
+            >
+              New tab
+            </button>
+            <button
+              onClick={() => {
+                void shellCommand(CMD.TOGGLE_VERTICAL_STRIP);
+                setMenu(null);
+              }}
+            >
+              {vertical ? "Use horizontal strip" : "Show tabs vertically"}
+            </button>
+          </div>
+        ) : null}
       </div>
     </>
   );

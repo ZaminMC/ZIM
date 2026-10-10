@@ -4,9 +4,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  GROUP_CARD_BORDER_MARGINS,
   GROUP_CARD_MAX_TABS,
   HOVER_CARD_ANCHOR_GAP,
-  HOVER_CARD_RAIL_REACH_MARGIN,
+  HOVER_CARD_BAND_BOTTOM_MARGIN,
+  HOVER_CARD_BAND_ROAM_MARGIN,
   HOVER_CARD_CORNER_RADIUS,
   HOVER_CARD_MAX_SHOW_DELAY_MS,
   HOVER_CARD_MAX_WIDTH_EXTRA_DELAY_MS,
@@ -20,6 +22,7 @@ import {
   hoverCardAnchor,
   hoverCardBand,
   hoverCardDomain,
+  hoverCardHeightFor,
   hoverCardShowDelayMs,
   largestTabSlotWidth,
 } from "./hoverCard";
@@ -48,11 +51,17 @@ describe("the hover card's geometry", () => {
     expect(anchor.x).toBe(300 + 20 - HOVER_CARD_WIDTH / 2); // centered
 
     // Off the left edge: the clamp holds 8.
-    const clampedLeft = hoverCardAnchor({ left: 0, width: 10, bottom: 41 }, 1024);
+    const clampedLeft = hoverCardAnchor(
+      { left: 0, width: 10, bottom: 41 },
+      1024,
+    );
     expect(clampedLeft.x).toBe(8);
 
     // Off the right edge: the card's right side holds 8.
-    const clampedRight = hoverCardAnchor({ left: 1010, width: 40, bottom: 41 }, 1024);
+    const clampedRight = hoverCardAnchor(
+      { left: 1010, width: 40, bottom: 41 },
+      1024,
+    );
     expect(clampedRight.x).toBe(1024 - HOVER_CARD_WIDTH - 8);
 
     // A window narrower than the card: the left margin wins (no
@@ -64,7 +73,9 @@ describe("the hover card's geometry", () => {
 
 describe("the show delay law (tab_hover_card_controller.cc GetShowDelay)", () => {
   it("is the floor at pinned width — a pinned tab gives its title up immediately", () => {
-    expect(hoverCardShowDelayMs(PINNED_WIDTH)).toBe(HOVER_CARD_MIN_SHOW_DELAY_MS);
+    expect(hoverCardShowDelayMs(PINNED_WIDTH)).toBe(
+      HOVER_CARD_MIN_SHOW_DELAY_MS,
+    );
     expect(hoverCardShowDelayMs(10)).toBe(HOVER_CARD_MIN_SHOW_DELAY_MS);
   });
 
@@ -80,7 +91,11 @@ describe("the show delay law (tab_hover_card_controller.cc GetShowDelay)", () =>
 
   it("interpolates monotonically between the pinned and standard widths", () => {
     let previous = HOVER_CARD_MIN_SHOW_DELAY_MS;
-    for (let width = PINNED_WIDTH + 1; width < STANDARD_SLOT_WIDTH; width += 8) {
+    for (
+      let width = PINNED_WIDTH + 1;
+      width < STANDARD_SLOT_WIDTH;
+      width += 8
+    ) {
       const delay = hoverCardShowDelayMs(width);
       expect(delay).toBeGreaterThan(previous);
       expect(delay).toBeLessThan(
@@ -140,7 +155,9 @@ describe("the group card's composition law", () => {
 describe("the domain law", () => {
   it("is the address without its scheme", () => {
     expect(hoverCardDomain("zim://server/survival")).toBe("server/survival");
-    expect(hoverCardDomain("zim://join/localhost:25565")).toBe("join/localhost:25565");
+    expect(hoverCardDomain("zim://join/localhost:25565")).toBe(
+      "join/localhost:25565",
+    );
     expect(hoverCardDomain("zim://settings/")).toBe("settings/");
   });
 
@@ -171,21 +188,53 @@ describe("the delay's consistency law", () => {
 });
 
 describe("the slide band's law", () => {
-  it("covers everything below the strip band on a horizontal strip", () => {
-    // The anchor's y is shared by every tab of the band — the carrier
-    // spans the width and everything under it.
-    const band = hoverCardBand(false, 47, 240, { w: 1024, h: 600 });
-    expect(band).toEqual({ x: 0, y: 47, w: 1024, h: 553 });
-  });
-
-  it("is the rail column plus the card's reach on the vertical rail", () => {
-    const band = hoverCardBand(true, 47, 240, { w: 1024, h: 600 });
-    expect(band).toEqual({
-      x: 0,
-      y: 0,
-      w: 240 + 256 + HOVER_CARD_RAIL_REACH_MARGIN,
+  it("is the card's corridor: the current anchor's rect plus the roam margin", () => {
+    // First show (no previous anchor): the band is the card's own rect
+    // widened by the roam margin, as tall as the card — NOT the whole
+    // content area (upstream's bubble is input-transparent; the carrier
+    // is not, so every covered pixel is a click the operator can lose).
+    const band = hoverCardBand("tab", { x: 100, y: 47 }, null, {
+      w: 1024,
       h: 600,
     });
-    expect(HOVER_CARD_RAIL_REACH_MARGIN).toBe(64);
+    expect(band.x).toBe(100 - HOVER_CARD_BAND_ROAM_MARGIN);
+    expect(band.y).toBe(47);
+    expect(band.w).toBe(HOVER_CARD_WIDTH + 2 * HOVER_CARD_BAND_ROAM_MARGIN);
+    expect(band.h).toBe(
+      hoverCardHeightFor("tab") + HOVER_CARD_BAND_BOTTOM_MARGIN,
+    );
+  });
+
+  it("unions the previous and current anchors — the slide's corridor", () => {
+    // A slide from x=600 back to x=100 spans both anchors plus margins.
+    const band = hoverCardBand(
+      "tab",
+      { x: 100, y: 47 },
+      { x: 600, y: 47 },
+      { w: 1024, h: 600 },
+    );
+    expect(band.x).toBe(100 - HOVER_CARD_BAND_ROAM_MARGIN);
+    expect(band.w).toBe(
+      600 + HOVER_CARD_WIDTH + HOVER_CARD_BAND_ROAM_MARGIN - band.x,
+    );
+  });
+
+  it("clamps into the viewport and never reaches past the window", () => {
+    const band = hoverCardBand("group", { x: 900, y: 500 }, null, {
+      w: 1024,
+      h: 600,
+    });
+    expect(band.x).toBeGreaterThanOrEqual(0);
+    expect(band.x + band.w).toBeLessThanOrEqual(1024);
+    expect(band.y + band.h).toBeLessThanOrEqual(600);
+  });
+
+  it("is tall enough for the group card's five members and footer", () => {
+    const tabHeight = hoverCardHeightFor("tab");
+    const groupHeight = hoverCardHeightFor("group");
+    expect(groupHeight).toBeGreaterThan(tabHeight);
+    expect(groupHeight).toBeGreaterThanOrEqual(
+      GROUP_CARD_BORDER_MARGINS.v * 2 + 18 + GROUP_CARD_MAX_TABS * 24,
+    );
   });
 });
