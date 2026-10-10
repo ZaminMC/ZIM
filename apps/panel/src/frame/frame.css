@@ -735,6 +735,31 @@ body {
   box-shadow: 0 0 0 3px var(--frame-accent-soft);
 }
 
+/* The wire's posture — the toolbar's connection dot, the chrome's own
+   answer to "is ZIM there": green while the daemon answers, amber while
+   it dials, red while it cannot be reached. The favicon dots speak the
+   servers' liveness; this one speaks the browser's own wire. The
+   palette is the favicon dot law's (faviconLaw.ts) — one color
+   vocabulary for every liveness mark in the shell. */
+.wire-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin: 0 4px;
+  background: var(--frame-line);
+  transition: background 140ms ease-out;
+}
+.wire-dot[data-state="ready"] {
+  background: #31a349; /* FAVICON_DOT_COLORS.green */
+}
+.wire-dot[data-state="connecting"] {
+  background: #f9ab00; /* FAVICON_DOT_COLORS.yellow */
+}
+.wire-dot[data-state="offline"] {
+  background: #d93025; /* FAVICON_DOT_COLORS.red */
+}
+
 /* The update notice is Chrome's own shape: a badge on the ⋮ button (the
    eye's "something needs you" catch) and the verb inside the menu —
    never a pill floating over the chrome (the 0.4.x toolbar pill read as

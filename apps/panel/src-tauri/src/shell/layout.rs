@@ -102,6 +102,34 @@ pub fn header_height(bookmarks_bar_visible: bool) -> f32 {
     strip + toolbar + bookmarks
 }
 
+// -- The seam law (device-pixel snapping) ------------------------------------
+//
+// The host splits the window between two webviews — the frame band on
+// top, the content under it. A logical constant lands between device
+// pixels at a fractional scale (111 CSS px at 125% is 138.75), and the
+// two webviews' bounds round independently: a row belongs to neither,
+// and the window's own surface shows there — black, a permanent
+// hairline between the chrome and the page. These helpers snap every
+// split to whole device pixels so BOTH sides share the row.
+
+/// A logical value snapped to whole device pixels (and back to logical).
+pub fn snap_to_device(logical: f64, scale: f64) -> f64 {
+    (logical * scale).round() / scale
+}
+
+/// The split at `boundary` inside a `window` of logical extent: returns
+/// `(top_extent, bottom_extent)` — the two logical spans either side of
+/// ONE device-snapped row. Their sum is the window's own snapped
+/// extent, so no third span can exist.
+pub fn snap_split(boundary: f64, window: f64, scale: f64) -> (f64, f64) {
+    let boundary_px = (boundary * scale).round();
+    let window_px = (window * scale).round();
+    (
+        boundary_px / scale,
+        ((window_px - boundary_px).max(0.0)) / scale,
+    )
+}
+
 /// One laid-out slot — what the frame layer renders. The model owns the
 /// geometry (single source of truth; the frame is a view of it).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -468,6 +496,50 @@ mod tests {
 
     fn plain(tabs: &[(u32, bool, bool)]) -> Vec<(u32, bool, bool, Option<u32>)> {
         tabs.iter().map(|(id, p, c)| (*id, *p, *c, None)).collect()
+    }
+
+    #[test]
+    fn the_seam_split_shares_one_device_row() {
+        // The founder's black line: 111 CSS px at 125% is 138.75 device
+        // px — the frame band and the content webview must land on the
+        // SAME row (139), never on rounding's opposite sides. Floats
+        // cannot compare exactly across the ÷scale — every device-row
+        // claim rides a 1e-9 tolerance.
+        let device = |logical: f64| logical * 1.25;
+        let (top, bottom) = snap_split(header_height(true), 800.0, 1.25);
+        assert!(
+            (device(top) - device(top).round()).abs() < 1e-9,
+            "band edge is a device row"
+        );
+        assert_eq!(device(top).round(), 139.0); // 111 → 138.75 snaps UP, shared
+        assert!(
+            (device(top + bottom) - (800.0 * 1.25).round()).abs() < 1e-9,
+            "the two spans cover the window's snapped extent exactly"
+        );
+        assert!(top > 0.0 && bottom > 0.0);
+        // 150% half-steps: 83 × 1.5 = 124.5 — one law, either side.
+        let (top, bottom) = snap_split(83.0, 600.0, 1.5);
+        assert!((top * 1.5 - (83.0 * 1.5).round()).abs() < 1e-9);
+        assert!((top + bottom - 600.0).abs() < 1e-9); // 600 × 1.5 / 1.5
+                                                      // Unity scale snaps to the constants themselves.
+        let (top, bottom) = snap_split(111.0, 800.0, 1.0);
+        assert_eq!(top, 111.0);
+        assert_eq!(bottom, 689.0);
+        // The rail's 240 logical px at 125% is 300 device px — exact.
+        let (rail, rest) = snap_split(RAIL_WIDTH as f64, 1280.0, 1.25);
+        assert!((rail * 1.25 - 300.0).abs() < 1e-9);
+        assert!((rail + rest - 1280.0).abs() < 1e-9); // 1280 × 1.25 / 1.25
+                                                      // A boundary past the window cannot produce a negative span.
+        let (_, bottom) = snap_split(900.0, 800.0, 1.0);
+        assert_eq!(bottom, 0.0);
+    }
+
+    #[test]
+    fn snap_to_device_is_identity_at_unity_and_integral_above() {
+        assert_eq!(snap_to_device(111.0, 1.0), 111.0);
+        let snapped = snap_to_device(111.0, 1.25);
+        assert!((snapped * 1.25 - (snapped * 1.25).round()).abs() < 1e-9);
+        assert!((snapped - 111.0).abs() < 0.5); // within half a device px
     }
 
     #[test]

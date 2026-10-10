@@ -211,6 +211,11 @@ export function FrameApp() {
   const updatePhase = useUpdates((s) => s.phase);
   const installNow = useUpdates((s) => s.installNow);
   const restart = useUpdates((s) => s.restart);
+  // The wire's posture — the frame dials the daemon itself (the favicon
+  // lane), so the chrome can show the one fact no page owns: whether ZIM
+  // is answering at all.
+  const wire = useFavicons((s) => s.wire);
+  const wireDaemon = useFavicons((s) => s.daemon);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const omniboxRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{
@@ -1977,6 +1982,29 @@ export function FrameApp() {
               <IconStar />
             </button>
           </div>
+          {/* The wire's posture — the dot that never leaves the chrome:
+            green while the daemon answers, amber while it dials, red
+            while it cannot be reached. The banner inside a page tells
+            that page's operator; this dot tells the browser's. */}
+          <span
+            className="wire-dot"
+            data-state={wire}
+            role="img"
+            aria-label={
+              wire === "ready"
+                ? `ZIM connected — ${wireDaemon?.name ?? "zamind"} ${wireDaemon?.version ?? ""}`.trimEnd()
+                : wire === "connecting"
+                  ? "Connecting to ZIM"
+                  : "ZIM is not answering"
+            }
+            title={
+              wire === "ready"
+                ? `Connected — ${wireDaemon?.name ?? "zamind"} ${wireDaemon?.version ?? ""}`.trimEnd()
+                : wire === "connecting"
+                  ? "Connecting to ZIM…"
+                  : "ZIM is not answering — reconnecting"
+            }
+          />
           {/* The three-dot menu — the browser-level actions live here and
             nowhere else; server management stays in the server's own
             views. The popup overlay anchors under the button; an update

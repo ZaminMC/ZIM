@@ -572,35 +572,36 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         (snap, header, create_tab)
     };
 
-    // The window's two-pane split (§54): horizontal = the frame band on
-    // top and the content under it; vertical = the rail column on the
-    // left and the content beside it. One law, stated once — every
-    // bounds write below reads it.
+    // The seam law (layout::snap_split): the band's bottom edge and the
+    // content's top edge are ONE device row — the arithmetic and its
+    // tests live with the layout's constants.
+    let scale = host_window.scale_factor().unwrap_or(1.0);
+    let win_w = layout::snap_to_device(size.width, scale);
+    let win_h = layout::snap_to_device(size.height, scale);
     let (content_pos, content_bounds, frame_bounds) = if snap.vertical {
-        let rail = layout::RAIL_WIDTH as f64;
+        let (rail, content_w) = layout::snap_split(layout::RAIL_WIDTH as f64, size.width, scale);
         (
             LogicalPosition::new(rail, 0.0),
             Rect {
                 position: LogicalPosition::new(rail, 0.0).into(),
-                size: LogicalSize::new((size.width - rail).max(0.0), size.height).into(),
+                size: LogicalSize::new(content_w, win_h).into(),
             },
             Rect {
                 position: LogicalPosition::new(0.0, 0.0).into(),
-                size: LogicalSize::new(rail, size.height).into(),
+                size: LogicalSize::new(rail, win_h).into(),
             },
         )
     } else {
+        let (header_log, content_h) = layout::snap_split(header as f64, size.height, scale);
         (
-            LogicalPosition::new(0.0, header as f64),
+            LogicalPosition::new(0.0, header_log),
             Rect {
-                position: LogicalPosition::new(0.0, header as f64).into(),
-                // `size` is already LogicalSize<f64> — the unit was named when
-                // the annotation landed; no cast to restate it.
-                size: LogicalSize::new(size.width, (size.height - header as f64).max(0.0)).into(),
+                position: LogicalPosition::new(0.0, header_log).into(),
+                size: LogicalSize::new(win_w, content_h).into(),
             },
             Rect {
                 position: LogicalPosition::new(0.0, 0.0).into(),
-                size: LogicalSize::new(size.width, header as f64).into(),
+                size: LogicalSize::new(win_w, header_log).into(),
             },
         )
     };
@@ -640,11 +641,15 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     // The active tab's webview is created lazily (WebContents born on
     // first focus — a restored session's inactive tabs stay cold).
+    // The webview's own background is WHITE (Chromium's blank paint —
+    // the first composited frame of a new tab): a booting page flashes
+    // paper, never the window's raw surface.
     if let Some((id, destination, reload)) = create_tab {
         let label = tab_label(window_label, id);
         host_window
             .add_child(
-                tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into())),
+                tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into()))
+                    .background_color(tauri::utils::config::Color(255, 255, 255, 255)),
                 content_pos,
                 content_bounds.size,
             )
@@ -2148,6 +2153,9 @@ fn spawn_tearoff_block(
     let window = tauri::window::WindowBuilder::new(app, &label)
         .decorations(false)
         .inner_size(1100.0, 720.0)
+        // The tear-off's raw surface is the strip gray, not black —
+        // booting webviews flash paper and chrome, never the void.
+        .background_color(tauri::utils::config::Color(222, 225, 230, 255))
         .build()
         .map_err(|e| format!("tear-off window failed: {e}"))?;
     let _ = window.set_position(LogicalPosition::new(
@@ -2159,7 +2167,8 @@ fn spawn_tearoff_block(
             tauri::webview::WebviewBuilder::new(
                 frame_label(&label),
                 WebviewUrl::App("frame.html".into()),
-            ),
+            )
+            .background_color(tauri::utils::config::Color(222, 225, 230, 255)),
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(1100.0, 83.0),
         )

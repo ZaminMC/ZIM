@@ -621,4 +621,15 @@ describe("<FrameApp /> the update notice and the bar's drop", () => {
     const command = bookmarkInvoked.find((args) => args?.url !== undefined);
     expect(command?.url).toBe("zim://settings/");
   });
+
+  it("the chrome shows the wire's posture — the dot that never leaves", async () => {
+    const { container } = await bootStrip();
+    // The demo fixture's lane answers (seedFaviconsForDemo rides ready):
+    // the toolbar carries the connection dot, green, and the ⋮ button
+    // keeps its place beside it.
+    const dot = container.querySelector<HTMLElement>(".wire-dot");
+    expect(dot).not.toBeNull();
+    expect(dot!.getAttribute("data-state")).toBe("ready");
+    expect(dot!.getAttribute("aria-label")).toContain("ZIM connected");
+  });
 });

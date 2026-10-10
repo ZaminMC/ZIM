@@ -17,7 +17,7 @@
 // stays push-only after boot.
 
 import { create } from "zustand";
-import { ProtocolClient } from "../protocol/client";
+import { ProtocolClient, type ClientStatus } from "../protocol/client";
 import { TauriTransport } from "../protocol/transport";
 import type { ServerState } from "../protocol/types";
 import {
@@ -46,9 +46,21 @@ interface FaviconState {
   servers: Record<string, FaviconEntry>;
   /** The lane followed the ACTIVE connection profile at dial time. */
   profileId: string;
+  /** The lane's own wire posture — the toolbar's connection dot reads
+   *  it (the one persistent surface that can say "ZIM is answering").
+   *  The content webviews carry the per-page banner; the frame is the
+   *  chrome, and the chrome shows the wire whatever page is up. */
+  wire: ClientStatus;
+  /** The ready hello's identity — the dot's tooltip names the daemon. */
+  daemon: { name: string; version: string } | null;
 }
 
-const initial: FaviconState = { servers: {}, profileId: "local" };
+const initial: FaviconState = {
+  servers: {},
+  profileId: "local",
+  wire: "offline",
+  daemon: null,
+};
 
 export const useFavicons = create<FaviconState>(() => initial);
 
@@ -276,6 +288,19 @@ export function startFaviconLane(): void {
   });
   client = laneClient;
 
+  // The wire's posture mirrors into the state the toolbar reads — the
+  // same listener shape the content's connection store rides.
+  laneClient.onStatus((status) => {
+    const info = laneClient.daemonInfo;
+    useFavicons.setState({
+      wire: status,
+      daemon:
+        status === "ready" && info
+          ? { name: info.daemon.name, version: info.daemon.version }
+          : null,
+    });
+  });
+
   void laneClient.connect().then(async () => {
     try {
       const list = await laneClient.request<{
@@ -373,5 +398,5 @@ export function seedFaviconsForDemo(
       ...(server.port != null ? { port: server.port } : {}),
     };
   }
-  useFavicons.setState({ servers: next });
+  useFavicons.setState({ servers: next, wire: "ready", daemon: null });
 }
