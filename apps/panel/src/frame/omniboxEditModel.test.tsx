@@ -9,6 +9,10 @@
 //             paste edits the field (the operator owns the commit),
 //             paste-and-go commits the clipboard text directly.
 //   The note — the inline classification announced BEFORE the commit.
+//   The popup — OmniboxPopupViewViews' rows: the arrows walk them (the
+//             field shows the selected match), Enter commits the
+//             selected row's text through the commit door, Escape
+//             reverts (popup first), a click commits.
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
@@ -20,6 +24,7 @@ import type * as FrameIpc from "./frameIpc";
 const commits: Array<{ text: string; newTab: boolean }> = [];
 let clip = "";
 let classifyFor: (text: string) => unknown = () => null;
+let suggestRows: FrameIpc.Suggestion[] = [];
 
 vi.mock("./frameIpc", async (importOriginal) => {
   const actual = await importOriginal<typeof FrameIpc>();
@@ -32,6 +37,7 @@ vi.mock("./frameIpc", async (importOriginal) => {
     omniboxClassify: (text: string) =>
       Promise.resolve(classifyFor(text) ?? null),
     clipboardText: () => Promise.resolve(clip),
+    omniboxSuggest: () => Promise.resolve(suggestRows),
   };
 });
 
@@ -41,6 +47,7 @@ describe("<FrameApp /> the omnibox edit model", () => {
     commits.length = 0;
     clip = "";
     classifyFor = () => null;
+    suggestRows = [];
   });
   afterEach(() => {
     cleanup();
@@ -204,6 +211,209 @@ describe("<FrameApp /> the omnibox edit model", () => {
       expect(container.querySelector(".omnibox-note")?.textContent).toBe(
         "no ZIM page",
       );
+    });
+  });
+});
+
+// -- The popup (OmniboxPopupViewViews) ---------------------------------------
+// The host proposes; the view walks. The rows carry their own committable
+// text — every landing rides the same commit door a typed Enter speaks.
+
+describe("<FrameApp /> the omnibox popup", () => {
+  beforeEach(() => {
+    history.replaceState(null, "", "/frame.html?demo");
+    commits.length = 0;
+    classifyFor = () => null;
+    suggestRows = [];
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  async function bootPopup(rows: FrameIpc.Suggestion[]) {
+    suggestRows = rows;
+    const view = render(<FrameApp />);
+    await waitFor(() => {
+      expect(view.container.querySelector(".omnibox")).toBeTruthy();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const input = view.container.querySelector<HTMLInputElement>(".omnibox")!;
+    return { view, input, resting: input.value };
+  }
+
+  const row = (
+    text: string,
+    title: string,
+    kind: FrameIpc.Suggestion["kind"],
+    subtitle?: string,
+  ): FrameIpc.Suggestion => ({ text, title, kind, ...(subtitle ? { subtitle } : {}) });
+
+  it("typing opens the popup with the host's rows", async () => {
+    const { input } = await bootPopup([
+      row("zim://server/survival", "Survival", "server", "localhost:25565 · running"),
+      row("surv", "surv", "search", "Search discovery"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "surv" } });
+    const popup = await waitFor(() => {
+      const el = document.querySelector(".omnibox-popup");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    const items = popup.querySelectorAll<HTMLButtonElement>(".suggest");
+    expect(items).toHaveLength(2);
+    const first = items[0];
+    const second = items[1];
+    expect(first?.querySelector(".suggest-title")?.textContent).toBe("Survival");
+    expect(first?.querySelector(".suggest-sub")?.textContent).toBe(
+      "localhost:25565 · running",
+    );
+    expect(second?.querySelector(".suggest-title")?.textContent).toBe("surv");
+    // Nothing is selected before the first arrow.
+    expect(popup.querySelectorAll(".suggest.selected")).toHaveLength(0);
+    expect(commits).toEqual([]);
+  });
+
+  it("an empty answer opens no popup", async () => {
+    const { input } = await bootPopup([]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "nothing matches" } });
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    expect(document.querySelector(".omnibox-popup")).toBeNull();
+  });
+
+  it("Down walks the rows and the field shows the selected match", async () => {
+    const { input } = await bootPopup([
+      row("zim://server/survival", "Survival", "server"),
+      row("zim://console/survival", "Console survival", "console"),
+      row("surv", "surv", "search", "Search discovery"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "surv" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeTruthy();
+    });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(input.value).toBe("zim://server/survival");
+    });
+    expect(
+      document.querySelector(".omnibox-popup .suggest.selected")?.textContent,
+    ).toContain("Survival");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(input.value).toBe("zim://console/survival");
+    });
+    // Down from the LAST row stays there (no wrap).
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(input.value).toBe("surv");
+    });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.value).toBe("surv");
+  });
+
+  it("Up past the first row returns the typed text", async () => {
+    const { input } = await bootPopup([
+      row("zim://server/survival", "Survival", "server"),
+      row("surv", "surv", "search", "Search discovery"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "surv" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeTruthy();
+    });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(input.value).toBe("zim://server/survival");
+    });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    await waitFor(() => {
+      expect(input.value).toBe("surv");
+    });
+    expect(
+      document.querySelector(".omnibox-popup .suggest.selected"),
+    ).toBeNull();
+    // Up from the typed text: nothing.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("surv");
+  });
+
+  it("Enter commits the selected row's text (Alt+Enter opens a new tab)", async () => {
+    const { input } = await bootPopup([
+      row("zim://server/survival", "Survival", "server"),
+      row("surv", "surv", "search", "Search discovery"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "surv" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeTruthy();
+    });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" }); // the search row
+    await waitFor(() => {
+      expect(input.value).toBe("surv");
+    });
+    fireEvent.keyDown(input, { key: "Enter", altKey: true });
+    await waitFor(() => {
+      expect(commits).toEqual([{ text: "surv", newTab: true }]);
+    });
+    // The popup is gone after the commit.
+    expect(document.querySelector(".omnibox-popup")).toBeNull();
+  });
+
+  it("Escape closes the popup and reverts to the permanent text", async () => {
+    const { input, resting } = await bootPopup([
+      row("zim://server/survival", "Survival", "server"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "surv" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeTruthy();
+    });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(document.querySelector(".omnibox-popup")).toBeNull();
+    // RevertAll: the display is the permanent text, the focus STAYS.
+    expect(input.value).toBe(resting);
+    expect(document.activeElement).toBe(input);
+    expect(commits).toEqual([]);
+  });
+
+  it("a row click commits its own text", async () => {
+    const { input } = await bootPopup([
+      row("zim://console/survival", "Console survival", "console", "localhost:25565 · running"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "console surv" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeTruthy();
+    });
+    fireEvent.mouseDown(
+      document.querySelector<HTMLButtonElement>(".omnibox-popup .suggest")!,
+    );
+    fireEvent.click(
+      document.querySelector<HTMLButtonElement>(".omnibox-popup .suggest")!,
+    );
+    await waitFor(() => {
+      expect(commits).toEqual([
+        { text: "zim://console/survival", newTab: false },
+      ]);
+    });
+    expect(document.querySelector(".omnibox-popup")).toBeNull();
+  });
+
+  it("an empty field closes the popup", async () => {
+    const { input } = await bootPopup([
+      row("zim://server/survival", "Survival", "server"),
+    ]);
+    input.focus();
+    fireEvent.change(input, { target: { value: "surv" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeTruthy();
+    });
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() => {
+      expect(document.querySelector(".omnibox-popup")).toBeNull();
     });
   });
 });

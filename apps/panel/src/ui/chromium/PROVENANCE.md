@@ -79,6 +79,8 @@ for that law; `frame.css` and `FrameApp.tsx` only consume it.
 | --- | --- | --- |
 | `components/omnibox/browser/omnibox_edit_model.{h,cc}` | `shell/omnibox.rs` (`land`, the disposition law), `FrameApp.tsx` (Escape's two stages), `frameIpc.ts` (`omniboxCommit(text, newTab)`) | OnEscapeKeyPressed: the first Esc with edited text restores the pre-edit text (display reverts, focus STAYS, all selected — blur is NOT the law), a bare Esc leaves the field; OpenURL's dispositions — plain Enter kCurrentTab (the tab the hand is in), Alt-Enter kNEW_FOREGROUND_TAB (a fresh foreground tab that takes the activation and inherits the opener) |
 | `chrome/browser/ui/views/omnibox/omnibox_view_views.{h,cc}` | `FrameApp.tsx` (`onContextMenu`, the paste menu), `frameIpc.ts` (`clipboardText`) | ShowContextMenu's paste verbs — Paste (the text enters the field as an edit; the operator owns the commit) and Paste and go (the clipboard text commits straight through the classifier, the field never edits); select-all on focus |
+| `chrome/browser/ui/views/omnibox/omnibox_popup_view_views.{h,cc}` + `omnibox_popup_contents_view.cc` | `FrameApp.tsx` (the popup machine), `frame.css` (`.omnibox-popup`, `.suggest`) | the rows under the field at the field's own width: icon, match title over description; the selection walks with the arrows and the FIELD SHOWS the selected match (Up past the first row returns the typed text; Down from the last row stays — no wrap); a row's mousedown never blurs the field, a click (or Enter) commits it |
+| `components/omnibox/browser/autocomplete_result.{h,cc}` | `shell/omnibox.rs` (`suggest`, `MAX_SUGGESTIONS = 8`) | the match list: the exact join first, the fleet's own names (starts_with outranks contains, then alphabetical — deterministic, no counters), the internal pages by prefix, the discovery search as the honest floor; the typed `console <name>` dialect proposes consoles above the dashboards; kMaxMatches posture truncates |
 | `components/omnibox/browser/autocomplete_input.h` | `shell/omnibox.rs` (`classify`) | the classification that runs before any landing (ported earlier; the landing consumes it) |
 | tab delivery: `chrome/browser/ui/tabs/tab_strip_model.cc`'s query-carrying navigation | `shell/tabs.rs` (`Tab::pending_query`), `shell/host.rs` (`shell_tab_hello`'s `query` field) | Alt-Enter with a search dialect: the query waits ON THE TAB (in-memory only), hello delivers it at boot — a webview that does not exist when the query lands still receives it; a reload re-delivers (results survive a reload), a restored session never resurrects one |
 
@@ -89,11 +91,19 @@ for that law; `frame.css` and `FrameApp.tsx` only consume it.
   providers — the single "Paste and go" commits through the same
   classifier a typed Enter uses, and the announcement note names what it
   was (join address / search / ZIM page) as it lands.
-- **No suggestion popup yet**: upstream's first Esc also closes the
-  autocomplete popup; the shell's classifier rides a note
-  (`.omnibox-note`), so Esc's restore path handles the whole contract.
-  The popup lane (providers, inline autocomplete) stays the documented
-  next lane.
+- **The popup's providers are honest, not scraped**: upstream's
+  autocomplete controller runs history/bookmark/search providers with
+  counters and latencies. ZIM's matches come from the classifier and the
+  frame's own fleet projection (the favicon lane's names — the one
+  daemon dial the frame already holds); no history provider exists yet,
+  and the search row is the discovery search, not a web engine.
+- **No inline autocomplete**: upstream fills the field's tail with the
+  top match's completion (selected as you type). The arrows here swap
+  the whole field text to the selected match's fill — the full-text law
+  — and the typed text waits in the view's own mirror until Up returns.
+- **Escape with a popup open reverts to the PERMANENT text** (upstream's
+  RevertAll — the typed text is spent), not to the typed text; the
+  second-stage revert law is unchanged.
 - **The announcement instead of destination-display**: the inline
   classification is named BEFORE the commit (`join address —
   host:port`, `search`, `ZIM page · settings`, `no ZIM page`) in the

@@ -28,6 +28,8 @@ import {
   isTauri,
   omniboxClassify,
   omniboxCommit,
+  omniboxSuggest,
+  type Suggestion,
   onSnapshot,
   onFocusAddress,
   onUpdateInstall,
@@ -75,7 +77,7 @@ import {
   type HoverCardPayload,
 } from "../ui/chromium/hoverCard";
 import { HoverCard } from "../ui/chromium/hoverCardView";
-import { seedFaviconsForDemo, startFaviconLane, useFavicons } from "./favicon";
+import { seedFaviconsForDemo, startFaviconLane, useFavicons, fleetBrief } from "./favicon";
 import { FAVICON_DOT_COLORS, SOFTWARE_GLYPHS, faviconDot } from "./faviconLaw";
 import { softwareMark } from "./softwareMarks";
 import { useFaviconDots } from "../state/faviconPrefs";
@@ -104,6 +106,7 @@ import {
   IconChevLeft,
   IconChevRight,
   IconDots,
+  IconSearch,
 } from "../ui/icons";
 import "./frame.css";
 
@@ -234,6 +237,15 @@ export function FrameApp() {
   // The classifier's latest-wins guard: keystrokes outrun their answers,
   // and a stale classification must never repaint the note.
   const classifySeq = useRef(0);
+  // The omnibox popup (OmniboxPopupViewViews): the rows the host
+  // proposed for the typed text, the active row's index (-1 = the typed
+  // text itself), and the typed text the arrows borrow the display
+  // from. The popup PROPOSES — every row commits through the same door
+  // a typed Enter speaks.
+  const [suggests, setSuggests] = useState<Suggestion[] | null>(null);
+  const [suggestActive, setSuggestActive] = useState(-1);
+  const suggestTimer = useRef<number | null>(null);
+  const typedRef = useRef("");
   // The boot must never fail silently: a white window teaches nothing.
   // Three spaced retries, then an honest error panel with a manual retry.
   const [bootError, setBootError] = useState<string | null>(null);
@@ -877,6 +889,7 @@ export function FrameApp() {
   useEffect(() => {
     setOmniboxText(null);
     setJoinNote(null);
+    closeSuggests();
   }, [snap?.address, snap?.active]);
 
   // The DOM menu (demo stand-in) closes on Escape or any click outside
@@ -1193,7 +1206,34 @@ export function FrameApp() {
     await omniboxCommit(omniboxText, newTab);
     setOmniboxText(null);
     setJoinNote(null);
+    closeSuggests();
+    typedRef.current = "";
   };
+
+  /** The popup's debounced ask (upstream's autocomplete controller
+   *  paces its providers): 80ms after the last keystroke, the typed
+   *  text against the fleet projection. An empty field closes. */
+  const fetchSuggests = (text: string) => {
+    if (suggestTimer.current != null) window.clearTimeout(suggestTimer.current);
+    const trimmed = text.trim();
+    if (trimmed === "") {
+      closeSuggests();
+      return;
+    }
+    suggestTimer.current = window.setTimeout(() => {
+      void omniboxSuggest(text, fleetBrief(useFavicons.getState())).then(
+        (rows) => {
+          setSuggests(rows.length > 0 ? rows : null);
+          setSuggestActive(-1);
+        },
+      );
+    }, 80);
+  };
+
+  function closeSuggests() {
+    setSuggests(null);
+    setSuggestActive(-1);
+  }
 
   const classifyNow = async (text: string) => {
     const ticket = ++classifySeq.current;
@@ -1748,12 +1788,15 @@ export function FrameApp() {
               placeholder="Search servers, or type an address"
               onChange={(e) => {
                 setOmniboxText(e.target.value);
+                typedRef.current = e.target.value;
                 void classifyNow(e.target.value);
+                fetchSuggests(e.target.value);
               }}
               onFocus={(e) => e.currentTarget.select()}
               onBlur={() => {
                 setOmniboxText(null);
                 setJoinNote(null);
+                closeSuggests();
               }}
               onContextMenu={(e) => {
                 // OmniboxViewViews::ShowContextMenu — the field owns its
@@ -1766,20 +1809,54 @@ export function FrameApp() {
                 );
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "ArrowDown" && suggests) {
+                  // The selection walks the rows and the field SHOWS the
+                  // selected match (upstream's arrow law); the note
+                  // follows the match. Down from the last row stays.
+                  e.preventDefault();
+                  const next = Math.min(suggestActive + 1, suggests.length - 1);
+                  const row = suggests[next];
+                  if (!row) return;
+                  setSuggestActive(next);
+                  setOmniboxText(row.text);
+                  void classifyNow(row.text);
+                } else if (e.key === "ArrowUp" && suggests) {
+                  // Up past the first row returns the typed text (-1);
+                  // from the typed text the arrow does nothing.
+                  e.preventDefault();
+                  const prev = suggestActive - 1;
+                  if (prev < -1) return;
+                  const row = prev === -1 ? null : suggests[prev];
+                  if (prev !== -1 && !row) return;
+                  setSuggestActive(prev);
+                  const text = row ? row.text : typedRef.current;
+                  setOmniboxText(text);
+                  void classifyNow(text);
+                } else if (e.key === "Enter") {
                   // OpenURL's disposition law: the plain Enter commits
                   // into the tab the hand is in; Alt-Enter opens a NEW
-                  // FOREGROUND tab for the same request.
+                  // FOREGROUND tab for the same request. The selected
+                  // popup row rides (omniboxText holds its text).
                   void commitOmnibox(e.altKey);
                   omniboxRef.current?.blur();
                 } else if (e.key === "Escape") {
-                  // OnEscapeKeyPressed's two-stage law: the FIRST Esc
-                  // with edited text restores the pre-edit text — the
-                  // display reverts, focus STAYS, the permanent text
-                  // selects all (blur is NOT the law). A second Esc,
-                  // nothing left to revert, leaves the field.
+                  // OnEscapeKeyPressed's law, popup first: an open popup
+                  // closes and the field REVERTS to the permanent text
+                  // (upstream's RevertAll — focus kept, all selected).
+                  // Then the two stages: edited text restores; a bare
+                  // Esc leaves the field.
                   e.stopPropagation();
-                  if (omniboxText != null) {
+                  if (suggests) {
+                    closeSuggests();
+                    typedRef.current = "";
+                    setOmniboxText(null);
+                    setJoinNote(null);
+                    const field = omniboxRef.current;
+                    if (field) {
+                      field.focus();
+                      field.select();
+                    }
+                  } else if (omniboxText != null) {
                     setOmniboxText(null);
                     setJoinNote(null);
                     const field = omniboxRef.current;
@@ -1793,6 +1870,59 @@ export function FrameApp() {
                 }
               }}
             />
+            {suggests ? (
+              // The popup under the field (OmniboxPopupViewViews' shape):
+              // icon, match title, the description under it. A row's
+              // mousedown never blurs the field (the click still lands);
+              // Enter commits the selected row's text through the same
+              // commit door a typed Enter speaks.
+              <div className="omnibox-popup" role="listbox" aria-label="Address suggestions">
+                {suggests.map((row, index) => {
+                  const icon =
+                    row.kind === "server"
+                      ? IconServer
+                      : row.kind === "console"
+                        ? IconTerminal
+                        : row.kind === "search"
+                          ? IconSearch
+                          : destinationGlyph(row.text);
+                  const Icon = icon;
+                  return (
+                    <button
+                      key={`${row.kind}-${row.text}-${index}`}
+                      role="option"
+                      aria-selected={index === suggestActive}
+                      className={index === suggestActive ? "suggest selected" : "suggest"}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseMove={() => {
+                        if (suggestActive !== index) {
+                          setSuggestActive(index);
+                          setOmniboxText(row.text);
+                        }
+                      }}
+                      onClick={() => {
+                        closeSuggests();
+                        typedRef.current = "";
+                        void omniboxCommit(row.text, false);
+                        setOmniboxText(null);
+                        setJoinNote(null);
+                        omniboxRef.current?.blur();
+                      }}
+                    >
+                      <span className="suggest-icon">
+                        <Icon width={15} height={15} />
+                      </span>
+                      <span className="suggest-texts">
+                        <span className="suggest-title">{row.title}</span>
+                        {row.subtitle ? (
+                          <span className="suggest-sub">{row.subtitle}</span>
+                        ) : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
             {pasteMenu ? (
               <div

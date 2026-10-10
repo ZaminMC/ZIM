@@ -80,7 +80,14 @@ never fake what the host provides.** Concretely, three lanes:
    clipboard text straight through the classifier), and the inline
    classification announced before the commit (the field's note names
    join address / search / ZIM page / no ZIM page). The suggestion
-   popup (providers, inline autocomplete) stays the next lane.
+   popup landed the same day (`suggest()` + the popup machine): the
+   exact join, the fleet's own names (from the frame's favicon-lane
+   projection — no new daemon dial), the pages by prefix, the typed
+   `console <name>` dialect, and the discovery search as the honest
+   floor; the arrows walk the rows with the field showing the selected
+   match, Enter/Alt-Enter commit through the same door, Escape reverts
+   (popup first). Remaining: inline autocomplete and the history
+   provider.
 
 3. **The tab machinery follows the model/render split Chromium uses.**
    Drag (ADR-0018), groups (§49), pinned tabs (§52), tab tear-off and
@@ -102,7 +109,8 @@ the browser's *discipline*, with the panel's own nouns.
 |---|---|
 | IDC command table + chords + field rules | **Reused as behavior** (`browserKeys.ts` + conformance tests) |
 | Omnibox input classification order | **Reused** (§58 dialects parse before any resolution) |
-| Omnibox edit model (select-all, Escape restore, Alt-Enter, paste-and-go) | **Adapted** (2026-10-10: Escape's two stages, OpenURL's dispositions through `land()`, the paste verbs, the pre-commit announcement; the suggestion popup is the remaining lane) |
+| Omnibox edit model (select-all, Escape restore, Alt-Enter, paste-and-go) | **Adapted** (2026-10-10: Escape's two stages, OpenURL's dispositions through `land()`, the paste verbs, the pre-commit announcement) |
+| Omnibox popup (matches under the field, arrow selection) | **Adapted** (2026-10-10: `suggest()` from the classifier + the fleet projection, kMaxMatches 8, the arrow/click/commit machine; inline autocomplete and the history provider remain) |
 | TabStrip model/render split | **Adapted** (tabs store renders the strip; drag/group/pin/restore ride the model) |
 | TabDragController edge cases | **Adapting** (ADR-0018 covers reorder + insertion edge; thresholds/tear-in next) |
 | Tab restore service | **Adapted** (§90 close memory + reopen in the tabs store) |

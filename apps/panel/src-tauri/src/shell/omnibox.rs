@@ -229,6 +229,240 @@ pub fn land(strip: &mut Strip, request: AddressRequest, new_tab: bool) -> Option
     }
 }
 
+// --- the popup's matches (OmniboxPopupViewViews over our dialects) ----------
+//
+// The edit model classifies and lands; the POPUP proposes. Upstream's
+// AutocompleteResult orders matches by relevance; ours orders by how
+// directly the text names the thing — the exact join first, the fleet's
+// own names next, the internal pages, the discovery search last. Every
+// row's `text` re-enters the SAME commit door a typed Enter uses (one
+// classifier, one landing law); the popup only proposes, the host still
+// decides.
+
+/// The frame's fleet projection, passed per call (the frame's favicon
+/// lane holds the registry's names; the host keeps no server list).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FleetServer {
+    pub server_id: String,
+    pub display_name: String,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuggestionKind {
+    Join,
+    Server,
+    Console,
+    Page,
+    Search,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Suggestion {
+    /// The committable text — what a typed Enter would have carried.
+    pub text: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    pub kind: SuggestionKind,
+}
+
+/// kMaxMatches posture: the popup never scrolls in a 400 DIP window.
+pub const MAX_SUGGESTIONS: usize = 8;
+
+/// The popup's rows for the typed text against the frame's fleet
+/// projection. Deterministic: same text, same list, same rows.
+pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let needle = trimmed.to_lowercase();
+    let mut rows: Vec<Suggestion> = Vec::new();
+
+    match classify(trimmed) {
+        AddressRequest::Internal(destination) => match &destination {
+            // A typed server or console reference names one thing.
+            Destination::Server { .. } | Destination::Console { .. } => {
+                rows.push(Suggestion {
+                    text: destination.url(),
+                    title: destination.label(),
+                    subtitle: None,
+                    kind: match destination {
+                        Destination::Console { .. } => SuggestionKind::Console,
+                        _ => SuggestionKind::Server,
+                    },
+                });
+            }
+            // zim://typed — the page word may be a prefix ("zim://set").
+            Destination::Missing { url } => {
+                let word = url.strip_prefix("zim://").unwrap_or(url).to_lowercase();
+                for page in INTERNAL_PAGES {
+                    if page.starts_with(&word) {
+                        let page_destination = Destination::parse(&format!("zim://{page}/"));
+                        rows.push(Suggestion {
+                            text: page_destination.url(),
+                            title: page_destination.label(),
+                            subtitle: Some(page_destination.url()),
+                            kind: SuggestionKind::Page,
+                        });
+                    }
+                }
+                if rows.is_empty() {
+                    // §58's honesty, proposed: the row that will land.
+                    rows.push(Suggestion {
+                        text: url.clone(),
+                        title: destination.label(),
+                        subtitle: Some("No ZIM page — nothing lives here".into()),
+                        kind: SuggestionKind::Page,
+                    });
+                }
+            }
+            other => {
+                rows.push(Suggestion {
+                    text: other.url(),
+                    title: other.label(),
+                    subtitle: Some(other.url()),
+                    kind: SuggestionKind::Page,
+                });
+            }
+        },
+        AddressRequest::Join { host, port } => {
+            // Row one: the address itself — "Join host:port".
+            let destination = Destination::Join {
+                host: host.clone(),
+                port,
+            };
+            rows.push(Suggestion {
+                text: destination.url(),
+                title: destination.label(),
+                subtitle: Some("Minecraft server address".into()),
+                kind: SuggestionKind::Join,
+            });
+            // The fleet answers too: the server that owns the typed
+            // port, or one whose name/id matches the host words.
+            let mut owned: Vec<&FleetServer> = servers
+                .iter()
+                .filter(|s| {
+                    s.port == Some(port)
+                        || s.display_name.to_lowercase().contains(&needle)
+                        || s.server_id.to_lowercase().contains(&needle)
+                })
+                .collect();
+            owned.sort_by(|a, b| {
+                let a_owned = a.port == Some(port);
+                let b_owned = b.port == Some(port);
+                b_owned
+                    .cmp(&a_owned)
+                    .then_with(|| a.display_name.cmp(&b.display_name))
+            });
+            for server in owned {
+                rows.push(server_row(server));
+            }
+        }
+        AddressRequest::Query(_) => {
+            // The typed "console <name>" dialect: the console row rides
+            // above the fleet's dashboards (the founder's reach — the
+            // console is one word away, not one navigation away).
+            let console_needle = trimmed
+                .strip_prefix("console ")
+                .map(str::trim)
+                .filter(|rest| !rest.is_empty())
+                .map(str::to_lowercase);
+            let matches_for = |needle: &str| -> Vec<&FleetServer> {
+                let mut hit: Vec<&FleetServer> = servers
+                    .iter()
+                    .filter(|s| {
+                        s.display_name.to_lowercase().contains(needle)
+                            || s.server_id.to_lowercase().contains(needle)
+                    })
+                    .collect();
+                hit.sort_by(|a, b| {
+                    let a_rank = rank_match(needle, &a.display_name.to_lowercase());
+                    let b_rank = rank_match(needle, &b.display_name.to_lowercase());
+                    a_rank
+                        .cmp(&b_rank)
+                        .then_with(|| a.display_name.cmp(&b.display_name))
+                });
+                hit
+            };
+            if let Some(rest) = &console_needle {
+                for server in matches_for(rest).into_iter().take(3) {
+                    rows.push(console_row(server));
+                }
+            }
+            let console_proposed: std::collections::HashSet<String> = rows
+                .iter()
+                .filter(|row| row.kind == SuggestionKind::Console)
+                .map(|row| {
+                    row.text
+                        .strip_prefix("zim://console/")
+                        .unwrap_or(&row.text)
+                        .to_owned()
+                })
+                .collect();
+            for server in matches_for(&needle) {
+                if console_proposed.contains(server.server_id.as_str()) {
+                    continue; // the console row already proposed this server
+                }
+                rows.push(server_row(server));
+            }
+            if console_needle.is_none() || rows.is_empty() {
+                // The search row — the honest floor (§22): the text is
+                // never dropped, discovery answers it.
+                rows.push(Suggestion {
+                    text: trimmed.to_owned(),
+                    title: trimmed.to_owned(),
+                    subtitle: Some("Search discovery".into()),
+                    kind: SuggestionKind::Search,
+                });
+            }
+        }
+    }
+
+    rows.truncate(MAX_SUGGESTIONS);
+    rows
+}
+
+/// starts_with outranks contains — Chromium's relevance instinct, ours
+/// is alphabetical inside a rank (deterministic, no counters).
+fn rank_match(needle: &str, haystack: &str) -> u8 {
+    if haystack.starts_with(needle) { 0 } else { 1 }
+}
+
+fn server_row(server: &FleetServer) -> Suggestion {
+    let destination = Destination::Server {
+        server_id: server.server_id.clone(),
+    };
+    Suggestion {
+        text: destination.url(),
+        title: server.display_name.clone(),
+        subtitle: Some(match server.port {
+            Some(port) => format!("localhost:{port} · {}", server.state),
+            None => server.state.clone(),
+        }),
+        kind: SuggestionKind::Server,
+    }
+}
+
+fn console_row(server: &FleetServer) -> Suggestion {
+    let destination = Destination::Console {
+        server_id: server.server_id.clone(),
+    };
+    Suggestion {
+        text: destination.url(),
+        title: destination.label(),
+        subtitle: Some(match server.port {
+            Some(port) => format!("localhost:{port} · {}", server.state),
+            None => server.state.clone(),
+        }),
+        kind: SuggestionKind::Console,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,5 +789,150 @@ mod tests {
             .is_none()
         );
         assert!(land(&mut strip, AddressRequest::Query("x".into()), false).is_none());
+    }
+
+    // --- the popup's matches (suggest) -------------------------------------
+
+    fn fleet() -> Vec<FleetServer> {
+        vec![
+            FleetServer {
+                server_id: "survival".into(),
+                display_name: "Survival".into(),
+                state: "running".into(),
+                port: Some(25565),
+            },
+            FleetServer {
+                server_id: "creative".into(),
+                display_name: "Creative".into(),
+                state: "stopped".into(),
+                port: Some(25566),
+            },
+            FleetServer {
+                server_id: "skyfactory".into(),
+                display_name: "SkyFactory 4".into(),
+                state: "crashed".into(),
+                port: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn empty_text_proposes_nothing() {
+        assert!(suggest("", &fleet()).is_empty());
+        assert!(suggest("   ", &fleet()).is_empty());
+    }
+
+    #[test]
+    fn the_join_proposes_the_address_then_the_port_owner() {
+        let rows = suggest("localhost:25565", &fleet());
+        assert_eq!(rows.len(), 2);
+        // Row one: the join itself, its text the produced URL (the
+        // commit door re-enters the same dialect a typed Enter speaks).
+        assert_eq!(rows[0].kind, SuggestionKind::Join);
+        assert_eq!(rows[0].text, "zim://join/localhost:25565");
+        assert_eq!(rows[0].title, "Join localhost:25565");
+        // Row two: the server that OWNS the port — every state owns.
+        assert_eq!(rows[1].kind, SuggestionKind::Server);
+        assert_eq!(rows[1].text, "zim://server/survival");
+        assert_eq!(rows[1].title, "Survival");
+        assert_eq!(
+            rows[1].subtitle.as_deref(),
+            Some("localhost:25565 · running")
+        );
+    }
+
+    #[test]
+    fn a_port_only_join_finds_its_owner_too() {
+        let rows = suggest("25566", &fleet());
+        assert_eq!(rows[0].kind, SuggestionKind::Join);
+        assert_eq!(rows[0].text, "zim://join/:25566");
+        assert_eq!(rows[1].text, "zim://server/creative");
+        assert_eq!(
+            rows[1].subtitle.as_deref(),
+            Some("localhost:25566 · stopped")
+        );
+    }
+
+    #[test]
+    fn a_typed_name_proposes_the_fleet_before_the_search() {
+        let rows = suggest("surv", &fleet());
+        // starts_with ("Survival") outranks contains; the search row is
+        // the honest floor underneath.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].kind, SuggestionKind::Server);
+        assert_eq!(rows[0].title, "Survival");
+        assert_eq!(rows[1].kind, SuggestionKind::Search);
+        assert_eq!(rows[1].text, "surv");
+        assert_eq!(rows[1].subtitle.as_deref(), Some("Search discovery"));
+    }
+
+    #[test]
+    fn the_search_row_survives_with_no_fleet_hit() {
+        let rows = suggest("best modpack 2026", &fleet());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, SuggestionKind::Search);
+        assert_eq!(rows[0].text, "best modpack 2026");
+    }
+
+    #[test]
+    fn the_console_dialect_proposes_consoles_not_dashboards() {
+        let rows = suggest("console surv", &fleet());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, SuggestionKind::Console);
+        assert_eq!(rows[0].text, "zim://console/survival");
+        assert_eq!(rows[0].title, "Console survival");
+    }
+
+    #[test]
+    fn an_empty_console_dialect_is_just_a_search() {
+        // "console " with no name: no console rows, the honest search.
+        let rows = suggest("console ", &fleet());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, SuggestionKind::Search);
+    }
+
+    #[test]
+    fn a_typed_page_prefix_proposes_the_page() {
+        let rows = suggest("zim://set", &fleet());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, SuggestionKind::Page);
+        assert_eq!(rows[0].text, "zim://settings/");
+        assert_eq!(rows[0].title, "Settings");
+        assert_eq!(rows[0].subtitle.as_deref(), Some("zim://settings/"));
+    }
+
+    #[test]
+    fn an_unknown_page_proposes_its_own_honesty() {
+        let rows = suggest("zim://nonsense", &fleet());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].text, "zim://nonsense");
+        assert_eq!(
+            rows[0].subtitle.as_deref(),
+            Some("No ZIM page — nothing lives here")
+        );
+    }
+
+    #[test]
+    fn a_typed_server_reference_names_one_thing() {
+        let rows = suggest("zim://server/survival", &fleet());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, SuggestionKind::Server);
+        assert_eq!(rows[0].title, "Server survival");
+        assert_eq!(rows[0].subtitle, None);
+    }
+
+    #[test]
+    fn the_popup_never_exceeds_k_max_matches() {
+        let mut many = fleet();
+        for i in 0..12 {
+            many.push(FleetServer {
+                server_id: format!("server{i}"),
+                display_name: format!("Farm {i}"),
+                state: "stopped".into(),
+                port: Some(30000 + i as u16),
+            });
+        }
+        let rows = suggest("farm", &many);
+        assert_eq!(rows.len(), MAX_SUGGESTIONS);
     }
 }

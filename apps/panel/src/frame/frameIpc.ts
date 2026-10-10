@@ -99,6 +99,32 @@ export const omniboxCommit = (text: string, newTab = false): Promise<CommitOutco
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
   isTauri() ? invokeHost("shell_omnibox_classify", { text }) : Promise.resolve(null);
 
+// -- The omnibox popup (OmniboxPopupViewViews' matches) -----------------------
+
+export interface Suggestion {
+  /** The committable text — what a typed Enter would have carried. */
+  text: string;
+  title: string;
+  subtitle?: string;
+  kind: "join" | "server" | "console" | "page" | "search";
+}
+
+/** The popup's rows: the typed text against the frame's fleet
+ *  projection (the favicon lane's names), classified and ordered by the
+ *  host — one authority, the same classifier a commit speaks. */
+export const omniboxSuggest = (
+  text: string,
+  servers: Array<{
+    server_id: string;
+    display_name: string;
+    state: string;
+    port?: number;
+  }>,
+): Promise<Suggestion[]> =>
+  isTauri()
+    ? invokeHost<Suggestion[]>("shell_omnibox_suggest", { text, servers })
+    : Promise.resolve([]);
+
 /** The clipboard's TEXT, honestly empty when nothing can be read — a
  *  denied permission is an empty paste, never a thrown menu. The
  *  plugin's readText is the sanctioned route (the capability names the

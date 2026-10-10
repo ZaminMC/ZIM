@@ -11,7 +11,8 @@
 // input the dot's law consumes).
 //
 // Deliberately NOT the content's startWire: no notifications machinery,
-// no job store — the frame paints dots, nothing else. The rendering can
+// no job store — the frame paints dots, and the projection names the
+// fleet for the omnibox's suggestions (fleetBrief). The rendering can
 // be silenced by the settings toggle (faviconPrefs); the lane itself
 // stays push-only after boot.
 
@@ -33,6 +34,12 @@ export interface FaviconEntry {
   software: SoftwareKey;
   state: ServerState;
   severity: ConsoleSeverity;
+  /** The registry's display name and port (the summaries carry both) —
+   *  the projection the omnibox's suggestions read. A server registered
+   *  after the boot list arrives nameless and is named by its
+   *  server.get fetch. */
+  name?: string;
+  port?: number;
 }
 
 interface FaviconState {
@@ -57,6 +64,22 @@ export function faviconFor(
     dot: faviconDot(entry.state, entry.severity),
     software: entry.software,
   };
+}
+
+/** The frame's fleet projection — what the omnibox's suggest call
+ *  passes to the host: the registry's names, ids, states, ports. */
+export function fleetBrief(state: FaviconState): Array<{
+  server_id: string;
+  display_name: string;
+  state: string;
+  port?: number;
+}> {
+  return Object.entries(state.servers).map(([serverId, entry]) => ({
+    server_id: serverId,
+    display_name: entry.name ?? serverId,
+    state: entry.state,
+    ...(entry.port != null ? { port: entry.port } : {}),
+  }));
 }
 
 // --- the lane ---------------------------------------------------------------
@@ -168,32 +191,52 @@ function syncLogSubscriptions(servers: Record<string, FaviconEntry>): void {
   }
 }
 
-/** Fold a registry summary into the projection; fetch the software the
- *  summary lacks (ServerSummary carries none) once per unknown server. */
+/** Fold a registry summary into the projection; fetch what the summary
+ *  lacks (ServerSummary carries no software) once per unknown server. */
 function foldState(
   serverId: string,
   state: ServerState,
   clientRef: ProtocolClient,
+  brief?: { name?: string; port?: number },
 ): void {
   useFavicons.setState((s) => {
     const existing = s.servers[serverId];
+    if (existing) {
+      // The brief's facts ride on top (the boot list names the fleet;
+      // the events only carry the state).
+      return {
+        servers: {
+          ...s.servers,
+          [serverId]: {
+            ...existing,
+            ...(brief?.name != null ? { name: brief.name } : {}),
+            ...(brief?.port != null ? { port: brief.port } : {}),
+          },
+        },
+      };
+    }
     return {
       servers: {
         ...s.servers,
-        [serverId]: existing ?? {
+        [serverId]: {
           software: softwareKey(undefined),
           state,
           severity: "none",
+          ...(brief?.name != null ? { name: brief.name } : {}),
+          ...(brief?.port != null ? { port: brief.port } : {}),
         },
       },
     };
   });
   const existing = useFavicons.getState().servers[serverId];
-  if (existing && existing.software === "unknown") {
+  if (existing && (existing.software === "unknown" || existing.name == null)) {
     void clientRef
-      .request<{ software?: string; state: ServerState }>("server.get", {
-        serverId,
-      })
+      .request<{
+        software?: string;
+        state: ServerState;
+        displayName?: string;
+        port?: number;
+      }>("server.get", { serverId })
       .then((details) => {
         useFavicons.setState((s) => {
           const current = s.servers[serverId];
@@ -204,6 +247,8 @@ function foldState(
               [serverId]: {
                 ...current,
                 software: softwareKey(details.software),
+                ...(details.displayName != null ? { name: details.displayName } : {}),
+                ...(details.port != null ? { port: details.port } : {}),
               },
             },
           };
@@ -234,10 +279,18 @@ export function startFaviconLane(): void {
   void laneClient.connect().then(async () => {
     try {
       const list = await laneClient.request<{
-        servers: Array<{ serverId: string; state: ServerState }>;
+        servers: Array<{
+          serverId: string;
+          state: ServerState;
+          displayName?: string;
+          port?: number;
+        }>;
       }>("server.list");
       for (const server of list.servers) {
-        foldState(server.serverId, server.state, laneClient);
+        foldState(server.serverId, server.state, laneClient, {
+          name: server.displayName,
+          port: server.port,
+        });
       }
     } catch (error: unknown) {
       logWarn("favicon", "server.list failed", error);
@@ -301,7 +354,13 @@ export function startFaviconLane(): void {
 export function seedFaviconsForDemo(
   servers: Record<
     string,
-    { software?: string; state: ServerState; severity?: ConsoleSeverity }
+    {
+      software?: string;
+      state: ServerState;
+      severity?: ConsoleSeverity;
+      name?: string;
+      port?: number;
+    }
   >,
 ): void {
   const next: Record<string, FaviconEntry> = {};
@@ -310,6 +369,8 @@ export function seedFaviconsForDemo(
       software: softwareKey(server.software),
       state: server.state,
       severity: server.severity ?? "none",
+      ...(server.name != null ? { name: server.name } : {}),
+      ...(server.port != null ? { port: server.port } : {}),
     };
   }
   useFavicons.setState({ servers: next });

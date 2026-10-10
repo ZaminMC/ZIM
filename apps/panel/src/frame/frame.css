@@ -956,3 +956,66 @@ body {
   pointer-events: none;
   z-index: 60;
 }
+
+/* The omnibox popup (OmniboxPopupViewViews): the rows the host proposed,
+   under the field, the field's own width. A row is icon + title over
+   description; the selection is the field's own hover fill. */
+.omnibox-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--frame-surface);
+  border: 1px solid var(--popup-line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-l);
+}
+.suggest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--frame-fg);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.suggest.selected,
+.suggest:hover {
+  background: var(--frame-field-hover);
+}
+.suggest-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--frame-fg-dim);
+}
+.suggest-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.suggest-title {
+  font-size: 13px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suggest-sub {
+  font-size: 11px;
+  line-height: 13px;
+  color: var(--frame-fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

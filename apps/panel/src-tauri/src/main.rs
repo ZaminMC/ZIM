@@ -429,6 +429,7 @@ fn main() {
             shell::host::shell_tab_action,
             shell::host::shell_command,
             shell::host::shell_omnibox_classify,
+            shell::host::shell_omnibox_suggest,
             shell::host::shell_omnibox_commit,
             shell::host::shell_bookmarks,
             shell::host::shell_bookmark_remove,
