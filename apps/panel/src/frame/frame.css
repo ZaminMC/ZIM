@@ -758,3 +758,14 @@ body {
 }
 
 .frame-error-retry:hover { background: var(--accent-strong); }
+
+/* The hover card's demo carrier: the browser fixture paints the card
+   itself (the real shell's carrier is the popup overlay webview). A
+   fixed, pointer-transparent layer over the whole page — the payload's
+   coordinates are already page coordinates. */
+.hover-card-demo-host {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+}

@@ -19,15 +19,28 @@
 //   the editor; here one form seeds the name, the color rides along only
 //   when picked, and Enter confirms — the keyboard contract the OS prompt
 //   used to own, kept.
+// - "hover-card": the port of the tab hover card (hovercard/
+//   tab_hover_card_bubble_view.cc) — the shell's fifth widget shape. Its
+//   overlay is UNfocused host-side (no set_focus — upstream's
+//   SetCanActivate(false) + set_accept_events(false)) and sized to the
+//   payload's SLIDE BAND: the card paints inside it, the rest of the
+//   window keeps its own pointer (webview hosting has no click-through,
+//   so the card yields any press on itself). The frame drives it — show,
+//   slide (shell://popup-update), fade (shell://popup-fade, then this
+//   overlay closes its own widget) — and the display payload arrives
+//   dressed (the laws run in the frame; this layer only paints).
 //
 // Keyboard contract: the overlay takes focus on open; ArrowUp/Down walk
 // the items, Enter activates, Escape dismisses. A click in the
 // transparent gutter dismisses, as does any interaction elsewhere in
-// the window (the host routes it here).
+// the window (the host routes it here). The hover card breaks none of
+// this — it never holds focus, so it never hears a key.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CMD } from "../commandIds";
 import { GROUP_TAB_STRIP_COLORS } from "../ui/chromium/chromiumTabs";
+import { HoverCard } from "../ui/chromium/hoverCardView";
+import type { HoverCardPayload } from "../ui/chromium/hoverCard";
 import {
   IconApps,
   IconCheck,
@@ -77,6 +90,8 @@ interface PopupContext {
   label?: string;
   color?: number;
   collapsed?: boolean;
+  /** The hover card's dressed display payload (kind "hover-card"). */
+  card?: HoverCardPayload;
 }
 
 const isTauri = (): boolean =>
@@ -143,14 +158,46 @@ export function PopupApp() {
   const [groupError, setGroupError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // The hover card's posture: the first payload mounts without the
+  // position transition (no glide from nowhere); every later one slides
+  // (AnimateToAnchor). `fading` is the host's fade order — 200ms out,
+  // then this overlay closes its own widget.
+  const [cardSliding, setCardSliding] = useState(false);
+  const [cardFading, setCardFading] = useState(false);
 
   // Boot: the host pushes the context (kind + the addressed tab's
   // posture); the demo lane reads it from the query for review.
   useEffect(() => {
     if (demoActive()) {
       const kind = new URLSearchParams(window.location.search).get("kind") ?? "tab-menu";
+      // The hover card's review postures: a tab card and a group card,
+      // dressed exactly as the frame would dress them.
+      const card: HoverCardPayload | undefined =
+        kind === "hover-card"
+          ? {
+              kind: "tab",
+              x: 40,
+              y: 8,
+              band: { x: 0, y: 0, w: 1024, h: 600 },
+              title: "Server survival — console",
+              domain: "server/survival",
+              members: [],
+              excess: 0,
+            }
+          : kind === "hover-card-group"
+            ? {
+                kind: "group",
+                x: 40,
+                y: 8,
+                band: { x: 0, y: 0, w: 1024, h: 600 },
+                title: "survival (4 tabs)",
+                domain: null,
+                members: ["Server survival — console", "Console hub", "zamind — heartbeat"],
+                excess: 1,
+              }
+            : undefined;
       setCtx({
-        kind,
+        kind: kind.startsWith("hover-card") ? "hover-card" : kind,
         tab_id: 3,
         group_id: 1,
         pinned: false,
@@ -166,6 +213,7 @@ export function PopupApp() {
         label: "survival",
         color: 1,
         collapsed: false,
+        card,
       });
       return;
     }
@@ -189,6 +237,41 @@ export function PopupApp() {
   }, []);
 
   const kind = groupKind ? "new-group" : (ctx?.kind ?? "tab-menu");
+
+  // The hover card's lane: the frame slides/refreshes the live card
+  // (popup-update — cancel any pending fade, apply the payload) and
+  // orders the hide (popup-fade — 200ms out, then this overlay closes
+  // its own widget through shell_popup_close, the FadeOut-then-close
+  // order). The card never holds focus, so no key ever reaches here.
+  const isHoverCard = kind === "hover-card";
+  useEffect(() => {
+    if (!isTauri() || !isHoverCard) return;
+    let disposed = false;
+    const offs: Array<() => void> = [];
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const offUpdate = await listen<HoverCardPayload>("shell://popup-update", (event) => {
+        if (disposed) return;
+        setCardFading(false);
+        setCtx((cur) => (cur ? { ...cur, card: event.payload } : cur));
+      });
+      const offFade = await listen("shell://popup-fade", () => {
+        if (disposed) return;
+        setCardFading(true);
+      });
+      offs.push(offUpdate, offFade);
+    })();
+    return () => {
+      disposed = true;
+      offs.forEach((off) => off());
+    };
+  }, [isHoverCard]);
+
+  // The slide arms AFTER the first card paint — the first payload
+  // positions itself where it stands, every later one glides.
+  useEffect(() => {
+    if (isHoverCard && ctx?.card) setCardSliding(true);
+  }, [isHoverCard, ctx?.card != null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The title field autofocuses (both the editor and the naming form
   // re-focus it when the menu turns into a form).
@@ -244,6 +327,33 @@ export function PopupApp() {
   }, []);
 
   if (!ctx) return <div className="gutter" onPointerDown={onGutterDown} />;
+
+  // The hover card: no gutter dismissal contract — the card paints where
+  // the frame anchored it (the payload's window coordinates, rebased on
+  // the band the carrier webview covers) and closes itself when the fade
+  // lands. The card yields any PRESS on itself: the carrier webview
+  // would otherwise eat it (webview hosting has no click-through — the
+  // delta lives in PROVENANCE.md), so the press at least clears the way
+  // for the next one.
+  if (kind === "hover-card") {
+    const card = ctx.card;
+    return (
+      <div className="hover-card-root" onPointerDown={() => void closePopup()}>
+        {card ? (
+          <HoverCard
+            card={{
+              ...card,
+              x: card.x - card.band.x,
+              y: card.y - card.band.y,
+            }}
+            sliding={cardSliding}
+            fading={cardFading}
+            onFaded={() => void closePopup()}
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   const zoomPct = Math.round((ctx.zoom ?? 1) * 100);
   const groups = ctx.groups ?? [];

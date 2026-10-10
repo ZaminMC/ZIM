@@ -34,6 +34,8 @@ import {
   shellCommand,
   shellDrag,
   shellPopup,
+  shellPopupFade,
+  shellPopupUpdate,
   stripScroll,
   stripScrollVertical,
   type Snapshot,
@@ -52,6 +54,19 @@ import {
   separatorColor,
   topCornerRadiusForWidth,
 } from "../ui/chromium/chromiumTabs";
+import {
+  HOVER_CARD_MIN_SHOW_DELAY_MS,
+  HOVER_CARD_RESHOW_BUFFER_MS,
+  groupCardHeader,
+  groupCardMembers,
+  hoverCardAnchor,
+  hoverCardBand,
+  hoverCardDomain,
+  hoverCardShowDelayMs,
+  largestTabSlotWidth,
+  type HoverCardPayload,
+} from "../ui/chromium/hoverCard";
+import { HoverCard } from "../ui/chromium/hoverCardView";
 import {
   IconBack,
   IconForward,
@@ -161,6 +176,249 @@ export function FrameApp() {
   // real shell; the demo has no popup host).
   const [demoGroupFor, setDemoGroupFor] = useState<number | null>(null);
 
+  // -- The hover card's machine — the port of TabHoverCardController -----
+  // The state machine rides refs (the pointer handlers and the
+  // mount-only effects must see one truth); the demo carrier is state
+  // because the browser fixture paints the card itself — under the
+  // shell the same payloads ride the popup overlay webview.
+  type HoverTarget = { kind: "tab" | "group"; id: number };
+  const [demoCard, setDemoCard] = useState<HoverCardPayload | null>(null);
+  const [demoCardSliding, setDemoCardSliding] = useState(false);
+  const [demoCardFading, setDemoCardFading] = useState(false);
+  const cardTarget = useRef<HoverTarget | null>(null);
+  const pendingTarget = useRef<HoverTarget | null>(null);
+  const cardPayload = useRef<HoverCardPayload | null>(null);
+  const cardAlive = useRef(false);
+  const showTimer = useRef<number | null>(null);
+  const lastMouseExit = useRef<number | null>(null);
+  const cardSnap = useRef<Snapshot | null>(null);
+  cardSnap.current = snap;
+
+  const clearShowTimer = (): void => {
+    if (showTimer.current != null) {
+      window.clearTimeout(showTimer.current);
+      showTimer.current = null;
+    }
+    pendingTarget.current = null;
+  };
+
+  // The payload builder: the anchor re-measures the LIVE element at
+  // decision time (the strip re-lays-out under a pending timer — a stale
+  // rect would park the card where the tab used to stand), the content
+  // comes dressed from the laws (hoverCard.ts — one home, no twin).
+  const buildCardPayload = (target: HoverTarget): HoverCardPayload | null => {
+    const current = cardSnap.current;
+    if (!current) return null;
+    const el = document.querySelector(
+      target.kind === "tab"
+        ? `[data-tab-id="${target.id}"]`
+        : `[data-group-chip-id="${target.id}"]`,
+    );
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const anchor = hoverCardAnchor(
+      { left: rect.left, width: rect.width, bottom: rect.bottom },
+      document.documentElement.clientWidth,
+    );
+    if (target.kind === "tab") {
+      const tab = current.tabs.find((t) => t.id === target.id);
+      if (!tab) return null;
+      return {
+        kind: "tab",
+        x: anchor.x,
+        y: anchor.y,
+        band: hoverCardBand(current.vertical, anchor.y, railW, {
+          w: document.documentElement.clientWidth,
+          h: document.documentElement.clientHeight,
+        }),
+        title: tab.title,
+        domain: hoverCardDomain(tab.url),
+        members: [],
+        excess: 0,
+      };
+    }
+    const group = current.groups.find((g) => g.id === target.id);
+    if (!group) return null;
+    // The member list walks the MODEL order (snap.tabs is the model's
+    // array, the view's interleave never touches it).
+    const memberTitles = current.tabs.filter((t) => t.group === target.id).map((t) => t.title);
+    const { members, excess } = groupCardMembers(memberTitles);
+    return {
+      kind: "group",
+      x: anchor.x,
+      y: anchor.y,
+      band: hoverCardBand(current.vertical, anchor.y, railW, {
+          w: document.documentElement.clientWidth,
+          h: document.documentElement.clientHeight,
+        }),
+      title: groupCardHeader(group.label, memberTitles.length),
+      domain: null,
+      members,
+      excess,
+    };
+  };
+
+  const carry = (payload: HoverCardPayload, target: HoverTarget, via: "show" | "update"): void => {
+    cardAlive.current = true;
+    cardTarget.current = target;
+    cardPayload.current = payload;
+    if (isTauri()) {
+      if (via === "show") {
+        void shellPopup(
+          "hover-card",
+          target.kind === "tab" ? target.id : null,
+          payload.x,
+          payload.y,
+          target.kind === "group" ? target.id : null,
+          payload as unknown as Record<string, unknown>,
+        );
+      } else {
+        void shellPopupUpdate(payload as unknown as Record<string, unknown>).then(
+          (delivered) => {
+            if (!delivered) {
+              // The overlay lost the race with its own fade — recreate.
+              void shellPopup(
+                "hover-card",
+                target.kind === "tab" ? target.id : null,
+                payload.x,
+                payload.y,
+                target.kind === "group" ? target.id : null,
+                payload as unknown as Record<string, unknown>,
+              );
+            }
+          },
+        );
+      }
+    } else {
+      setDemoCardFading(false);
+      setDemoCardSliding(via === "update");
+      setDemoCard(payload);
+    }
+  };
+
+  // The hide law: 200ms out, then the overlay closes its own widget.
+  // The demo carrier hears the same order; its onFaded clears it.
+  const hideCard = (): void => {
+    clearShowTimer();
+    if (!cardAlive.current) return;
+    cardAlive.current = false;
+    cardTarget.current = null;
+    cardPayload.current = null;
+    if (isTauri()) {
+      void shellPopupFade();
+    } else {
+      setDemoCardFading(true);
+    }
+  };
+
+  // UpdateHoverCard: the controller's dispatch. "event" is the
+  // sniffer's verdict (click/keypress — hide, and the next show waits
+  // the full delay again); "animating" is the drag session's (hide,
+  // exit timestamp untouched); "hover" is the pointer's arrive/leave;
+  // "data" refreshes a live card's content without re-arming anything.
+  const updateHoverCard = (
+    target: HoverTarget | null,
+    updateType: "hover" | "event" | "animating" | "data",
+  ): void => {
+    if (updateType === "event") {
+      lastMouseExit.current = null; // PreventImmediateReshow
+      hideCard();
+      return;
+    }
+    if (updateType === "animating") {
+      hideCard();
+      return;
+    }
+    if (target == null) {
+      lastMouseExit.current = performance.now(); // the buffer starts here
+      hideCard();
+      return;
+    }
+    if (updateType !== "data") {
+      const current = cardTarget.current ?? pendingTarget.current;
+      if (current && current.kind === target.kind && current.id === target.id) return;
+    }
+    clearShowTimer();
+    if (cardAlive.current) {
+      // The card is up (or fading): no delay — content now, anchor
+      // slides (AnimateToAnchor; a pending fade cancels).
+      const payload = buildCardPayload(target);
+      if (!payload) {
+        hideCard();
+        return;
+      }
+      carry(payload, target, "update");
+      return;
+    }
+    const exit = lastMouseExit.current;
+    const immediate =
+      exit != null && performance.now() - exit <= HOVER_CARD_RESHOW_BUFFER_MS;
+    if (immediate) {
+      const payload = buildCardPayload(target);
+      if (payload) carry(payload, target, "show");
+      return;
+    }
+    // GetShowDelay: the LARGEST tab in the strip decides for everyone.
+    const snapNow = cardSnap.current;
+    const delay = snapNow
+      ? hoverCardShowDelayMs(largestTabSlotWidth(snapNow.slots))
+      : HOVER_CARD_MIN_SHOW_DELAY_MS;
+    pendingTarget.current = target;
+    showTimer.current = window.setTimeout(() => {
+      showTimer.current = null;
+      pendingTarget.current = null;
+      if (cardAlive.current) return;
+      const payload = buildCardPayload(target);
+      if (payload) carry(payload, target, "show");
+    }, delay);
+  };
+
+  // The mount-only effects (pointerdown sniffer, keydown sniffer, drag
+  // session) reach the machine through this ever-current ref.
+  const hoverApi = useRef<{
+    update: (
+      target: HoverTarget | null,
+      updateType: "hover" | "event" | "animating" | "data",
+    ) => void;
+    alive: () => boolean;
+  }>({
+    update: () => {},
+    alive: () => false,
+  });
+  hoverApi.current = {
+    update: (target, updateType) => updateHoverCard(target, updateType),
+    alive: () => cardAlive.current,
+  };
+
+  // The card's subject must survive every snapshot: a tab or group that
+  // vanished (or a slot mid-close) takes its card with it (kAnimating),
+  // and a hovered tab whose title/address changed refreshes the live
+  // card in place (kTabDataChanged — no re-arm, no slide order change).
+  useEffect(() => {
+    if (!snap) return;
+    const target = cardTarget.current;
+    if (!target || !cardAlive.current) return;
+    const exists =
+      target.kind === "tab"
+        ? snap.tabs.some((t) => t.id === target.id)
+        : snap.groups.some((g) => g.id === target.id);
+    if (!exists) {
+      hoverApi.current.update(null, "animating");
+      return;
+    }
+    if (target.kind === "tab") {
+      const tab = snap.tabs.find((t) => t.id === target.id);
+      const payload = cardPayload.current;
+      if (
+        tab &&
+        payload &&
+        (tab.title !== payload.title || hoverCardDomain(tab.url) !== payload.domain)
+      ) {
+        hoverApi.current.update(target, "data");
+      }
+    }
+  }, [snap]);
+
   // The model's tab order is snapshot.tabs' order (the host maps it
   // straight from strip.tabs) — the slot view interleaves group chips
   // and hides collapsed tabs, so positions must come from the model's
@@ -209,7 +467,9 @@ export function FrameApp() {
         // The threshold is where the drag begins: capture the pointer
         // (the session must survive the pointer leaving the webview — a
         // tear-off drop lands past the window's edge) and announce the
-        // session to the host.
+        // session to the host. The drag is kAnimating to the hover
+        // card: it hides, its exit timestamp untouched.
+        hoverApi.current.update(null, "animating");
         try {
           element.setPointerCapture(pointerId);
         } catch {
@@ -391,10 +651,18 @@ export function FrameApp() {
 
   // Any pointerdown in the frame is an interaction a popup must yield
   // to (the anchor button re-opens on the click that follows — the
-  // upstream toggle rhythm). A cheap no-op when nothing is open.
+  // upstream toggle rhythm). A cheap no-op when nothing is open. A live
+  // hover card yields through its own fade path — the kEvent hide (the
+  // sniffer's law: a click hides the card, and the next show waits the
+  // full delay again).
   useEffect(() => {
-    if (!isTauri()) return;
-    const onDown = () => void dismissPopup();
+    const onDown = () => {
+      // The sniffer's law runs in BOTH carriers — a click hides a live
+      // card (kEvent) whether the shell or the demo fixture hosts it.
+      // Only the menu dismissal needs the host.
+      if (hoverApi.current.alive()) hoverApi.current.update(null, "event");
+      else if (isTauri()) void dismissPopup();
+    };
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, []);
@@ -438,9 +706,12 @@ export function FrameApp() {
     return () => stopUpdates();
   }, []);
 
-  // The browser keyboard contract (ADR-0032), frame side.
+  // The browser keyboard contract (ADR-0032), frame side. Every key is
+  // also the sniffer's verdict: a live hover card hides (kEvent), the
+  // next show waits the full delay again.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (hoverApi.current.alive()) hoverApi.current.update(null, "event");
       const target = event.target as (HTMLElement & { isContentEditable: boolean }) | null;
       const api: BrowserKeyApi = {
         newTab: () => void shellCommand(CMD.NEW_TAB),
@@ -648,9 +919,28 @@ export function FrameApp() {
   };
 
   return (
-    <div
-      className={vertical ? "frame vertical" : "frame"}
-      style={vertical ? { width: railW } : { height: snap.header_height }}
+    <>
+      {/* The demo's card carrier: the browser fixture has no popup
+          webview, so the card paints here — a fixed, pointer-transparent
+          layer whose coordinates are the page's own (the demo frame
+          sits at the window origin, the same space the payload uses).
+          The real shell's carrier is the popup overlay webview. */}
+      {!isTauri() && demoCard ? (
+        <div className="hover-card-demo-host" aria-hidden>
+          <HoverCard
+            card={demoCard}
+            sliding={demoCardSliding}
+            fading={demoCardFading}
+            onFaded={() => {
+              setDemoCard(null);
+              setDemoCardFading(false);
+            }}
+          />
+        </div>
+      ) : null}
+      <div
+        className={vertical ? "frame vertical" : "frame"}
+        style={vertical ? { width: railW } : { height: snap.header_height }}
     >
       {/* Tab strip row / §54 rail — Chromium's 35+6 band horizontal, the
           stacked rows vertical; drag region on the bare ground either
@@ -663,6 +953,19 @@ export function FrameApp() {
         data-declutter={
           snap.tabs.length >= TAB_STRIP_DECLUTTER_MIN_TABS_FOR_SEPARATOR_HIDE || undefined
         }
+        onMouseLeave={() => {
+          // Leaving the strip entirely: the buffer starts here
+          // (ShouldShowImmediately's kShowWithoutDelayTimeBuffer).
+          hoverApi.current.update(null, "hover");
+        }}
+        onMouseMove={(e) => {
+          // Bare strip under the pointer is no hover target either —
+          // the card hides as if the strip were left (TabStrip's own
+          // mousemove re-evaluation).
+          const el = e.target as HTMLElement | null;
+          if (el?.closest("[data-tab],[data-group-chip]")) return;
+          hoverApi.current.update(null, "hover");
+        }}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).dataset.tab === undefined) {
             // Windows titlebar law: a bare-strip double click asks about
@@ -688,6 +991,10 @@ export function FrameApp() {
             ),
           }}
           onWheel={(e) => {
+            // The strip moved under a stationary pointer — the hover
+            // target changed without any boundary crossing. The card
+            // yields (kAnimating); the next crossing re-arms the law.
+            if (cardAlive.current) hideCard();
             if (maxScroll === 0) return;
             const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
             setScroll(
@@ -739,6 +1046,7 @@ export function FrameApp() {
                 <button
                   key={`group-${group.id}`}
                   data-group-chip
+                  data-group-chip-id={group.id}
                   className="group-chip"
                   style={{
                     left: slot.x,
@@ -746,8 +1054,10 @@ export function FrameApp() {
                     ...(vertical ? { top: slot.y, height: slot.height } : {}),
                     ...groupVars(group.color),
                   }}
-                  title={`Group ${group.label}${group.collapsed ? " — collapsed" : ""}`}
                   aria-label={`Toggle group ${group.label}`}
+                  onMouseEnter={() =>
+                    updateHoverCard({ kind: "group", id: group.id }, "hover")
+                  }
                   onClick={() =>
                     void shellCommand(CMD.TOGGLE_GROUP_COLLAPSE, { group_id: group.id })
                   }
@@ -811,6 +1121,7 @@ export function FrameApp() {
               <div
                 key={tab.id}
                 data-tab
+                data-tab-id={tab.id}
                 className={[
                   "tab",
                   tab.active ? "tab-active" : "tab-inactive",
@@ -859,7 +1170,8 @@ export function FrameApp() {
                       }
                     : {}),
                 }}
-                title={tab.title}
+                aria-label={`Tab ${tab.title}`}
+                onMouseEnter={() => updateHoverCard({ kind: "tab", id: tab.id }, "hover")}
                 onClick={() => {
                   // A drag session's release also dispatches a click —
                   // the just-ended drag never selects.
@@ -1153,6 +1465,7 @@ export function FrameApp() {
         </div>
       ) : null}
 
-    </div>
+      </div>
+    </>
   );
 }

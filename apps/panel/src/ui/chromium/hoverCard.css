@@ -1,0 +1,113 @@
+/* The tab hover card's paint (hovercard/tab_hover_card_bubble_view.cc):
+   a 256-wide card 6 below the hovered slot — the title (two lines max,
+   13px medium) over the domain line (12px regular), group cards the
+   composed header over up to five bullet members and the "+ N More"
+   footer. The surfaces are chrome_color_mixer.cc's; the secondary text
+   is the SAME color as the title (kColorTabHoverCardSecondaryText →
+   ui::kColorLabelForeground) — the hierarchy is typography's, not the
+   palette's. The card is pointer-transparent host-side
+   (set_ignore_cursor_events — upstream's SetCanActivate(false) +
+   set_accept_events(false)); these styles never see a cursor. */
+
+.hover-card {
+  position: absolute;
+  box-sizing: border-box;
+  width: 256px; /* GetPreviewImageSize().width() — the standard slot width */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: #f8f9fa; /* kColorTabHoverCardBackground, kGoogleGrey050 */
+  color: var(--frame-fg, #202124);
+  border-radius: 8px; /* GetCornerRadiusMetric(Emphasis::kHigh) */
+  box-shadow: var(--shadow-l);
+  animation: hc-fade-in 200ms ease-out both; /* kHoverCardSlideDuration */
+  z-index: 5;
+}
+
+/* The between-tab slide (AnimateToAnchor) rides the 200ms transition;
+   the first paint mounts without this class — no glide from nowhere. */
+.hover-card-sliding {
+  transition: left 200ms ease-out, top 200ms ease-out;
+}
+
+/* The hide law: 200ms out, then the carrier closes the widget. */
+.hover-card-fading {
+  animation: hc-fade-out 200ms ease-out both;
+}
+
+@keyframes hc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hc-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Tab card: the text margins (kTextMargins VH 12/12) live on the lines —
+   the title gives up its bottom margin when the domain line shows
+   beneath it (kTitleDomainSpacing takes over). */
+.hc-title {
+  margin: 12px 12px 12px 12px;
+}
+.hc-title.hc-title-with-domain {
+  margin-bottom: 0;
+}
+.hc-domain {
+  margin: 4px 12px 12px 12px;
+}
+
+/* Group card: the border margins (kGroupHovercardBorderMargins VH 6/12)
+   move onto the card; each line carries kGroupTitleMargins VH 6/0. */
+.hover-card.hc-group {
+  padding: 6px 12px;
+}
+.hc-group .hc-title,
+.hc-group .hc-member,
+.hc-group .hc-footer {
+  margin: 6px 0 0 0;
+}
+
+/* The label: the two-line title clamps; single lines ellipsize at the
+   end (delta: upstream's domain elides at the HEAD — ELIDE_HEAD keeps
+   the tail; CSS offers only the end. PROVENANCE.md records it). */
+.hc-label {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.hc-lines-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.hc-lines-1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hc-text {
+  display: block;
+  font-size: 13px; /* STYLE_BODY_3_EMPHASIS (title) */
+  font-weight: 500;
+  line-height: 18px;
+}
+.hc-domain .hc-text,
+.hc-member .hc-text,
+.hc-footer .hc-text {
+  font-size: 12px; /* STYLE_BODY_4 */
+  font-weight: 400;
+  line-height: 16px;
+}
+
+/* FadeLabelView: the previous text overlays and fades out while the new
+   text shows underneath — the crossfade riding the slide. */
+.hc-text-fading {
+  position: absolute;
+  inset: 0;
+  animation: hc-fade-out 200ms ease-out both;
+  pointer-events: none;
+}

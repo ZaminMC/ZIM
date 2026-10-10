@@ -97,19 +97,35 @@ export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
   isTauri() ? invokeHost("shell_omnibox_classify", { text }) : Promise.resolve(null);
 
 /** Open the application-owned popup overlay (tab-menu | app-menu |
- *  group-editor), anchored at frame coordinates. The group editor
- *  addresses a GROUP (groupId), the menus a tab (tabId). The browser
- *  demo has no popup host; its DOM stand-in serves there instead. */
+ *  group-editor | hover-card), anchored at frame coordinates. The group
+ *  editor addresses a GROUP (groupId), the menus a tab (tabId). The
+ *  hover card carries its dressed display payload (hoverCard.ts) and is
+ *  refused (false) while any other popup holds the lane — upstream's
+ *  ScopedHideHoverCardLock, enforced at the one-popup registry. The
+ *  browser demo has no popup host; its DOM stand-in serves instead. */
 export const shellPopup = (
-  kind: "tab-menu" | "app-menu" | "group-editor",
+  kind: "tab-menu" | "app-menu" | "group-editor" | "hover-card",
   tabId: number | null,
   x: number,
   y: number,
   groupId: number | null = null,
-): Promise<void> =>
+  card: Record<string, unknown> | null = null,
+): Promise<boolean> =>
   isTauri()
-    ? invokeHost("shell_popup", { kind, tabId, groupId, x, y })
-    : Promise.resolve();
+    ? invokeHost<boolean>("shell_popup", { kind, tabId, groupId, x, y, card })
+    : Promise.resolve(true);
+
+/** Slide or refresh the LIVE hover card (content + anchor in one
+ *  payload). False means the overlay is gone (the fade won the race) —
+ *  the next show recreates it. */
+export const shellPopupUpdate = (card: Record<string, unknown>): Promise<boolean> =>
+  isTauri() ? invokeHost<boolean>("shell_popup_update", { card }) : Promise.resolve(true);
+
+/** Order the live hover card to fade out; the overlay plays the 200ms
+ *  fade and closes its own widget when it lands (the
+ *  FadeOut-then-close order). False = nothing alive to fade. */
+export const shellPopupFade = (): Promise<boolean> =>
+  isTauri() ? invokeHost<boolean>("shell_popup_fade", {}) : Promise.resolve(false);
 
 /** Dismiss a window's popup overlay — a no-op when none is open, so it
  *  can ride every pointerdown cheaply. */

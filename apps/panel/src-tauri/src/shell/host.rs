@@ -445,6 +445,10 @@ struct PopupState {
     tab: Option<TabId>,
     /// The group editor addresses a group, not a tab.
     group: Option<GroupId>,
+    /// The hover card's dressed display payload (hoverCard.ts): the card
+    /// content is the frame's law-dressed snapshot, re-dressed on every
+    /// slide/update. Menus carry none.
+    card: Option<serde_json::Value>,
 }
 
 /// The overlay's rect for a kind anchored at (x, y): the menu's drop
@@ -1273,13 +1277,16 @@ pub async fn shell_bookmark_remove(
     sync(&app, &state, &window_name)
 }
 
-/// Open a popup overlay for a window: the application-owned menu or
-/// form that replaced the NATIVE gray popup. The overlay is a
-/// transparent child webview (the newest child, so it floats above the
-/// content), focused on arrival, carrying its kind and tab context in
-/// the URL for [`shell_popup_boot`] to read. Any previously open popup
-/// of the window dies first — one popup at a time, as upstream's widget
-/// stack allows exactly one.
+/// Open a popup overlay for a window: the application-owned menu,
+/// form, or hover card that replaced the NATIVE gray popup. The overlay
+/// is a transparent child webview (the newest child, so it floats above
+/// the content), carrying its kind and tab context in the URL for
+/// [`shell_popup_boot`] to read. Any previously open popup of the window
+/// dies first — one popup at a time, as upstream's widget stack allows
+/// exactly one — EXCEPT the hover card: while any popup holds the lane
+/// the card is refused (ScopedHideHoverCardLock's law, enforced at the
+/// one-popup registry), and a menu opening kills a showing card by the
+/// same dismiss-first order as always.
 #[tauri::command]
 pub async fn shell_popup(
     window: tauri::Webview,
@@ -1288,16 +1295,47 @@ pub async fn shell_popup(
     group_id: Option<u32>,
     x: f64,
     y: f64,
+    card: Option<serde_json::Value>,
     state: State<'_, ShellState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let window_name = window_label_of(&window);
+    if kind == "hover-card" && state.lock().popups.contains_key(&window_name) {
+        // The lock law: a popup is open — no card shows.
+        return Ok(false);
+    }
     let host_window = window_for(&app, &window_name)?;
     let size: LogicalSize<f64> = host_window
         .inner_size()
         .map_err(|e| e.to_string())?
         .to_logical(host_window.scale_factor().unwrap_or(1.0));
-    let (position, popup_size) = popup_rect((size.width, size.height), &kind, x, y);
+    // The hover card's carrier covers exactly the payload's SLIDE BAND —
+    // the window rectangle the card may roam (the frame's law), clamped
+    // into the window. Slides stay inside the band; everything outside
+    // it keeps its own pointer. Menus keep popup_rect's law.
+    let (position, popup_size) = if kind == "hover-card" {
+        let band = card
+            .as_ref()
+            .and_then(|c| c.get("band"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let field = |key: &str| {
+            band.get(key)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                .max(0.0)
+        };
+        let (bx, by, bw, bh) = (field("x"), field("y"), field("w"), field("h"));
+        (
+            LogicalPosition::new(bx, by),
+            LogicalSize::new(
+                bw.max(1.0).min((size.width - bx).max(1.0)),
+                bh.max(1.0).min((size.height - by).max(1.0)),
+            ),
+        )
+    } else {
+        popup_rect((size.width, size.height), &kind, x, y)
+    };
     dismiss_popup(&app, &state, &window_name);
     let label = popup_label(&window_name);
     host_window
@@ -1313,20 +1351,28 @@ pub async fn shell_popup(
         "shell://popup-boot",
         serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id }),
     );
+    let is_card = kind == "hover-card";
     state.lock().popups.insert(
         window_name,
         PopupState {
             kind,
             tab: tab_id,
             group: group_id.map(|g| g as GroupId),
+            card: if is_card { card } else { None },
         },
     );
     // Focus follows the popup: Escape and the arrow keys work from the
-    // first keystroke, exactly like a freshly opened OS menu.
+    // first keystroke, exactly like a freshly opened OS menu. The hover
+    // card breaks the rule on purpose — SetCanActivate(false) +
+    // set_accept_events(false) upstream: the card never takes the
+    // focus, it only paints (webview hosting has no click-through, so
+    // the card also yields any press on its own band — PopupApp's law).
     if let Some(popup) = app.get_webview(&label) {
-        let _ = popup.set_focus();
+        if !is_card {
+            let _ = popup.set_focus();
+        }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// The overlay asks for its context: kind, the addressed tab, and the
@@ -1346,6 +1392,15 @@ pub fn shell_popup_boot(
         }
     };
     let mut context = serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id });
+    if kind == "hover-card" {
+        // The card's content is the frame's dressed payload, relayed
+        // verbatim — the host never re-dresses it (one law home).
+        let inner = state.lock();
+        if let Some(popup) = inner.popups.get(&window_name) {
+            context["card"] = popup.card.clone().unwrap_or(serde_json::Value::Null);
+        }
+        return Ok(context);
+    }
     if kind == "group-editor" {
         if let Some(group_id) = group_id {
             let inner = state.lock();
@@ -1409,6 +1464,58 @@ pub fn shell_popup_close(
     let window_name = window_label_of(&window);
     dismiss_popup(&app, &state, &window_name);
     Ok(())
+}
+
+/// Slide or refresh the LIVE hover card: the frame's new dressed payload
+/// replaces the stored one and rides to the overlay. False means no
+/// card is alive (the fade won the race) — the frame's next show
+/// recreates the widget.
+#[tauri::command]
+pub fn shell_popup_update(
+    window: tauri::Webview,
+    card: serde_json::Value,
+    state: State<'_, ShellState>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let window_name = window_label_of(&window);
+    {
+        let mut inner = state.lock();
+        match inner.popups.get_mut(&window_name) {
+            Some(popup) if popup.kind == "hover-card" => popup.card = Some(card.clone()),
+            _ => return Ok(false),
+        }
+    }
+    let _ = app.emit_to(&popup_label(&window_name), "shell://popup-update", card);
+    Ok(true)
+}
+
+/// Order the live hover card to fade out (the HideHoverCard law: 200ms
+/// out, THEN the widget closes — the overlay plays the fade and asks
+/// [`shell_popup_close`] when it lands). False = nothing alive to fade.
+#[tauri::command]
+pub fn shell_popup_fade(
+    window: tauri::Webview,
+    state: State<'_, ShellState>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let window_name = window_label_of(&window);
+    let is_card = {
+        let inner = state.lock();
+        inner
+            .popups
+            .get(&window_name)
+            .map(|p| p.kind == "hover-card")
+            .unwrap_or(false)
+    };
+    if !is_card {
+        return Ok(false);
+    }
+    let _ = app.emit_to(
+        &popup_label(&window_name),
+        "shell://popup-fade",
+        serde_json::json!({}),
+    );
+    Ok(true)
 }
 
 /// Dismissal from the FRAME or a CONTENT webview ("I was clicked — the

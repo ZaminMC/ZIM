@@ -28,6 +28,15 @@ body {
   inset: 0;
 }
 
+/* The hover card's overlay root: the slide band the carrier webview
+   covers. The overlay never takes focus (host-side); a press on the
+   band itself yields the card (webview hosting has no click-through —
+   the press clears the way for the next one). */
+.hover-card-root {
+  position: absolute;
+  inset: 0;
+}
+
 .menu {
   position: absolute;
   top: 0;

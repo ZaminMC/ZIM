@@ -497,3 +497,160 @@ describe("<PopupApp /> the keyboard contract", () => {
     });
   });
 });
+
+// -- The hover card ---------------------------------------------------------
+// The shell's fifth widget shape: the frame drives it (show, slide, fade),
+// this overlay only paints. The tests exercise the REAL tauri event lane:
+// the mocked @tauri-apps/api/event records the listeners, the tests fire
+// them — the same payloads shell_popup_update / shell_popup_fade carry.
+
+const eventListeners: Array<{ event: string; handler: (e: { payload: unknown }) => void }> = [];
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (event: string, handler: (e: { payload: unknown }) => void) => {
+    eventListeners.push({ event, handler });
+    return Promise.resolve(() => {});
+  },
+}));
+
+const fireShellEvent = (event: string, payload?: unknown): void => {
+  for (const listener of eventListeners) {
+    if (listener.event === event) listener.handler({ payload });
+  }
+};
+
+const HOVER_TAB_CARD = {
+  kind: "tab",
+  x: 40,
+  y: 47,
+  band: { x: 0, y: 47, w: 1024, h: 553 },
+  title: "Server survival — console",
+  domain: "server/survival",
+  members: [],
+  excess: 0,
+};
+
+const HOVER_GROUP_CARD = {
+  kind: "group",
+  x: 40,
+  y: 47,
+  band: { x: 0, y: 47, w: 1024, h: 553 },
+  title: "survival (3 tabs)",
+  domain: null,
+  members: ["Server survival", "Console hub", "zamind — heartbeat"],
+  excess: 2,
+};
+
+describe("<PopupApp /> the hover card", () => {
+  beforeEach(() => {
+    invoked = [];
+    eventListeners.length = 0;
+    bootContext(null);
+    history.replaceState(null, "", "/popup.html");
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+  afterEach(() => {
+    cleanup();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+
+  async function renderCard(card: Record<string, unknown>) {
+    tauriLane();
+    bootContext({ kind: "hover-card", tab_id: null, card });
+    const view = render(<PopupApp />);
+    await waitFor(() => {
+      expect(view.container.querySelector(".hover-card")).not.toBeNull();
+    });
+    return view;
+  }
+
+  it("paints the tab card: title over the domain line, no menu, no gutter law", async () => {
+    const { container } = await renderCard(HOVER_TAB_CARD);
+    expect(container.querySelector(".menu")).toBeNull();
+    expect(container.querySelector(".hover-card")!.textContent).toContain(
+      "Server survival — console",
+    );
+    expect(container.querySelector(".hc-domain")!.textContent).toContain("server/survival");
+    // No gutter dismissal contract — the card closes itself when faded.
+    expect(container.querySelector(".gutter")).toBeNull();
+  });
+
+  it("paints the group card: header, bullet members, the +N More footer", async () => {
+    const { container } = await renderCard(HOVER_GROUP_CARD);
+    const card = container.querySelector(".hover-card")!;
+    expect(card.classList.contains("hc-group")).toBe(true);
+    expect(card.textContent).toContain("survival (3 tabs)");
+    expect(card.textContent).toContain("•  Server survival");
+    expect(card.textContent).toContain("•  Console hub");
+    expect(card.textContent).toContain("+ 2 More");
+    // A group card has no domain line.
+    expect(container.querySelector(".hc-domain")).toBeNull();
+  });
+
+  it("slides on popup-update: the new payload's text shows (the old fades on top)", async () => {
+    const { container } = await renderCard(HOVER_TAB_CARD);
+    await waitFor(() => {
+      expect(eventListeners.some((l) => l.event === "shell://popup-update")).toBe(true);
+    });
+    fireShellEvent("shell://popup-update", { ...HOVER_TAB_CARD, title: "Console hub", domain: "console/hub" });
+    await waitFor(() => {
+      expect(container.querySelector(".hover-card")!.textContent).toContain("Console hub");
+    });
+    // The crossfade keeps the previous text on top until it lands.
+    expect(container.querySelector(".hc-text-fading")!.textContent).toContain(
+      "Server survival — console",
+    );
+  });
+
+  it("fades on popup-fade and closes its own widget when the fade lands", async () => {
+    const { container } = await renderCard(HOVER_TAB_CARD);
+    await waitFor(() => {
+      expect(eventListeners.some((l) => l.event === "shell://popup-fade")).toBe(true);
+    });
+    fireShellEvent("shell://popup-fade");
+    let card = container.querySelector(".hover-card")!;
+    await waitFor(() => {
+      card = container.querySelector(".hover-card")!;
+      expect(card.classList.contains("hover-card-fading")).toBe(true);
+    });
+    // The 200ms fade ends (jsdom never runs the CSS — the component
+    // hears it through the event the animation would fire; jsdom's
+    // AnimationEvent is a stub, so the property rides a raw dispatch).
+    const ended = new Event("animationend", { bubbles: true });
+    Object.defineProperty(ended, "animationName", { value: "hc-fade-out" });
+    fireEvent(card, ended);
+    await waitFor(() => {
+      expect(invoked.some((call) => call.cmd === "shell_popup_close")).toBe(true);
+    });
+  });
+
+  it("an update cancels a pending fade (CancelFadeOut)", async () => {
+    const { container } = await renderCard(HOVER_TAB_CARD);
+    await waitFor(() => {
+      expect(eventListeners.some((l) => l.event === "shell://popup-update")).toBe(true);
+    });
+    fireShellEvent("shell://popup-fade");
+    await waitFor(() => {
+      expect(container.querySelector(".hover-card")!.classList.contains("hover-card-fading")).toBe(
+        true,
+      );
+    });
+    fireShellEvent("shell://popup-update", { ...HOVER_TAB_CARD, title: "Console hub" });
+    await waitFor(() => {
+      expect(container.querySelector(".hover-card")!.classList.contains("hover-card-fading")).toBe(
+        false,
+      );
+    });
+  });
+
+  it("the demo lane renders both review postures from the query", async () => {
+    history.replaceState(null, "", "/popup.html?demo&kind=hover-card-group");
+    const { container } = render(<PopupApp />);
+    await waitFor(() => {
+      expect(container.querySelector(".hover-card.hc-group")).not.toBeNull();
+    });
+    expect(container.querySelector(".hover-card")!.textContent).toContain("survival (4 tabs)");
+    expect(container.querySelector(".hover-card")!.textContent).toContain("+ 1 More");
+    expect(invoked).toHaveLength(0);
+  });
+});
