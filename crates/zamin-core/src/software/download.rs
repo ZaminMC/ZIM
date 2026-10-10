@@ -152,8 +152,12 @@ fn download_streamed(
         });
     }
     // The staging file lives next to the destination: same filesystem,
-    // so the final rename is atomic (ADR-0009 discipline).
-    let staging = dir.join(format!(".zamin-staging-{}.part", std::process::id()));
+    // so the final rename is atomic (ADR-0009 discipline). The name is
+    // UNIQUE per operation: a predictable PID-derived name lets a
+    // malicious plugin pre-symlink the exact path (the daemon then
+    // downloads THROUGH it, outside the root) and makes concurrent
+    // downloads into one directory interleave bytes.
+    let staging = crate::fsops::staging_part(dir, "zamin-staging");
 
     let result = stream_to(url, &staging, expected, options);
 

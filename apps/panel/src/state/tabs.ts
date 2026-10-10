@@ -94,6 +94,8 @@ const CMD = {
   ADD_NEW_TAB_TO_GROUP: 34100,
   TOGGLE_PINNED: 50001,
   TOGGLE_MUTE: 50003,
+  // ⓩ Local: identity-addressed selection (see commandIds.ts).
+  SELECT_TAB_BY_ID: 50024,
 } as const;
 
 /** Desktop host present? (mirror of frame/frameIpc's probe; kept local
@@ -107,6 +109,18 @@ const hostCommand = (id: number, arg?: Record<string, unknown>): void => {
     // The host answers every mirrored verb; a failure here is the dev
     // bridge's absence, never a user-facing error.
   });
+};
+
+/** The host's tab identity is numeric; the shim's local ids (dev-bridge
+ *  mirrors) are strings like `t3-abc`. `Number(id)` on those was NaN,
+ *  which serialized to null and silently retargeted the command onto the
+ *  ACTIVE tab — a loaded footgun. Forward a tab_id ONLY when the id
+ *  genuinely is one; otherwise the host's active-tab fallback is the
+ *  explicit intent (the content view addressing "its" tab IS the active
+ *  one). */
+const hostTabId = (id: TabId): Record<string, unknown> => {
+  const n = Number(id);
+  return Number.isInteger(n) && n > 0 ? { tab_id: n } : {};
 };
 
 const freshTab = (destination: Destination): Tab => ({
@@ -243,7 +257,7 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   close: (id) => {
-    hostCommand(CMD.CLOSE_TAB, { tab_id: Number(id) });
+    hostCommand(CMD.CLOSE_TAB, hostTabId(id));
     set((s) => {
       const index = s.tabs.findIndex((t) => t.id === id);
       if (index === -1) return s;
@@ -292,10 +306,16 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   setActive: (id) => {
-    // Selection by local id: map through the strip position for the host.
-    set((s) => {
-      const index = s.tabs.findIndex((t) => t.id === id);
-      if (index >= 0) hostCommand(CMD.SELECT_TAB_0 + index);
+    // Selection by identity when the id IS a host identity — never the
+    // old `SELECT_TAB_0 + index` arithmetic (Chromium's first-eight
+    // shortcut block: the ninth tab "selected" DUPLICATE_TAB, the tenth
+    // RESTORE_TAB). Local (dev-bridge) ids select locally only; the real
+    // strip's selection is the frame's to drive.
+    set(() => {
+      const n = Number(id);
+      if (Number.isInteger(n) && n > 0) {
+        hostCommand(CMD.SELECT_TAB_BY_ID, { tab_id: n });
+      }
       return { activeId: id };
     });
   },
@@ -315,7 +335,7 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   duplicate: (id) => {
-    hostCommand(CMD.DUPLICATE_TAB, { tab_id: Number(id) });
+    hostCommand(CMD.DUPLICATE_TAB, hostTabId(id));
     set((s) => {
       const index = s.tabs.findIndex((t) => t.id === id);
       const source = s.tabs[index];
@@ -336,7 +356,7 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   togglePin: (id) => {
-    hostCommand(CMD.TOGGLE_PINNED, { tab_id: Number(id) });
+    hostCommand(CMD.TOGGLE_PINNED, hostTabId(id));
     set((s) => {
       // §52 invariant: pinned head, stable within blocks.
       const tabs = s.tabs.map((t) => (t.id === id ? { ...t, pinned: !t.pinned, groupId: undefined } : t));
@@ -365,7 +385,7 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   addToNewGroup: (id) => {
-    hostCommand(CMD.ADD_NEW_TAB_TO_GROUP, { tab_id: Number(id) });
+    hostCommand(CMD.ADD_NEW_TAB_TO_GROUP, hostTabId(id));
     set((s) => {
       const groupId = `g${Object.keys(s.groups).length + 1}-${Math.random().toString(36).slice(2, 6)}`;
       const colors = GROUP_COLORS;
@@ -446,7 +466,7 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   toggleMute: (id) => {
-    hostCommand(CMD.TOGGLE_MUTE, { tab_id: Number(id) });
+    hostCommand(CMD.TOGGLE_MUTE, hostTabId(id));
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, muted: !t.muted } : t)),
     }));

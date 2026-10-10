@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::restore::{commit, CommitError};
+use super::restore::{commit, CommitError, CommitJournal, JournalPhase};
 use super::*;
 use crate::server::registry::tempdir;
 
@@ -646,7 +646,7 @@ fn commit_failure_rolls_the_live_tree_back() {
     fs::create_dir_all(rollback.join("world")).unwrap();
     fs::write(rollback.join("world/blocker"), b"occupied").unwrap();
 
-    let err = commit(&root, &staging, &rollback).unwrap_err();
+    let err = commit(&root, &staging, &rollback, None).unwrap_err();
     assert!(
         matches!(err, CommitError::RolledBack(_)),
         "a sane rollback is the expected failure: {err:?}"
@@ -678,12 +678,137 @@ fn commit_happy_path_swaps_the_trees() {
     fs::write(staging.join("world/level.dat"), b"data").unwrap();
 
     let rollback = dir.path.join("rollback");
-    commit(&root, &staging, &rollback).unwrap();
+    commit(&root, &staging, &rollback, None).unwrap();
 
     assert!(!root.join("old.txt").exists());
     assert_eq!(fs::read(root.join("new.txt")).unwrap(), b"new");
     assert_eq!(fs::read(root.join("world/level.dat")).unwrap(), b"data");
     assert!(!staging.exists() && !rollback.exists(), "workspace cleaned");
+}
+
+// --- crash recovery --------------------------------------------------------
+
+#[test]
+fn recovery_prepared_phase_returns_the_live_tree() {
+    let dir = tempdir::scoped("restore-crash-prepared");
+    let root = dir.path.join("server");
+    fs::create_dir_all(root.join("world")).unwrap();
+    fs::write(root.join("world/level.dat"), b"live").unwrap();
+    fs::write(root.join("server.properties"), b"live\n").unwrap();
+
+    // Crash window: journal written, move-aside partially done — the live
+    // `world` was already moved into the rollback dir.
+    let rollback = root.join(".zamin-restore-backup-w");
+    fs::create_dir_all(&rollback).unwrap();
+    fs::rename(root.join("world"), rollback.join("world")).unwrap();
+    let staging = root.join(".zamin-restore-staging-w");
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("new.txt"), b"staged").unwrap();
+    let journal = CommitJournal {
+        path: root.join(RESTORE_JOURNAL_NAME),
+        id: "w".to_owned(),
+        staged: vec!["world".to_owned(), "new.txt".to_owned()],
+    };
+    journal.write(JournalPhase::Prepared).unwrap();
+
+    let note = recover_interrupted(&root).unwrap();
+    assert!(note.is_some());
+    // The live tree is fully back and nothing staged leaked in.
+    assert_eq!(fs::read(root.join("world/level.dat")).unwrap(), b"live");
+    assert_eq!(fs::read(root.join("server.properties")).unwrap(), b"live\n");
+    assert!(!root.join("new.txt").exists());
+    assert!(!staging.exists() && !rollback.exists(), "workspace cleaned");
+    assert!(!journal.path.exists(), "journal removed");
+}
+
+#[test]
+fn recovery_aside_phase_removes_arrivals_and_returns_the_tree() {
+    let dir = tempdir::scoped("restore-crash-aside");
+    let root = dir.path.join("server");
+    fs::create_dir_all(root.join("world")).unwrap();
+    fs::write(root.join("world/level.dat"), b"live").unwrap();
+    let _ = dir;
+
+    // Crash window: move-aside complete (live tree wholly in rollback),
+    // move-in partial (staged `new.txt` landed, `world` did not).
+    let rollback = root.join(".zamin-restore-backup-w");
+    fs::create_dir_all(&rollback).unwrap();
+    fs::rename(root.join("world"), rollback.join("world")).unwrap();
+    let staging = root.join(".zamin-restore-staging-w");
+    fs::create_dir_all(&staging).unwrap();
+    fs::create_dir_all(staging.join("world")).unwrap();
+    fs::write(staging.join("world/level.dat"), b"staged").unwrap();
+    fs::write(root.join("new.txt"), b"staged-arrival").unwrap();
+    let journal = CommitJournal {
+        path: root.join(RESTORE_JOURNAL_NAME),
+        id: "w".to_owned(),
+        staged: vec!["world".to_owned(), "new.txt".to_owned()],
+    };
+    journal.write(JournalPhase::Aside).unwrap();
+
+    let note = recover_interrupted(&root).unwrap();
+    assert!(note.is_some());
+    assert_eq!(fs::read(root.join("world/level.dat")).unwrap(), b"live");
+    assert!(!root.join("new.txt").exists(), "the staged arrival is gone");
+    assert!(!staging.exists() && !rollback.exists(), "workspace cleaned");
+    assert!(!journal.path.exists(), "journal removed");
+}
+
+#[test]
+fn recovery_committed_phase_finishes_the_cleanup() {
+    let dir = tempdir::scoped("restore-crash-committed");
+    let root = dir.path.join("server");
+    fs::create_dir_all(&root).unwrap();
+    let _ = dir;
+
+    // Crash window: the restored tree stands; the old tree is still in
+    // the rollback dir and the journal still says committed.
+    fs::write(root.join("new.txt"), b"restored").unwrap();
+    let rollback = root.join(".zamin-restore-backup-w");
+    fs::create_dir_all(&rollback).unwrap();
+    fs::write(rollback.join("old.txt"), b"old-live").unwrap();
+    let staging = root.join(".zamin-restore-staging-w");
+    fs::create_dir_all(&staging).unwrap();
+    let journal_path = root.join(RESTORE_JOURNAL_NAME);
+    let journal = CommitJournal {
+        path: journal_path.clone(),
+        id: "w".to_owned(),
+        staged: vec!["new.txt".to_owned()],
+    };
+    journal.write(JournalPhase::Committed).unwrap();
+
+    let note = recover_interrupted(&root).unwrap();
+    assert!(note.is_some());
+    assert_eq!(fs::read(root.join("new.txt")).unwrap(), b"restored");
+    assert!(!rollback.exists() && !staging.exists(), "workspace cleaned");
+    assert!(!journal_path.exists(), "journal removed");
+}
+
+#[test]
+fn recovery_without_a_journal_sweeps_stale_staging_only() {
+    let dir = tempdir::scoped("restore-crash-stale");
+    let root = dir.path.join("server");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("live.txt"), b"live").unwrap();
+    let _ = dir;
+
+    // A stale staging dir (inert archive copy) is swept; a stale rollback
+    // dir without a journal may hold the only copy of live data and is
+    // NEVER touched.
+    let staging = root.join(".zamin-restore-staging-old");
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("junk"), b"junk").unwrap();
+    let rollback = root.join(".zamin-restore-backup-old");
+    fs::create_dir_all(rollback.join("precious")).unwrap();
+    fs::write(rollback.join("precious/data"), b"only-copy").unwrap();
+
+    let note = recover_interrupted(&root).unwrap();
+    assert!(note.is_none());
+    assert!(!staging.exists(), "stale staging swept");
+    assert!(
+        rollback.join("precious/data").exists(),
+        "journal-less rollback untouched"
+    );
 }
 
 // --- disk-full classification ------------------------------------------------

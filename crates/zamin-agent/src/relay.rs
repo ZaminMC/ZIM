@@ -19,8 +19,19 @@ pub async fn serve_connection(
 ) -> Result<(), AgentError> {
     let mut remote = Connection::new(io);
     // The gate runs before the local connection exists: an unauthenticated
-    // peer never causes a daemon session.
-    let Some(first) = remote.recv().await? else {
+    // peer never causes a daemon session. The wait for the first frame is
+    // BOUNDED — an unauthenticated peer that connects and sends nothing
+    // used to park its task and TLS buffers forever (a trivial remote
+    // resource drain, one connection at a time).
+    const FIRST_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    let first = match tokio::time::timeout(FIRST_FRAME_TIMEOUT, remote.recv()).await {
+        Ok(received) => received?,
+        Err(_) => {
+            tracing::debug!("closing a connection that never authenticated");
+            return Ok(());
+        }
+    };
+    let Some(first) = first else {
         return Ok(());
     };
     match auth::gate(&first, token) {

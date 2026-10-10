@@ -138,6 +138,19 @@ pub fn write(
     use uuid::Uuid;
 
     let decoded = decode_chunk(content)?;
+    // The protocol's own chunk cap, enforced on the daemon side too: the
+    // CLI honors it, but the frame cap alone would let a 16 MiB chunk
+    // through every other client — the protocol constant is the contract.
+    if decoded.len() as u32 > zamin_protocol::files::FILES_WRITE_MAX_CHUNK {
+        return Err(ProtocolError::new(
+            zamin_protocol::error::ErrorCode::FsNotWritable,
+            format!(
+                "files.write chunks are capped at {} bytes; this one is {} — page the upload.",
+                zamin_protocol::files::FILES_WRITE_MAX_CHUNK,
+                decoded.len()
+            ),
+        ));
+    }
     let staging = root.join(STAGING_DIR);
     std::fs::create_dir_all(&staging).map_err(|source| {
         to_protocol(&zamin_core::error::CoreError::Io {
@@ -145,6 +158,9 @@ pub fn write(
             source,
         })
     })?;
+    // Abandoned staging handles (a crashed upload, a closed panel
+    // mid-write) used to live forever; sweep pages untouched for a day.
+    sweep_stale_staging(&staging);
 
     let id = match staging_id {
         Some(id) if id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
@@ -179,6 +195,28 @@ pub fn write(
         staging_id: id,
         bytes_staged,
     })
+}
+
+/// Abandoned staging pages (a crashed upload, a closed panel mid-write)
+/// used to live forever. Anything untouched for a day is garbage by any
+/// reasonable account — a live upload touches its page continuously.
+fn sweep_stale_staging(staging: &Path) {
+    const STAGING_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+    let Ok(read) = std::fs::read_dir(staging) else {
+        return;
+    };
+    for entry in read.flatten() {
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if modified
+            .elapsed()
+            .map(|age| age > STAGING_TTL)
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// `files.commit`: one atomic rename from the staging file onto `target`,

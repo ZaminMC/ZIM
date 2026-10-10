@@ -68,8 +68,10 @@ describe("writeScoreboardTitle", () => {
       "# the main scoreboard\ntitle=Old\nline.1=Players: 12\n\n# keep me\n",
     );
     const after = writeScoreboardTitle(before, "&aNew");
+    // The untouched pair keeps its own raw bytes (the line-preservation
+    // contract); only the title re-renders.
     expect(serializeProperties(after)).toBe(
-      "# the main scoreboard\ntitle=&aNew\nline.1=Players\\: 12\n\n# keep me\n",
+      "# the main scoreboard\ntitle=&aNew\nline.1=Players: 12\n\n# keep me\n",
     );
   });
 });

@@ -396,16 +396,27 @@ impl ProcessOps for WindowsProcessOps {
                 };
                 let job = unsafe { create_job_with_limits(&spec.limits)? };
                 if unsafe { AssignProcessToJobObject(job, process_handle) } == 0 {
+                    let source = std::io::Error::last_os_error();
                     unsafe { CloseHandle(job) };
-                    return Err(PlatformError::Io(std::io::Error::last_os_error()));
+                    // The child EXISTS by now — an unsupervised, running
+                    // server with no job boundary. Kill it before failing:
+                    // a spawn failure must never leave an orphan behind.
+                    let _ = child.start_kill();
+                    return Err(PlatformError::Io(source));
                 }
                 JobHandle(job)
             }
             ChildFlavor::Raw { process, .. } => {
                 let job = unsafe { create_job_with_limits(&spec.limits)? };
                 if unsafe { AssignProcessToJobObject(job, process.as_raw_handle()) } == 0 {
+                    let source = std::io::Error::last_os_error();
                     unsafe { CloseHandle(job) };
-                    return Err(PlatformError::Io(std::io::Error::last_os_error()));
+                    // The child exists and is STILL SUSPENDED — without
+                    // this kill it would hang forever, never resumed and
+                    // never terminated (a suspended zombie holding every
+                    // pipe and handle).
+                    unsafe { TerminateProcess(process.as_raw_handle(), 1) };
+                    return Err(PlatformError::Io(source));
                 }
                 JobHandle(job)
             }
@@ -504,17 +515,28 @@ impl ProcessOps for WindowsProcessOps {
         // Adopted servers were spawned by a previous daemon, so the Job
         // Object that provides tree-kill is unreachable here; the kill
         // degrades to the single verified process. Identity must be
-        // verified by the caller (ADR-0005).
+        // verified by the caller (ADR-0005). Only "no such process"
+        // maps to ProcessGone — a refusal (access denied, protected
+        // process) used to be misreported as "gone" and hid the real
+        // cause from the stop ladder and the operator.
         unsafe {
             let process = OpenProcess(PROCESS_TERMINATE, 0, pid);
             if process.is_null() {
-                return Err(PlatformError::ProcessGone { pid });
+                let source = std::io::Error::last_os_error();
+                return Err(match source.raw_os_error() {
+                    Some(87) /* ERROR_INVALID_PARAMETER: no such pid */ => {
+                        PlatformError::ProcessGone { pid }
+                    }
+                    _ => PlatformError::Io(source),
+                });
             }
             let ok = TerminateProcess(process, 1);
-            CloseHandle(process);
             if ok == 0 {
-                return Err(PlatformError::ProcessGone { pid });
+                let source = std::io::Error::last_os_error();
+                CloseHandle(process);
+                return Err(PlatformError::Io(source));
             }
+            CloseHandle(process);
         }
         Ok(())
     }

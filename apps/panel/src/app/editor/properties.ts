@@ -1,15 +1,20 @@
 // The properties AST (§33): a line-preserving parse of Java-properties
 // files. The editor never re-serializes the file from a rebuilt model —
-// it keeps every raw line and rewrites only the pairs the operator
-// touched, so comments, blank lines, ordering, and keys the compose view
-// does not know survive a save byte for byte. Compose is a view over
-// this AST, never a second representation that can drift.
+// it keeps every raw line and rewrites only the pairs whose key or value
+// actually changed, so comments, blank lines, ordering, CRLF endings,
+// and keys the compose view does not know survive a save byte for byte
+// (serialize re-parses each pair's own raw line and re-renders it only
+// when it no longer decodes to the pair's current key/value — no
+// mutation path can forget to mark itself dirty). Compose is a view
+// over this AST, never a second representation that can drift.
 
 export type PropertyLineKind = "blank" | "comment" | "pair";
 
 export interface PropertyLine {
   kind: PropertyLineKind;
-  /** The untouched raw text (for blank/comment) — the round-trip keeps it. */
+  /** The untouched raw text — for every kind, pairs included. A pair
+   *  whose raw still decodes to its own key/value is emitted verbatim;
+   *  the raw is the byte-for-byte round-trip. */
   raw: string;
   /** For pairs: the key, decoded (backslash escapes resolved). */
   key?: string;
@@ -44,20 +49,30 @@ function decodeValue(text: string): string {
   return out;
 }
 
-function encodeValue(text: string): string {
+const ESCAPES: Record<string, string> = {
+  "\\": "\\\\",
+  "=": "\\=",
+  ":": "\\:",
+  " ": "\\ ",
+  "#": "\\#",
+  "!": "\\!",
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
+  "\f": "\\f",
+};
+
+/** Keys must escape everything the parser would treat as structure:
+ *  separators (`=` `:` and whitespace — a space in a key would otherwise
+ *  become the separator on re-parse), comment starters (`#` `!` — a key
+ *  starting with one would become a comment), and the usual control
+ *  characters. */
+function encodeKey(text: string): string {
   let out = "";
   for (const ch of text) {
-    if (ch === "\\" || ch === "=" || ch === ":" || ch === "\n" || ch === "\r" || ch === "\t" || ch === "\f") {
-      const simple: Record<string, string> = {
-        "\\": "\\\\",
-        "=": "\\=",
-        ":": "\\:",
-        "\n": "\\n",
-        "\r": "\\r",
-        "\t": "\\t",
-        "\f": "\\f",
-      };
-      out += simple[ch] ?? "";
+    const esc = ESCAPES[ch];
+    if (esc !== undefined) {
+      out += esc;
       continue;
     }
     if (ch < " ") {
@@ -69,71 +84,131 @@ function encodeValue(text: string): string {
   return out;
 }
 
-/** One file → lines. A pair is `key sep value` where sep is the first
- *  unescaped `=`, `:`, or whitespace run; keys keep their case. A line
- *  that parses as nothing else is an honest `pair` with an empty value
- *  (properties semantics: a bare key means ""). */
+/** Values escape separators and control characters. A value's LEADING
+ *  run of spaces/tabs is the separator's own whitespace to the parser —
+ *  escape it or the round-trip eats it; INNER and trailing spaces are
+ *  literal content in a value (unlike a key, where any space is
+ *  structural) and stay unescaped. */
+function encodeValue(text: string): string {
+  let out = "";
+  let leading = true;
+  for (const ch of text) {
+    if (leading && (ch === " " || ch === "\t")) {
+      out += ESCAPES[ch] ?? ch;
+      continue;
+    }
+    leading = false;
+    if (ch === " " || ch === "\t") {
+      out += ch; // inner/trailing: literal value content
+      continue;
+    }
+    const esc = ESCAPES[ch];
+    if (esc !== undefined) {
+      out += esc;
+      continue;
+    }
+    if (ch < " ") {
+      out += `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** Decode one pair line's body (no line ending) into key + value. A
+ *  pair is `key sep value` where sep is the first unescaped `=`, `:`,
+ *  or whitespace run; keys keep their case. A line that parses as
+ *  nothing else is an honest pair with an empty value (properties
+ *  semantics: a bare key means ""). */
+function decodePairBody(body: string): { key: string; value: string } {
+  let sep = -1;
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === "\\") {
+      i += 1;
+      continue;
+    }
+    if (ch === "=" || ch === ":") {
+      sep = i;
+      break;
+    }
+    if (ch === " " || ch === "\t") {
+      sep = i;
+      break;
+    }
+  }
+  if (sep === -1) {
+    return { key: decodeValue(body.trim()), value: "" };
+  }
+  const keyPart = body.slice(0, sep).trim();
+  let rest = body.slice(sep + 1);
+  // One optional run of spaces after the separator is the format's own.
+  const afterSep = rest.match(/^[ \t]*/)?.[0].length ?? 0;
+  rest = rest.slice(afterSep);
+  return { key: decodeValue(keyPart), value: decodeValue(rest) };
+}
+
+/** One file → lines. A CRLF file carries its `\r` at the end of every
+ *  raw line — that is the line's ENDING, not part of its value: the CR
+ *  is parsed off the body but kept on the raw, so an untouched file
+ *  round-trips byte for byte and an edited line re-renders with the
+ *  file's own ending. */
 export function parseProperties(text: string): PropertyLine[] {
   const lines = text.split("\n");
   // A trailing newline is a real final line break, not an extra line.
   const trailingBreak = lines.length > 1 && lines.at(-1) === "";
   if (trailingBreak) lines.pop();
   const parsed: PropertyLine[] = lines.map((raw) => {
-    const trimmed = raw.trimStart();
+    const body = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const trimmed = body.trimStart();
     if (trimmed === "") return { kind: "blank", raw };
     if (trimmed.startsWith("#") || trimmed.startsWith("!")) return { kind: "comment", raw };
-    // Split key from value at the first unescaped separator.
-    let sep = -1;
-    for (let i = 0; i < raw.length; i += 1) {
-      const ch = raw[i];
-      if (ch === "\\") {
-        i += 1;
-        continue;
-      }
-      if (ch === "=" || ch === ":") {
-        sep = i;
-        break;
-      }
-      if (ch === " " || ch === "\t") {
-        sep = i;
-        break;
-      }
-    }
-    if (sep === -1) {
-      return { kind: "pair", raw, key: decodeValue(raw.trim()), value: "" };
-    }
-    const keyPart = raw.slice(0, sep).trim();
-    let rest = raw.slice(sep + 1);
-    // One optional run of spaces after the separator is the format's own.
-    const afterSep = rest.match(/^[ \t]*/)?.[0].length ?? 0;
-    rest = rest.slice(afterSep);
-    return { kind: "pair", raw, key: decodeValue(keyPart), value: decodeValue(rest) };
+    const { key, value } = decodePairBody(body);
+    return { kind: "pair", raw, key, value };
   });
   if (trailingBreak) parsed.push({ kind: "blank", raw: "" });
   return parsed;
 }
 
-/** Lines → file text. The raw bytes of blank and comment lines survive;
- *  a pair renders key + separator + encoded value on one line. */
+/** Lines → file text. Blank and comment lines survive as their raw
+ *  bytes; a pair survives as its own raw line while that raw still
+ *  decodes to the pair's current key/value, and re-renders (key +
+ *  `=` + encoded value, keeping the line's original CR ending) the
+ *  moment it no longer does. */
 export function serializeProperties(lines: PropertyLine[]): string {
   return lines
     .map((line) => {
       if (line.kind !== "pair") return line.raw;
-      return `${encodeValue(line.key ?? "")}=${encodeValue(line.value ?? "")}`;
+      const key = line.key ?? "";
+      const value = line.value ?? "";
+      if (line.raw !== "") {
+        const body = line.raw.endsWith("\r") ? line.raw.slice(0, -1) : line.raw;
+        const asWritten = decodePairBody(body);
+        if (asWritten.key === key && asWritten.value === value) return line.raw;
+      }
+      const cr = line.raw.endsWith("\r") ? "\r" : "";
+      return `${encodeKey(key)}=${encodeValue(value)}${cr}`;
     })
     .join("\n");
 }
 
 /** An immutable edit: the pair named `key` (first match) gets `value`;
- *  everything else — including its position — stays exactly as it was. */
+ *  everything else — including its position — stays exactly as it was.
+ *  Setting a pair to the value it already carries is a no-op (the raw
+ *  line stays put, byte for byte). */
 export function setPropertyValue(
   lines: PropertyLine[],
   key: string,
   value: string,
 ): PropertyLine[] {
-  return lines.map((line) =>
-    line.kind === "pair" && line.key === key ? { ...line, value } : line,
-  );
+  let matched = false;
+  return lines.map((line) => {
+    if (line.kind !== "pair" || matched || line.key !== key) return line;
+    matched = true;
+    if (line.value === value) return line;
+    return { ...line, value };
+  });
 }
 
 /** `server-port` → "Server Port". Words split on `-`, `.`, `_`. */

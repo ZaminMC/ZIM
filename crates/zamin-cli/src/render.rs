@@ -1,5 +1,6 @@
 //! Human-facing rendering. `--json` bypasses all of this.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use zamin_cli::ClientError;
@@ -15,6 +16,34 @@ use zamin_protocol::plugins::{
 use zamin_protocol::schedules::{ScheduleAction, ScheduleSpec, SchedulesListResult};
 use zamin_protocol::server::{ServerDetails, ServerState, ServerSummary};
 use zamin_protocol::streams::{LogLevel, LogLine};
+
+/// Neutralize terminal control sequences in untrusted text before it
+/// reaches a println. Raw MC server output (any plugin can print
+/// anything — CSI/OSC sequences have written clipboards via OSC 52 and
+/// executed commands in some terminals) and remote catalog metadata used
+/// to be printed verbatim. ESC and every other control character except
+/// `\n`/`\t` is dropped; the visible text survives untouched.
+fn sanitize(text: &str) -> Cow<'_, str> {
+    let risky = text.chars().any(|c| {
+        let v = c as u32;
+        v == 0x7f || (v < 0x20 && c != '\n' && c != '\t') || (0x80..=0x9f).contains(&v)
+    });
+    if !risky {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let v = c as u32;
+        // Keep \n and \t; keep printable ASCII and everything from the
+        // printable-Unicode range; drop the control ranges and DEL.
+        let keep = (v == '\n' as u32 || v == '\t' as u32)
+            || (v >= 0x20 && v != 0x7f && !(0x80..=0x9f).contains(&v));
+        if keep {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
+}
 
 pub fn state_text(state: ServerState) -> &'static str {
     match state {
@@ -116,9 +145,11 @@ pub fn log_line_typed(line: &LogLine) {
 
 fn print_log(level: &str, thread: Option<&str>, line: &str) {
     let level = level.to_ascii_uppercase();
+    // Server output is hostile-capable input (see `sanitize`): the
+    // terminal is the attack surface.
     match thread {
-        Some(thread) => println!("{level:<6} [{thread}] {line}"),
-        None => println!("{level:<6} {line}"),
+        Some(thread) => println!("{:<6} [{}] {}", level, sanitize(thread), sanitize(line)),
+        None => println!("{:<6} {}", level, sanitize(line)),
     }
 }
 
@@ -195,11 +226,11 @@ pub fn plugin_hits(result: &PluginsSearchResult) {
     for hit in &result.hits {
         println!(
             "{:<slug_width$}  {:<title_width$}  {:>10}  {:<7}  {}",
-            hit.slug,
-            hit.title,
+            sanitize(&hit.slug),
+            sanitize(&hit.title),
             hit.downloads,
             hit.loaders.join(","),
-            hit.project_id,
+            sanitize(&hit.project_id),
             slug_width = slug_width,
             title_width = title_width,
         );
@@ -227,10 +258,10 @@ pub fn plugin_versions(result: &PluginsVersionsResult) {
     for version in &result.versions {
         println!(
             "{:<number_width$}  {:<8}  {:<13}  {}",
-            version.version_number,
-            version.id,
+            sanitize(&version.version_number),
+            sanitize(&version.id),
             version.game_versions.join(","),
-            version.file_name.as_deref().unwrap_or("(not installable)"),
+            sanitize(version.file_name.as_deref().unwrap_or("(not installable)")),
             number_width = number_width,
         );
     }
@@ -261,7 +292,7 @@ pub fn installed_plugins(result: &PluginsInstalledResult) {
         };
         println!(
             "{:<name_width$}  {:>9}  {}{}",
-            entry.file_name,
+            sanitize(&entry.file_name),
             bytes_text(entry.size_bytes),
             utc_date_text(entry.modified_ms),
             note,
@@ -1009,6 +1040,7 @@ pub fn discovery_table(result: &DiscoverResult) {
         } else {
             name
         };
+        let name = sanitize(&name).into_owned();
         println!(
             "{:<10}  {:<18}  {:<7}  {:<10}  {}",
             server.state.as_deref().unwrap_or(""),

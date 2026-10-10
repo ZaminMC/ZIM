@@ -185,12 +185,12 @@ impl ModrinthClient {
         );
         match idempotent_get(|| self.agent.get(&url).call().map_err(Box::new)) {
             Ok(response) => {
-                let body = response
-                    .into_string()
-                    .map_err(|e| CoreError::HttpTransport {
+                let body = crate::http::read_capped_string(response).map_err(|e| {
+                    CoreError::HttpTransport {
                         url: url.clone(),
                         message: e.to_string(),
-                    })?;
+                    }
+                })?;
                 let parsed: RawVersion =
                     serde_json::from_str(&body).map_err(|e| CoreError::HttpTransport {
                         url: url.clone(),
@@ -209,12 +209,12 @@ impl ModrinthClient {
 
     fn get_json(&self, url: &str) -> Result<String, CoreError> {
         match idempotent_get(|| self.agent.get(url).call().map_err(Box::new)) {
-            Ok(response) => response
-                .into_string()
-                .map_err(|e| CoreError::HttpTransport {
+            Ok(response) => {
+                crate::http::read_capped_string(response).map_err(|e| CoreError::HttpTransport {
                     url: url.to_owned(),
                     message: e.to_string(),
-                }),
+                })
+            }
             Err(error) => Err(http_error(url, *error)),
         }
     }

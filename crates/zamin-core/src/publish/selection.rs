@@ -269,6 +269,7 @@ pub fn resolve_selection(
     walk(
         root,
         PathBuf::new(),
+        0,
         sel,
         limits,
         &mut entries_seen,
@@ -282,6 +283,7 @@ pub fn resolve_selection(
 fn walk(
     root: &Path,
     rel_dir: PathBuf,
+    depth: usize,
     sel: &PublishSelection,
     limits: ResolveLimits,
     entries_seen: &mut u64,
@@ -331,7 +333,22 @@ fn walk(
             continue;
         }
         if meta.is_dir() {
-            walk(root, rel, sel, limits, entries_seen, total_bytes, out)?;
+            // Depth cap, same ceiling as fsops: recursion without one is
+            // a stack overflow waiting for a pathological tree (an abort,
+            // not an error — it would take the whole daemon down).
+            if depth >= crate::fsops::WALK_MAX_DEPTH {
+                return Err(CoreError::CopyTooDeep { path: abs });
+            }
+            walk(
+                root,
+                rel,
+                depth + 1,
+                sel,
+                limits,
+                entries_seen,
+                total_bytes,
+                out,
+            )?;
             continue;
         }
         if !meta.is_file() {
@@ -342,7 +359,9 @@ fn walk(
             continue;
         }
         let size = meta.len();
-        *total_bytes += size;
+        // Saturate: a tree of crafted sparse giants cannot wrap the sum
+        // past the cap.
+        *total_bytes = (*total_bytes).saturating_add(size);
         if *total_bytes > limits.max_total_bytes {
             return Err(CoreError::PublishTooLarge {
                 found: *total_bytes,

@@ -76,6 +76,15 @@ pub struct Actor {
     root: PathBuf,
     runtime_dir: PathBuf,
     global_config_path: PathBuf,
+    /// mtime-keyed cache of the GLOBAL config: the tick loop asks for
+    /// effective settings every 250 ms, and the old path re-read and
+    /// re-parsed the file on every ask — sync I/O on the actor's own
+    /// task, four times a second, per server, forever. A stat is not a
+    /// read: the cache turns the steady state into one metadata call,
+    /// and both daemon-mediated config.set writes and hand edits move
+    /// the mtime, so changes still land on the very next tick.
+    global_config_cache:
+        std::sync::Mutex<Option<(Option<std::time::SystemTime>, config::GlobalConfigFile)>>,
     /// The daemon's managed JDK root (`<data>/java`): auto-selection
     /// considers fetched runtimes alongside system-wide candidates.
     managed_java_root: PathBuf,
@@ -140,6 +149,7 @@ impl Actor {
             root,
             runtime_dir,
             global_config_path,
+            global_config_cache: std::sync::Mutex::new(None),
             managed_java_root,
             hub,
             gate,
@@ -330,12 +340,22 @@ impl Actor {
             .java_major_required
             .or_else(|| settings.mc_version.as_deref().and_then(java_major_for));
 
-        let java = settings
-            .java_path
-            .clone()
-            .map(Ok)
-            .unwrap_or_else(|| select_java(&self.managed_java_root, required))
-            .map_err(|e| self.preflight_failure(e))?;
+        let java = match settings.java_path.clone() {
+            Some(java) => Ok(java),
+            None => {
+                // `select_java` spawns and inspects whole JVMs synchronously
+                // (run_capture + thread sleeps, up to seconds) — run on the
+                // actor's own task it would stall the 250 ms tick loop and
+                // every queued command for the whole fleet-visible window.
+                // The single-inspect call below already knows this; the
+                // selection loop must too.
+                let root = self.managed_java_root.clone();
+                tokio::task::spawn_blocking(move || select_java(&root, required))
+                    .await
+                    .map_err(|e| as_internal(e.to_string()))?
+            }
+        }
+        .map_err(|e| self.preflight_failure(e))?;
         let java_info = tokio::task::spawn_blocking({
             let java = java.clone();
             move || zamin_core::java::inspect(&java)
@@ -496,9 +516,30 @@ impl Actor {
     }
 
     async fn load_effective_settings(&self) -> Result<EffectiveSettings, CoreError> {
-        let global = config::load_global(&self.global_config_path)?;
+        let global = self.load_global_cached()?;
         let per = self.load_server_config().await;
         Ok(config::layer(&global.defaults, &per.settings))
+    }
+
+    /// The global half of effective settings, cached on the file's
+    /// mtime (see the field's doc). `load_global` answers defaults for a
+    /// missing file, so a `None` mtime caches like any other.
+    fn load_global_cached(&self) -> Result<config::GlobalConfigFile, CoreError> {
+        let mtime = std::fs::metadata(&self.global_config_path)
+            .and_then(|meta| meta.modified())
+            .ok();
+        let mut cache = self
+            .global_config_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((cached_mtime, cached)) = cache.as_ref() {
+            if *cached_mtime == mtime {
+                return Ok(cached.clone());
+            }
+        }
+        let loaded = config::load_global(&self.global_config_path)?;
+        *cache = Some((mtime, loaded.clone()));
+        Ok(loaded)
     }
 
     async fn load_server_config(&self) -> ServerConfigFile {
@@ -1062,7 +1103,14 @@ impl Actor {
                     ),
                 }
             }
-            self.stop_requested_at = Some(Instant::now() - GRACEFUL_GRACE);
+            // The clock now pretends the stdin window already spent itself,
+            // so the force condition below (elapsed >= stop_timeout +
+            // GRACEFUL_GRACE) lands exactly one grace window after the
+            // signal — the same arithmetic `signal_adopted_graceful` uses.
+            // (An earlier `now - GRACEFUL_GRACE` reset made force wait a
+            // whole extra stop_timeout after the signal: a stuck server
+            // took ~2×stop_timeout to die.)
+            self.stop_requested_at = Some(Instant::now() - stop_timeout);
             return;
         }
 
@@ -1261,8 +1309,61 @@ pub struct AdoptRecord {
     pub started_at_ms: i64,
 }
 
-/// Stream stdout/stderr into per-line batches; the batcher flushes at ~50 ms
-/// so IPC carries batches, not per-line messages (ADR-0006).
+/// Read one newline-terminated line with a byte cap. A logical log line
+/// has no inherent bound: a hostile or pathological emitter can write
+/// megabytes with no newline, and a >16 MiB line would overflow the
+/// frame cap and kill the client's session writer (besides the memory
+/// spike through ring + batch + notification). Bytes past the cap are
+/// drained (the stream stays newline-aligned) and counted; the caller
+/// marks the cut in the log itself.
+async fn read_capped_line<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    cap: usize,
+) -> std::io::Result<Option<(Vec<u8>, u64)>> {
+    let mut line: Vec<u8> = Vec::with_capacity(256);
+    let mut dropped: u64 = 0;
+    loop {
+        let (consumed, complete) = {
+            let available = reader.fill_buf().await?;
+            if available.is_empty() {
+                // EOF: the final line (no trailing newline) or a clean end.
+                if line.is_empty() && dropped == 0 {
+                    return Ok(None);
+                }
+                return Ok(Some((line, dropped)));
+            }
+            if let Some(pos) = available.iter().position(|&b| b == b'\n') {
+                let end = pos + 1; // include the newline
+                let room = cap.saturating_sub(line.len());
+                if room > 0 {
+                    let take = end.min(room);
+                    line.extend_from_slice(&available[..take]);
+                    dropped += (end - take) as u64;
+                } else {
+                    dropped += end as u64;
+                }
+                (end, true)
+            } else {
+                // No newline in this buffer: take what fits, count the rest,
+                // keep draining on the next fill_buf.
+                let room = cap.saturating_sub(line.len());
+                let take = available.len().min(room);
+                line.extend_from_slice(&available[..take]);
+                dropped += (available.len() - take) as u64;
+                (available.len(), false)
+            }
+        };
+        reader.consume(consumed);
+        if complete {
+            return Ok(Some((line, dropped)));
+        }
+    }
+}
+
+/// Stream stdout/stderr into per-line batches; the batcher flushes at ~10 ms
+/// so IPC carries batches, not per-line messages (ADR-0006). No single
+/// logical line may exceed `LOG_LINE_MAX_BYTES` — the stream stays aligned
+/// and the cut is visible in the log itself.
 async fn pump_logs(
     pipe: impl tokio::io::AsyncRead + Unpin + Send + 'static,
     server_id: String,
@@ -1271,27 +1372,32 @@ async fn pump_logs(
 ) {
     let (tx, mut rx) = mpsc::channel::<LogLine>(4096);
     tokio::spawn(async move {
-        let mut reader = BufReader::new(pipe);
-        let mut buf = Vec::with_capacity(256);
+        let mut reader = BufReader::with_capacity(64 * 1024, pipe);
+        const LOG_LINE_MAX_BYTES: usize = 256 * 1024;
         loop {
-            buf.clear();
-            match reader.read_until(b'\n', &mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    let raw = String::from_utf8_lossy(&buf);
-                    let line = logparse::parse_line(&raw, now_ms());
-                    let line = LogLine {
-                        level: if level == LogLevel::Unknown {
-                            line.level
-                        } else {
-                            level
-                        },
-                        ..line
-                    };
-                    if tx.send(line).await.is_err() {
-                        break;
-                    }
-                }
+            let (bytes, dropped) = match read_capped_line(&mut reader, LOG_LINE_MAX_BYTES).await {
+                Ok(Some(pair)) => pair,
+                Ok(None) | Err(_) => break,
+            };
+            let mut raw = String::from_utf8_lossy(&bytes).into_owned();
+            if dropped > 0 {
+                // The cut is visible in the log itself: an operator seeing
+                // a truncated line knows the emitter, not the pipeline,
+                // lost the bytes.
+                let body = raw.strip_suffix('\n').unwrap_or(&raw);
+                raw = format!("{body} …[zamin: {dropped} bytes dropped]\n");
+            }
+            let line = logparse::parse_line(&raw, now_ms());
+            let line = LogLine {
+                level: if level == LogLevel::Unknown {
+                    line.level
+                } else {
+                    level
+                },
+                ..line
+            };
+            if tx.send(line).await.is_err() {
+                break;
             }
         }
     });

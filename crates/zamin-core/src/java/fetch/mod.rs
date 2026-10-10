@@ -80,9 +80,8 @@ impl AdoptiumClient {
                 },
             },
         )?;
-        let body = response
-            .into_string()
-            .map_err(|e| CoreError::HttpTransport {
+        let body =
+            crate::http::read_capped_string(response).map_err(|e| CoreError::HttpTransport {
                 url: url.clone(),
                 message: e.to_string(),
             })?;
@@ -122,9 +121,8 @@ impl AdoptiumClient {
                 },
             },
         )?;
-        let body = response
-            .into_string()
-            .map_err(|e| CoreError::HttpTransport {
+        let body =
+            crate::http::read_capped_string(response).map_err(|e| CoreError::HttpTransport {
                 url: link.to_owned(),
                 message: e.to_string(),
             })?;
@@ -255,9 +253,9 @@ pub fn install_jdk(
         }
         None => {
             // Download next to the managed root so extraction is a plain
-            // read (the no-cache path keeps its old shape).
-            let archive_path =
-                managed_root.join(format!(".jdk-download-{}.part", std::process::id()));
+            // read (the no-cache path keeps its old shape). Unique staging
+            // name: concurrent fetches must not share a part file.
+            let archive_path = crate::fsops::staging_part(managed_root, "jdk-download");
             let download = crate::software::download_to_dir(
                 &asset.url,
                 managed_root,
@@ -464,7 +462,9 @@ fn extract_tar_gz(
             ));
         }
         let size = entry.header().size().unwrap_or(0);
-        total_bytes += size;
+        // Saturate: header-controlled sizes must not wrap the running sum
+        // past the cap (a debug-build panic, a release-build bypass).
+        total_bytes = total_bytes.saturating_add(size);
         if total_bytes > MAX_UNPACKED_BYTES || entries_done > MAX_ENTRIES {
             if let Some(t) = &top {
                 let _ = std::fs::remove_dir_all(managed_root.join(t));
@@ -523,7 +523,8 @@ fn extract_zip(
         if file.is_symlink() {
             return Err(unsafe_entry(file.name(), "link entries are never unpacked"));
         }
-        total_bytes += file.size();
+        // Saturate (see the tar path): header sizes are attacker data.
+        total_bytes = total_bytes.saturating_add(file.size());
         if total_bytes > MAX_UNPACKED_BYTES || (i as u64) > MAX_ENTRIES {
             return Err(CoreError::ArchiveTooLarge {
                 found: total_bytes,

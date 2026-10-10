@@ -58,8 +58,8 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
     InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    WaitForSingleObject, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
 use crate::error::PlatformError;
@@ -542,15 +542,21 @@ pub fn spawn_appcontainer(
     let (stderr_ours, stderr_child) = make_pipe(false)?;
 
     // 3. Command line (raw CreateProcessW wants the whole line, NUL
-    //    terminated — `wide` provides the terminator).
-    let mut cmdline = wide(
-        &spec
-            .args
+    //    terminated — `wide` provides the terminator). The FIRST token
+    //    is argv[0]: the CRT's CommandLineToArgvW derives argv[0] from
+    //    the command line, NOT from lpApplicationName — a line built
+    //    from `spec.args` alone would hand the JVM "-Xms" as its own
+    //    name and shift every real argument by one. `std::process::Command`
+    //    prepends the program implicitly; the raw path must do it itself.
+    let mut cmdline = wide(&format!(
+        "{} {}",
+        quote_arg(&spec.program.to_string_lossy()),
+        spec.args
             .iter()
             .map(|a| quote_arg(a))
             .collect::<Vec<_>>()
-            .join(" "),
-    );
+            .join(" ")
+    ));
 
     // 4. Environment: the parent's env with TMP/TEMP aimed INSIDE the
     //    jail (the container cannot write the user's temp dir; the JVM
@@ -597,13 +603,38 @@ pub fn spawn_appcontainer(
         Reserved: 0,
     };
 
-    // 6. The attribute list: one attribute, the security capabilities.
+    // 6. The attribute list: two attributes — the security capabilities,
+    //    and the explicit handle list. bInheritHandles=1 without a handle
+    //    list would leak EVERY inheritable handle in the daemon (other
+    //    servers' pipe ends, sockets) into the AppContainer child; the
+    //    list narrows inheritance to exactly the three stdio handles,
+    //    which is the sandbox's own threat model.
     let mut attr_size = 0usize;
-    unsafe { InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut attr_size) };
+    unsafe { InitializeProcThreadAttributeList(std::ptr::null_mut(), 2, 0, &mut attr_size) };
     let mut attr_buf: Vec<u8> = vec![0u8; attr_size];
     let attr_list = attr_buf.as_mut_ptr() as *mut c_void;
-    if unsafe { InitializeProcThreadAttributeList(attr_list, 1, 0, &mut attr_size) } == 0 {
+    if unsafe { InitializeProcThreadAttributeList(attr_list, 2, 0, &mut attr_size) } == 0 {
         return Err(last_os_error("initializing the process attribute list"));
+    }
+    let handle_list: [HANDLE; 3] = [
+        stdin_child.as_raw_handle(),
+        stdout_child.as_raw_handle(),
+        stderr_child.as_raw_handle(),
+    ];
+    if unsafe {
+        UpdateProcThreadAttribute(
+            attr_list,
+            0,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+            handle_list.as_ptr() as *const c_void,
+            std::mem::size_of::<[HANDLE; 3]>(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    } == 0
+    {
+        unsafe { DeleteProcThreadAttributeList(attr_list as _) };
+        return Err(last_os_error("restricting the inherited handle list"));
     }
     if unsafe {
         UpdateProcThreadAttribute(

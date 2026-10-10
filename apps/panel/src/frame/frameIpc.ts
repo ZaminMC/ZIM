@@ -697,6 +697,13 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
       if (target) activate(target.id);
       break;
     }
+    case 50024: { // SELECT_TAB_BY_ID — identity-addressed selection (the
+      // host's ⓩ verb; the demo mirror speaks it so the frame's mouse
+      // path exercises the same command the desktop does).
+      const tid = Number(arg?.tab_id);
+      if (byId(tid)) activate(tid);
+      break;
+    }
     case 34027: { // DUPLICATE_TAB
       const source = byId(Number(arg?.tab_id ?? demo.active));
       if (source) {

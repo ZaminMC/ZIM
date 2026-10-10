@@ -60,18 +60,17 @@ export const useMetrics = create<MetricsState>()((set) => ({
 const counts = new Map<string, number>();
 const disposers = new Map<string, () => void>();
 
-/** Begin (or join) the metrics stream for a server. Fire-and-forget: the
- *  store simply stays empty until the wire is up — no error surfaces from
- *  a background stream. */
-export function ensureMetrics(serverId: string): void {
-  const count = (counts.get(serverId) ?? 0) + 1;
-  counts.set(serverId, count);
-  if (count > 1) return;
+/** Begin (or join) the metrics stream for a server. A failed subscribe
+ *  retries on a short backoff while references remain — chips that went
+ *  empty on a transient failure used to stay empty until unmount (the
+ *  stream never came back on its own). Fire-and-forget otherwise: the
+ *  store simply stays empty until the wire is up. */
+const RETRY_BASE_MS = 2_000;
+const RETRY_MAX_MS = 30_000;
+const retryAttempts = new Map<string, number>();
 
-  // History first, then the live stream (its ring replay is deduped).
-  void metricsRange({ serverId, maxSamples: METRICS_WINDOW })
-    .then((result) => useMetrics.getState().seed(serverId, result.samples))
-    .catch(() => {}); // unknown server or wire down: live samples still flow
+function subscribeWithRetry(serverId: string): void {
+  if ((counts.get(serverId) ?? 0) < 1) return; // dropped while waiting
   void subscribeMetrics(serverId, {
     onPayload: (notification) => {
       if (notification.payload.kind === "metrics") {
@@ -87,7 +86,28 @@ export function ensureMetrics(serverId: string): void {
       }
       disposers.set(serverId, () => sub.dispose());
     })
-    .catch((error: unknown) => logWarn("metrics", "metrics stream failed", error));
+    .catch((error: unknown) => {
+      logWarn("metrics", "metrics stream failed", error);
+      const attempt = (retryAttempts.get(serverId) ?? 0) + 1;
+      retryAttempts.set(serverId, attempt);
+      const delay = Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS);
+      setTimeout(() => {
+        retryAttempts.delete(serverId);
+        subscribeWithRetry(serverId);
+      }, delay);
+    });
+}
+
+export function ensureMetrics(serverId: string): void {
+  const count = (counts.get(serverId) ?? 0) + 1;
+  counts.set(serverId, count);
+  if (count > 1) return;
+
+  // History first, then the live stream (its ring replay is deduped).
+  void metricsRange({ serverId, maxSamples: METRICS_WINDOW })
+    .then((result) => useMetrics.getState().seed(serverId, result.samples))
+    .catch(() => {}); // unknown server or wire down: live samples still flow
+  subscribeWithRetry(serverId);
 }
 
 /** Drop one reference; the last one closes the subscription. History

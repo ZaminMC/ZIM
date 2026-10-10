@@ -245,24 +245,37 @@ impl HubHandle {
         let mut last_replayed = seq_cursor;
         if stream == StreamKind::Events {
             if let Some(from) = seq_cursor {
-                let rings = inner
-                    .rings
-                    .get(server_id.as_deref().unwrap_or_default())
-                    .ok_or(HubError::CursorInvalid)?;
-                let oldest = rings.events.front().map(|(seq, _)| *seq);
-                if oldest.is_some_and(|oldest| oldest > from) {
+                // A cursor beyond this daemon's newest seq cannot have
+                // come from THIS generation (seq only grows): it is a
+                // pre-restart cursor whose numbering now collides with
+                // this generation's early events. Replaying nothing and
+                // answering live from here would SILENTLY SKIP every
+                // event between boot and now — the client must re-sync
+                // from a fresh snapshot instead.
+                let current = self.hub.seq.load(Ordering::SeqCst);
+                if from > current {
                     return Err(HubError::CursorInvalid);
                 }
-                for (seq, event) in rings.events.iter().filter(|(s, _)| *s > from) {
-                    let _ = sender.try_send(StreamNotification {
-                        stream,
-                        server_id: server_id.clone(),
-                        seq: *seq,
-                        payload: StreamPayload::Event {
-                            event: event.clone(),
-                        },
-                    });
-                    last_replayed = Some(*seq);
+                // A scope with NO ring has never published: nothing to
+                // replay for it, and registering live from `from` is
+                // exactly right. (A ring that ROTATED past `from` is a
+                // real gap and stays a CursorInvalid.)
+                if let Some(rings) = inner.rings.get(server_id.as_deref().unwrap_or_default()) {
+                    let oldest = rings.events.front().map(|(seq, _)| *seq);
+                    if oldest.is_some_and(|oldest| oldest > from) {
+                        return Err(HubError::CursorInvalid);
+                    }
+                    for (seq, event) in rings.events.iter().filter(|(s, _)| *s > from) {
+                        let _ = sender.try_send(StreamNotification {
+                            stream,
+                            server_id: server_id.clone(),
+                            seq: *seq,
+                            payload: StreamPayload::Event {
+                                event: event.clone(),
+                            },
+                        });
+                        last_replayed = Some(*seq);
+                    }
                 }
             }
         }

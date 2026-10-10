@@ -39,17 +39,37 @@ const REQUEST_CACHE_TTL: Duration = Duration::from_secs(600);
 const REQUEST_CACHE_CAP: usize = 1024;
 const OUTBOUND_QUEUE: usize = 256;
 
+/// One frame bound for the wire, or the flush barrier (see
+/// `Outbound::flush_barrier`).
+enum OutboundFrame {
+    Data(Bytes),
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
 /// Shared outbound queue: everything destined for the wire.
 #[derive(Clone)]
 struct Outbound {
-    tx: mpsc::Sender<Bytes>,
+    tx: mpsc::Sender<OutboundFrame>,
 }
 
 impl Outbound {
     async fn send(&self, payload: Bytes, what: &str) {
-        if self.tx.send(payload).await.is_err() {
+        if self.tx.send(OutboundFrame::Data(payload)).await.is_err() {
             tracing::warn!("outbound queue closed while sending {what}");
         }
+    }
+
+    /// A FIFO barrier through the writer: the returned receiver resolves
+    /// once every frame enqueued BEFORE the barrier is on the wire. Used
+    /// by `daemon.shutdown` so `exit(0)` cannot beat the ok-reply's flush.
+    async fn flush_barrier(&self) -> tokio::sync::oneshot::Receiver<()> {
+        let (ack, rx) = tokio::sync::oneshot::channel();
+        if self.tx.send(OutboundFrame::Flush(ack)).await.is_err() {
+            // Queue closed (writer dead): the receiver resolves
+            // immediately with Err — callers treat that as "nothing more
+            // will be written", which is the truth of a dead wire.
+        }
+        rx
     }
 
     async fn reply(&self, response: Response) {
@@ -64,16 +84,35 @@ pub async fn serve(connection: Connection, engine: Engine, audit: Audit) -> Resu
     let (outbound_tx, mut outbound_rx) = mpsc::channel(OUTBOUND_QUEUE);
     let outbound = Outbound { tx: outbound_tx };
 
-    // The writer task is the only sender on the wire.
-    let writer = tokio::spawn(async move {
+    // The writer task is the only sender on the wire. It ends when the
+    // queue closes (normal session end) or when a send fails — an I/O
+    // error, or a frame the transport refuses (FrameTooLarge > 16 MiB).
+    // Either way the wire is dead: the session must not outlive its
+    // writer, or every reply and notification is silently discarded
+    // while the client hangs until its own timeout. (In-flight requests
+    // are detached tasks; cancelling the loop strands nothing.)
+    let mut writer = tokio::spawn(async move {
         while let Some(frame) = outbound_rx.recv().await {
-            if write_half.send(frame).await.is_err() {
-                break;
+            match frame {
+                OutboundFrame::Data(frame) => {
+                    if let Err(e) = write_half.send(frame).await {
+                        tracing::warn!("session writer ended: {e}");
+                        break;
+                    }
+                }
+                OutboundFrame::Flush(ack) => {
+                    // Everything enqueued before the barrier is on the wire.
+                    let _ = ack.send(());
+                }
             }
         }
     });
 
-    let result = session_loop(&mut read_half, &outbound, &engine, &audit).await;
+    let result = tokio::select! {
+        result = session_loop(&mut read_half, &outbound, &engine, &audit) => result,
+        // The writer died: tear the session down instead of zombie-ing on.
+        _ = &mut writer => Err("outbound writer ended; session torn down".to_owned()),
+    };
 
     // Closing the outbound queue ends the writer task.
     drop(outbound);
@@ -127,19 +166,31 @@ async fn session_loop(
             let has_method = value.get("method").is_some();
             let has_id_key = value.get("id").is_some();
             if has_method && has_id_key {
-                // It *tried* to be a request but the id is unreadable (e.g.
-                // an object or a float). JSON-RPC 2.0 §4.1: reply with a
-                // typed error carrying a Null id. Genuine notifications
-                // (method without id) get no reply, per JSON-RPC §4.2.
-                outbound
-                    .reply(Response::err(
-                        RequestId::Null,
-                        ProtocolError::new(
-                            ErrorCode::ProtocolInvalidRequest,
-                            "The request id must be a number or a string.",
+                // It *tried* to be a request: name the actual defect. A
+                // wrong or missing `jsonrpc` version used to masquerade
+                // as an id problem (JSON-RPC 2.0 §4.1: the error reply
+                // carries a Null id either way).
+                let error = if value.get("jsonrpc").and_then(|v| v.as_str())
+                    == Some(zamin_protocol::envelope::JSONRPC_VERSION)
+                {
+                    ProtocolError::new(
+                        ErrorCode::ProtocolInvalidRequest,
+                        "The request id must be a number or a string.",
+                    )
+                } else {
+                    let found = value
+                        .get("jsonrpc")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned);
+                    ProtocolError::new(
+                        ErrorCode::ProtocolVersionUnsupported,
+                        format!(
+                            "The jsonrpc field must be \"2.0\"; this request says {}.",
+                            found.as_deref().unwrap_or("(missing)")
                         ),
-                    ))
-                    .await;
+                    )
+                };
+                outbound.reply(Response::err(RequestId::Null, error)).await;
             }
             // Anything else (notifications, responses, stray shapes) is not
             // ours to judge; v0 has client→daemon requests only.
@@ -191,8 +242,15 @@ async fn session_loop(
                 ))
                 .await;
             let engine = engine.clone();
+            // The barrier rides the queue RIGHT BEHIND the ok-reply; when
+            // the writer acknowledges it (inside the task below, after the
+            // servers settle) the reply is provably on the wire — exit(0)
+            // can no longer race the flush and leave the client holding a
+            // broken pipe instead of its answer.
+            let flushed = outbound.flush_barrier().await;
             tokio::spawn(async move {
                 engine.shutdown_all().await;
+                let _ = flushed.await;
                 tracing::info!("daemon shutdown: all servers settled, exiting");
                 std::process::exit(0);
             });
@@ -210,11 +268,42 @@ async fn session_loop(
             });
 
         if let Some(key) = request_key {
-            if let Some(cached) = cache.lookup(key) {
-                outbound
-                    .reply(Response::ok(request.id.clone(), cached))
-                    .await;
-                continue;
+            match cache.lookup_or_claim(key) {
+                Lookup::Done(cached) => {
+                    outbound
+                        .reply(Response::ok(request.id.clone(), cached))
+                        .await;
+                    continue;
+                }
+                Lookup::Wait(rx) => {
+                    // A retry whose original is still executing: ride its
+                    // result instead of double-executing it (a second
+                    // backup.create on the same requestId was the whole
+                    // hazard). The wait happens OFF the loop — the loop
+                    // reads and answers, it never waits on work.
+                    let outbound_task = outbound.clone();
+                    let id = request.id.clone();
+                    tokio::spawn(async move {
+                        match rx.await {
+                            Ok(value) => {
+                                outbound_task.reply(Response::ok(id, value)).await;
+                            }
+                            Err(_) => {
+                                outbound_task
+                                    .reply(Response::err(
+                                        id,
+                                        ProtocolError::new(
+                                            ErrorCode::InternalError,
+                                            "The original copy of this request did not complete; retry with a fresh requestId.",
+                                        ),
+                                    ))
+                                    .await;
+                            }
+                        }
+                    });
+                    continue;
+                }
+                Lookup::Claimed => {}
             }
         }
 
@@ -267,8 +356,15 @@ async fn session_loop(
                         .map(|(name, version)| (name.as_str(), version.as_str())),
                 );
             }
-            if let (Some(key), Some(result)) = (request_key, response.result.clone()) {
-                cache_task.remember(key, result);
+            match (request_key, response.result.clone()) {
+                (Some(key), Some(result)) => cache_task.fulfill(key, result),
+                (Some(key), None) => {
+                    // Errors are not cached: release the claim so a retry
+                    // re-executes instead of waiting on a result that
+                    // never comes.
+                    cache_task.forget(key);
+                }
+                _ => {}
             }
             outbound_task.reply(response).await;
         });
@@ -382,23 +478,11 @@ async fn handle_subscribe(
         .await
         .map_err(|e| dispatch_error(request.id.clone(), e))?;
 
-    // Forwarder: hub queue → outbound queue. Both are bounded; the hub
-    // degrades slow consumers, so this task can never stall the daemon
-    // (ADR-0006).
-    let forward_outbound = outbound.clone();
-    tokio::spawn(async move {
-        let mut receiver = subscription.receiver;
-        while let Some(notification) = receiver.recv().await {
-            let note = zamin_protocol::envelope::Notification::new(
-                methods::STREAMS_NOTIFICATION,
-                serde_json::to_value(notification).ok(),
-            );
-            if let Ok(payload) = serde_json::to_vec(&note) {
-                forward_outbound.send(payload.into(), "notification").await;
-            }
-        }
-    });
-
+    // The reply goes on the wire BEFORE the forwarder exists: both share
+    // the single outbound queue, so a client that drops notifications
+    // arriving ahead of the subscribe confirmation (the opening logs
+    // batch can otherwise beat the response on a multi-thread runtime)
+    // still sees the stream start in order.
     let subscription_id = result.subscription_id.clone();
     let payload = match serde_json::to_value(result) {
         Ok(payload) => payload,
@@ -415,6 +499,23 @@ async fn handle_subscribe(
     outbound
         .reply(Response::ok(request.id.clone(), payload))
         .await;
+
+    // Forwarder: hub queue → outbound queue. Both are bounded; the hub
+    // degrades slow consumers, so this task can never stall the daemon
+    // (ADR-0006).
+    let forward_outbound = outbound.clone();
+    tokio::spawn(async move {
+        let mut receiver = subscription.receiver;
+        while let Some(notification) = receiver.recv().await {
+            let note = zamin_protocol::envelope::Notification::new(
+                methods::STREAMS_NOTIFICATION,
+                serde_json::to_value(notification).ok(),
+            );
+            if let Ok(payload) = serde_json::to_vec(&note) {
+                forward_outbound.send(payload.into(), "notification").await;
+            }
+        }
+    });
     Ok(subscription_id)
 }
 
@@ -673,12 +774,30 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
         methods::AUDIT_LIST => {
             // The audit's read side (ADR-0011): newest-first, paged, and
             // like every read it is not itself audited — a listing floods
-            // the file without making the system safer.
+            // the file without making the system safer. The whole-file
+            // read runs on the blocking pool: it grew up on the async
+            // path, and the file has no rotation.
             let params: zamin_protocol::audit::AuditListParams = match request.parse_params() {
                 Ok(params) => params,
                 Err(e) => return unreadable(id, e),
             };
-            let read = audit.read(params.limit, params.offset);
+            let audit_for_read = audit.clone();
+            let read = match tokio::task::spawn_blocking(move || {
+                audit_for_read.read(params.limit, params.offset)
+            })
+            .await
+            {
+                Ok(read) => read,
+                Err(e) => {
+                    return Response::err(
+                        id,
+                        ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("the audit read task failed: {e}"),
+                        ),
+                    )
+                }
+            };
             json_ok(id, read)
         }
         // Server configuration surfaces (founder §37–39, ADR-0019). The
@@ -1292,10 +1411,23 @@ fn unreadable(id: RequestId, error: serde_json::Error) -> Response {
     )
 }
 
-/// Bounded, TTL'd dedupe of recently completed mutating requests, keyed by
-/// the client's requestId (UUIDv7, compared as its 128-bit value).
+/// Bounded, TTL'd dedupe of mutating requests, keyed by the client's
+/// requestId (UUIDv7, compared as its 128-bit value). A key's first sight
+/// CLAIMS it (an in-flight marker): a duplicate arriving while the
+/// original still executes waits on its result instead of dispatching a
+/// second copy — the dedupe window previously covered only completed
+/// requests, so a client retry during a slow backup double-executed it.
+enum CacheEntry {
+    InFlight {
+        waiters: Vec<tokio::sync::oneshot::Sender<serde_json::Value>>,
+    },
+    Done {
+        value: serde_json::Value,
+    },
+}
+
 struct RequestCache {
-    entries: Mutex<HashMap<u128, (Instant, serde_json::Value)>>,
+    entries: Mutex<HashMap<u128, (Instant, CacheEntry)>>,
 }
 
 impl Default for RequestCache {
@@ -1306,21 +1438,50 @@ impl Default for RequestCache {
     }
 }
 
+enum Lookup {
+    /// Completed within the TTL window: replay this value.
+    Done(serde_json::Value),
+    /// A copy is executing: ride its result through the receiver.
+    Wait(tokio::sync::oneshot::Receiver<serde_json::Value>),
+    /// First sight: the caller dispatches and later fulfills or forgets.
+    Claimed,
+}
+
 impl RequestCache {
-    fn lookup(&self, key: u128) -> Option<serde_json::Value> {
+    fn lookup_or_claim(&self, key: u128) -> Lookup {
         let mut entries = self
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (stamp, value) = entries.get(&key)?;
-        if stamp.elapsed() > REQUEST_CACHE_TTL {
-            entries.remove(&key);
-            return None;
+        let expired = |stamp: &Instant| stamp.elapsed() > REQUEST_CACHE_TTL;
+        match entries.get_mut(&key) {
+            Some((stamp, CacheEntry::Done { value })) if !expired(stamp) => {
+                return Lookup::Done(value.clone());
+            }
+            Some((stamp, CacheEntry::InFlight { waiters })) if !expired(stamp) => {
+                // The TTL also bounds a wedged claim: an InFlight older
+                // than the window means its dispatch died without
+                // fulfilling — fall through and re-claim (re-execute)
+                // rather than wait forever.
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                waiters.push(tx);
+                return Lookup::Wait(rx);
+            }
+            _ => {}
         }
-        Some(value.clone())
+        entries.insert(
+            key,
+            (
+                Instant::now(),
+                CacheEntry::InFlight {
+                    waiters: Vec::new(),
+                },
+            ),
+        );
+        Lookup::Claimed
     }
 
-    fn remember(&self, key: u128, value: serde_json::Value) {
+    fn fulfill(&self, key: u128, value: serde_json::Value) {
         let mut entries = self
             .entries
             .lock()
@@ -1328,9 +1489,31 @@ impl RequestCache {
         if entries.len() >= REQUEST_CACHE_CAP {
             // Clear on overflow rather than an LRU: the window is a retry
             // safety net, and a 1024-request burst in one session already
-            // means something unusual.
+            // means something unusual. (In-flight waiters dropped by the
+            // clear get the typed "did not complete" error.)
             entries.clear();
         }
-        entries.insert(key, (Instant::now(), value));
+        let waiters = match entries.insert(
+            key,
+            (
+                Instant::now(),
+                CacheEntry::Done {
+                    value: value.clone(),
+                },
+            ),
+        ) {
+            Some((_, CacheEntry::InFlight { waiters })) => waiters,
+            _ => Vec::new(),
+        };
+        for tx in waiters {
+            let _ = tx.send(value.clone());
+        }
+    }
+
+    fn forget(&self, key: u128) {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&key);
     }
 }

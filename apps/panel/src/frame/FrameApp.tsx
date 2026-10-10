@@ -250,6 +250,8 @@ export function FrameApp() {
   const [suggests, setSuggests] = useState<Suggestion[] | null>(null);
   const [suggestActive, setSuggestActive] = useState(-1);
   const suggestTimer = useRef<number | null>(null);
+  // The suggest popup's latest-wins ticket (see fetchSuggests).
+  const suggestSeq = useRef(0);
   const typedRef = useRef("");
   // The boot must never fail silently: a white window teaches nothing.
   // Three spaced retries, then an honest error panel with a manual retry.
@@ -562,17 +564,17 @@ export function FrameApp() {
   }, [snap]);
 
   // The model's tab order is snapshot.tabs' order (the host maps it
-  // straight from strip.tabs) — the slot view interleaves group chips
-  // and hides collapsed tabs, so positions must come from the model's
-  // array, never from the rendered slot sequence.
+  // straight from strip.tabs) — but SELECTION addresses the tab by its
+  // identity, never its position: the old `SELECT_TAB_0 + index`
+  // arithmetic only covered Chromium's first-eight shortcut block and
+  // overflowed into DUPLICATE_TAB (34027) and RESTORE_TAB (34028) from
+  // the ninth tab on, while a reorder can shift an index between render
+  // and click.
   const selectTab = useCallback(
     (tabId: number) => {
-      if (snap) {
-        const index = snap.tabs.findIndex((t) => t.id === tabId);
-        if (index >= 0) void shellCommand(CMD.SELECT_TAB_0 + index);
-      }
+      void shellCommand(CMD.SELECT_TAB_BY_ID, { tab_id: tabId });
     },
-    [snap],
+    [],
   );
 
   // The drag session — Chromium's TabDragController, frame side. A
@@ -1217,7 +1219,10 @@ export function FrameApp() {
 
   /** The popup's debounced ask (upstream's autocomplete controller
    *  paces its providers): 80ms after the last keystroke, the typed
-   *  text against the fleet projection. An empty field closes. */
+   *  text against the fleet projection. An empty field closes. The
+   *  ticket is the latest-wins guard the classifier already carries —
+   *  out-of-order IPC answers used to repaint STALE rows (and reset the
+   *  active index) over the current keystroke's. */
   const fetchSuggests = (text: string) => {
     if (suggestTimer.current != null) window.clearTimeout(suggestTimer.current);
     const trimmed = text.trim();
@@ -1225,9 +1230,11 @@ export function FrameApp() {
       closeSuggests();
       return;
     }
+    const ticket = ++suggestSeq.current;
     suggestTimer.current = window.setTimeout(() => {
       void omniboxSuggest(text, fleetBrief(useFavicons.getState())).then(
         (rows) => {
+          if (ticket !== suggestSeq.current) return; // a newer keystroke owns the popup
           setSuggests(rows.length > 0 ? rows : null);
           setSuggestActive(-1);
         },

@@ -10,9 +10,11 @@
 //! is a miss (and its file is dropped), never a plausible-looking lie.
 //! Blocking on purpose: callers already run inside `spawn_blocking`.
 
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
@@ -21,6 +23,20 @@ use crate::error::CoreError;
 use crate::software::{DownloadOptions, DownloadOutcome, Verified};
 
 const META_FILE: &str = "meta.json";
+
+/// Total-bytes ceiling for the runtime cache. The cache used to grow
+/// without bound — multi-GB JDKs and every jar version, forever. Entries
+/// now evict least-recently-used first (meta.json's mtime IS the last-use
+/// stamp — every validated hit rewrites it); the entry a fetch just
+/// stored is never its own eviction victim. Eight GiB holds a JDK family
+/// plus a jar history with room to spare.
+pub const CACHE_MAX_TOTAL_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
+/// Process-wide single-flight registry, keyed by cache root + URL:
+/// concurrent `fetch`es of the same URL (a second server installing the
+/// same jar, a job retry) wait for the first download instead of racing
+/// it, then find the entry the first one stored.
+static FETCH_LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct CacheMeta {
@@ -63,6 +79,20 @@ impl Cache {
 
     fn entry_dir(&self, url: &str) -> PathBuf {
         self.root.join(Self::key(url))
+    }
+
+    /// The per-(root, url) single-flight lock. A std Mutex is deliberate:
+    /// `fetch` is blocking by design and already runs on a blocking
+    /// thread; waiting for the in-flight download of the SAME asset is
+    /// exactly what the waiter wants to do.
+    fn fetch_lock(root: &Path, url: &str) -> Arc<Mutex<()>> {
+        let registry = FETCH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut map = registry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.entry(format!("{}|{}", root.display(), url))
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     fn read_meta(entry: &Path) -> Option<CacheMeta> {
@@ -122,10 +152,14 @@ impl Cache {
     /// A validated hit, or None. Validation: the meta record exists, the
     /// artifact's size matches, and its re-hashed digest matches. An
     /// unsound artifact is deleted on sight (a miss, and the entry
-    /// cannot poison the next caller).
+    /// cannot poison the next caller). A hit also refreshes the entry's
+    /// last-use stamp — meta.json's mtime, the eviction order — through
+    /// an atomic rewrite of identical bytes (concurrent readers are
+    /// unaffected).
     pub fn lookup(&self, url: &str) -> Option<CachedArtifact> {
         let entry = self.entry_dir(url);
-        let meta = Self::read_meta(&entry)?;
+        let meta_bytes = std::fs::read(entry.join(META_FILE)).ok()?;
+        let meta: CacheMeta = serde_json::from_slice(&meta_bytes).ok()?;
         let path = entry.join(&meta.file);
         let Ok(size) = std::fs::metadata(&path) else {
             return None;
@@ -139,6 +173,7 @@ impl Cache {
             let _ = std::fs::remove_file(&path);
             return None;
         }
+        let _ = crate::fsops::atomic_write(&entry.join(META_FILE), &meta_bytes);
         Some(CachedArtifact {
             path,
             size: meta.size,
@@ -184,21 +219,10 @@ impl Cache {
             path: entry.join(META_FILE),
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, source.to_string()),
         })?;
-        let mut meta_file =
-            File::create(entry.join(META_FILE)).map_err(|source| CoreError::Io {
-                path: entry.join(META_FILE),
-                source,
-            })?;
-        meta_file
-            .write_all(&meta_bytes)
-            .map_err(|source| CoreError::Io {
-                path: entry.join(META_FILE),
-                source,
-            })?;
-        meta_file.sync_all().map_err(|source| CoreError::Io {
-            path: entry.join(META_FILE),
-            source,
-        })?;
+        // Atomic (unique temp + fsync + rename): a crash mid-write used
+        // to leave a torn meta.json — a permanent miss with an orphaned
+        // artifact. The rename also stamps the entry's last-use.
+        crate::fsops::atomic_write(&entry.join(META_FILE), &meta_bytes)?;
         Ok(CachedArtifact {
             path: dest,
             size,
@@ -206,11 +230,58 @@ impl Cache {
         })
     }
 
+    /// Evict least-recently-used entries until the cache fits its
+    /// quota. Best-effort: eviction trouble never fails an install, and
+    /// the entry a fetch just stored (`keep`) is never a victim.
+    fn evict_to_quota(&self, keep: &Path) {
+        let Ok(read) = std::fs::read_dir(&self.root) else {
+            return;
+        };
+        let mut entries: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
+        let mut total: u64 = 0;
+        for dir in read.flatten() {
+            let path = dir.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(meta) = Self::read_meta(&path) else {
+                // An unaccountable entry: stale staging garbage. Its size
+                // is unknown — count nothing, sweep it.
+                let _ = std::fs::remove_dir_all(&path);
+                continue;
+            };
+            // Artifact + a 4 KiB page for meta.json.
+            let size = meta.size.saturating_add(4096);
+            let used = std::fs::metadata(path.join(META_FILE))
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            total = total.saturating_add(size);
+            entries.push((path, used, size));
+        }
+        if total <= CACHE_MAX_TOTAL_BYTES {
+            return;
+        }
+        // Oldest last-use first.
+        entries.sort_by_key(|(_, used, _)| *used);
+        for (path, _, size) in entries {
+            if total <= CACHE_MAX_TOTAL_BYTES {
+                break;
+            }
+            if path == keep {
+                continue;
+            }
+            let _ = std::fs::remove_dir_all(&path);
+            total = total.saturating_sub(size);
+        }
+    }
+
     /// The full flow: check → validate → use; miss → download into the
     /// cache's staging area (the caller's published checksum and
     /// progress/cancel ride along) → publish → return. Offline installs
     /// are the hit path; nothing about the miss path changes the
-    /// downloader's own verification discipline.
+    /// downloader's own verification discipline. Single-flight per URL:
+    /// concurrent fetches of the same asset wait for the winner instead
+    /// of racing downloads into the same entry.
     pub fn fetch(
         &self,
         url: &str,
@@ -221,12 +292,27 @@ impl Cache {
         if let Some(hit) = self.lookup(url) {
             return Ok(hit);
         }
+        // Single-flight: the lock is held across the whole download. A
+        // waiter re-looks-up after acquiring — the first fetcher's store
+        // is its hit. (A poisoned lock — a panicked first fetcher — is
+        // recovered, not propagated: the next claimant simply runs.)
+        let flight = Self::fetch_lock(&self.root, url);
+        let _guard = flight
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(hit) = self.lookup(url) {
+            return Ok(hit);
+        }
         let entry = self.entry_dir(url);
         std::fs::create_dir_all(&entry).map_err(|source| CoreError::Io {
             path: entry.clone(),
             source,
         })?;
-        let staging = entry.join(format!(".staging-{}.part", std::process::id()));
+        // Unique staging name per fetch: same-directory concurrent fetches
+        // previously interleaved bytes through the identical PID-derived
+        // part file and raced the store rename (spurious
+        // ChecksumMismatch; a pre-symlinked name would escape the root).
+        let staging = crate::fsops::staging_part(&entry, "staging");
         let outcome = crate::software::download_to_staging(url, &staging, expected, options);
         match outcome {
             Ok(downloaded) => {
@@ -236,7 +322,12 @@ impl Cache {
                     "sha256"
                 };
                 match self.store(url, &staging, &downloaded.digest, algorithm, file_name) {
-                    Ok(artifact) => Ok(artifact),
+                    Ok(artifact) => {
+                        // The cache just grew: enforce the quota (this
+                        // entry is exempt as its own cause).
+                        self.evict_to_quota(&entry);
+                        Ok(artifact)
+                    }
                     Err(store_error) => {
                         let _ = std::fs::remove_file(&staging);
                         Err(store_error)
@@ -276,7 +367,9 @@ pub fn install_from_cache(
             ),
         });
     }
-    let staging = dir.join(format!(".zamin-staging-{}.part", std::process::id()));
+    // Unique per install: concurrent installs into one directory must not
+    // interleave through a shared PID-derived part file.
+    let staging = crate::fsops::staging_part(dir, "zamin-staging");
     let result = (|| {
         std::fs::copy(artifact, &staging).map_err(|source| CoreError::Io {
             path: staging.to_path_buf(),

@@ -37,19 +37,38 @@ impl TlsMaterial {
     /// Load the material from `dir`, generating a fresh self-signed pair on
     /// first use. Idempotent: every later load yields the same certificate
     /// and therefore the same fingerprint clients pin.
+    ///
+    /// Regeneration happens ONLY on a missing PAIR. A transient read
+    /// failure of either file (EACCES, EIO, a Windows sharing violation
+    /// during an AV scan) used to fall through to regeneration — silently
+    /// changing the pinned fingerprint, breaking every remote client, and
+    /// overwriting the old key. Anything unreadable-but-present, or a
+    /// half-written pair, is now a loud, actionable error.
     pub fn load_or_generate(dir: &Path) -> Result<TlsMaterial, TlsError> {
         let cert_path = dir.join(CERT_FILE);
         let key_path = dir.join(KEY_FILE);
-        if let (Ok(cert), Ok(key)) = (
-            CertificateDer::from_pem_file(&cert_path),
-            PrivateKeyDer::from_pem_file(&key_path),
-        ) {
-            return Ok(TlsMaterial { cert, key });
+        let cert_missing = !cert_path.exists();
+        let key_missing = !key_path.exists();
+        match (cert_missing, key_missing) {
+            (false, false) => {}
+            (true, true) => {
+                // First use: generate the identity pair.
+                fs::create_dir_all(dir)?;
+                let (cert, key) = generate_self_signed()?;
+                write_private(&cert_path, pem_encode("CERTIFICATE", cert.as_ref()))?;
+                write_private(&key_path, pem_encode("PRIVATE KEY", key.secret_der()))?;
+                tracing::info!("generated new agent TLS material in {dir:?}");
+                return Ok(TlsMaterial { cert, key });
+            }
+            (true, false) | (false, true) => {
+                return Err(TlsError::Io(std::io::Error::other(format!(
+                    "incomplete TLS material in {dir:?}: {} is missing. Delete BOTH {CERT_FILE} and {KEY_FILE} to deliberately regenerate the identity.",
+                    if cert_missing { CERT_FILE } else { KEY_FILE }
+                ))));
+            }
         }
-        fs::create_dir_all(dir)?;
-        let (cert, key) = generate_self_signed()?;
-        write_private(&cert_path, pem_encode("CERTIFICATE", cert.as_ref()))?;
-        write_private(&key_path, pem_encode("PRIVATE KEY", key.secret_der()))?;
+        let cert = CertificateDer::from_pem_file(&cert_path)?;
+        let key = PrivateKeyDer::from_pem_file(&key_path)?;
         Ok(TlsMaterial { cert, key })
     }
 

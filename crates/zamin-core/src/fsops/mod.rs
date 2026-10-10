@@ -4,8 +4,10 @@
 //! escape the root are denied. Sync on purpose — the daemon drives these
 //! through `spawn_blocking` so an interactive path never blocks.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -13,6 +15,11 @@ use crate::error::CoreError;
 
 const ATOMIC_WRITE_RETRIES: usize = 3;
 const ATOMIC_WRITE_RETRY_DELAY: Duration = Duration::from_millis(50);
+
+/// Attempts to find a free unique staging name before giving up. The
+/// odds of even one collision on a random uuid are astronomical; the
+/// bound exists so the loop is provably finite.
+const UNIQUE_STAGING_ATTEMPTS: usize = 4;
 
 /// Hard ceiling on one `copy` operation's total bytes, across every file
 /// it lands. A synchronous, protocol-serving copy must never be able to
@@ -160,39 +167,14 @@ impl RootedFs {
 
     /// Temp file + rename, with a small retry for Windows sharing
     /// violations when another process holds the target open (ADR-0009).
+    /// Rides the one hardened write path (unique staging name, exclusive
+    /// creation, fsync before rename).
     pub fn write(&self, rel: &str, bytes: &[u8]) -> Result<(), CoreError> {
         let path = self.resolve(rel)?;
         if path.is_dir() {
             return Err(CoreError::NotWritable { path });
         }
-        let parent = path
-            .parent()
-            .ok_or_else(|| CoreError::NotWritable { path: path.clone() })?;
-        fs::create_dir_all(parent).map_err(|source| CoreError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-
-        let tmp = path.with_extension(format!("zamin-tmp-{}", std::process::id()));
-        fs::write(&tmp, bytes).map_err(|source| CoreError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            match fs::rename(&tmp, &path) {
-                Ok(()) => return Ok(()),
-                Err(source) if attempt < ATOMIC_WRITE_RETRIES && is_sharing_violation(&source) => {
-                    std::thread::sleep(ATOMIC_WRITE_RETRY_DELAY);
-                }
-                Err(source) => {
-                    let _ = fs::remove_file(&tmp);
-                    return Err(CoreError::Io { path, source });
-                }
-            }
-        }
+        write_via_unique_temp(&path, bytes)
     }
 
     pub fn mkdir(&self, rel: &str) -> Result<(), CoreError> {
@@ -522,37 +504,107 @@ fn kind_rank(kind: &EntryKind) -> u8 {
     }
 }
 
-/// Atomic write for daemon-owned files (registry, per-server config).
-/// Same temp+rename discipline as `RootedFs::write`, without a root.
+/// Atomic write for daemon-owned files (registry, per-server config,
+/// markers, schedules, publish state). The one hardened write path —
+/// same discipline as `RootedFs::write`, without a root.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
+    write_via_unique_temp(path, bytes)
+}
+
+/// A unique staging sibling for `path`: the target's own name plus
+/// `.zamin-tmp-<uuid>`. PID-derived names are PREDICTABLE: in directories
+/// the unsandboxed server process can write (Unix carries no OS sandbox —
+/// ADR-0009's containment is path validation), a malicious plugin can
+/// pre-create a symlink at the exact expected path and the daemon's
+/// write-through-rename then lands OUTSIDE the root with daemon
+/// privileges. The same predictability makes two concurrent operations
+/// into one directory interleave bytes through the identical temp name.
+/// A random suffix kills both classes.
+fn unique_temp_sibling(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map_or_else(|| OsString::from("zamin-tmp"), |n| n.to_os_string());
+    name.push(format!(".zamin-tmp-{}", uuid::Uuid::now_v7().simple()));
+    path.with_file_name(name)
+}
+
+/// A unique hidden staging part name inside `dir` (`.<prefix>-<uuid>.part`)
+/// for download/copy staging sites — same predictability argument as
+/// `unique_temp_sibling`, shared by software downloads, the cache, and
+/// the JDK fetch.
+pub fn staging_part(dir: &Path, prefix: &str) -> PathBuf {
+    dir.join(format!(".{prefix}-{}.part", uuid::Uuid::now_v7().simple()))
+}
+
+/// The one hardened write path every daemon-owned file rides:
+/// - a UNIQUE staging name (no symlink squat, no concurrent interleave),
+/// - exclusive creation (`create_new` = O_EXCL — nothing, including a
+///   pre-planted symlink, may already sit at the name),
+/// - fsync BEFORE the rename: a crash after the rename must never reveal
+///   a torn or empty file under its final name (registry.json, markers,
+///   and schedules ride this — backup create already had this discipline;
+///   now everything does),
+/// - the sharing-violation rename retry for Windows (ADR-0009),
+/// - a best-effort parent-dir sync on POSIX so the rename itself is
+///   durable (tmpfs parents refuse fsync; that is fine).
+fn write_via_unique_temp(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| CoreError::Io {
             path: parent.to_path_buf(),
             source,
         })?;
     }
-    let tmp = path.with_extension(format!("zamin-tmp-{}", std::process::id()));
-    fs::write(&tmp, bytes).map_err(|source| CoreError::Io {
-        path: tmp.clone(),
-        source,
-    })?;
-    let mut attempt = 0;
-    loop {
-        attempt += 1;
-        match fs::rename(&tmp, path) {
-            Ok(()) => return Ok(()),
-            Err(source) if attempt < ATOMIC_WRITE_RETRIES && is_sharing_violation(&source) => {
-                std::thread::sleep(ATOMIC_WRITE_RETRY_DELAY);
-            }
+    let mut last: Option<CoreError> = None;
+    for _ in 0..UNIQUE_STAGING_ATTEMPTS {
+        let tmp = unique_temp_sibling(path);
+        let mut file = match fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)
+        {
+            Ok(file) => file,
             Err(source) => {
-                let _ = fs::remove_file(&tmp);
-                return Err(CoreError::Io {
-                    path: path.to_path_buf(),
-                    source,
-                });
+                // Astronomically unlikely (random uuid); try a fresh name.
+                last = Some(CoreError::Io { path: tmp, source });
+                continue;
+            }
+        };
+        let written = file.write_all(bytes).and_then(|_| file.sync_all());
+        if let Err(source) = written {
+            let _ = fs::remove_file(&tmp);
+            return Err(CoreError::Io { path: tmp, source });
+        }
+        drop(file);
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match fs::rename(&tmp, path) {
+                Ok(()) => {
+                    #[cfg(unix)]
+                    if let Some(parent) = path.parent() {
+                        if let Ok(dir) = fs::File::open(parent) {
+                            let _ = dir.sync_all();
+                        }
+                    }
+                    return Ok(());
+                }
+                Err(source) if attempt < ATOMIC_WRITE_RETRIES && is_sharing_violation(&source) => {
+                    std::thread::sleep(ATOMIC_WRITE_RETRY_DELAY);
+                }
+                Err(source) => {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(CoreError::Io {
+                        path: path.to_path_buf(),
+                        source,
+                    });
+                }
             }
         }
     }
+    Err(last.unwrap_or_else(|| CoreError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::other("could not claim a unique staging file"),
+    }))
 }
 
 fn validate_relative(rel: &str) -> Result<&str, CoreError> {

@@ -23,14 +23,40 @@ function formatSize(bytes: number): string {
   return ` · ${mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`}`;
 }
 
+/** Only http(s) links leave the app. The URL comes from the releases API
+ *  (remote-controlled data): React does NOT block `javascript:` (or any
+ *  other scheme) hrefs, so one crafted asset URL would execute script in
+ *  the panel's origin — where the CSP is the backstop, but the scheme
+ *  check is the front door. */
+function safeAssetUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    // not a URL at all: no link, just text
+  }
+  return null;
+}
+
 function AssetLink({ asset }: { asset: PublishedRelease["assets"][number] }) {
   const isInstaller =
     asset.browserDownloadUrl.endsWith("-setup.exe") ||
     asset.browserDownloadUrl.endsWith(".AppImage");
+  const href = safeAssetUrl(asset.browserDownloadUrl);
+  if (href === null) {
+    return (
+      <span className={`${shared.mono} ${styles.asset} ${isInstaller ? styles.installer : ""}`}>
+        {asset.name}
+        <span className={styles.assetSize}>{formatSize(asset.size)}</span>
+      </span>
+    );
+  }
   return (
     <a
       className={`${shared.mono} ${styles.asset} ${isInstaller ? styles.installer : ""}`}
-      href={asset.browserDownloadUrl}
+      href={href}
       target="_blank"
       rel="noreferrer"
     >

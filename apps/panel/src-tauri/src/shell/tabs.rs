@@ -704,6 +704,18 @@ impl Strip {
         }
     }
 
+    /// Select by identity — the keyboard contract's Ctrl+1..8 keeps its
+    /// index arithmetic (upstream semantics), but every selection that
+    /// KNOWS the tab (mouse clicks, the panel's model) must address it by
+    /// id: an index can shift under a reorder, and the old `SELECT_TAB_0 +
+    /// index` derivation overflowed into DUPLICATE_TAB and RESTORE_TAB
+    /// from the ninth tab on.
+    pub fn select_id(&mut self, id: TabId) {
+        if self.index_of(id).is_some() {
+            self.activate(id);
+        }
+    }
+
     /// CloseWebContentsAt — records a ClosedTab and repairs the
     /// selection (the neighbor to the right, else the one to the left).
     pub fn close(&mut self, id: TabId) -> bool {

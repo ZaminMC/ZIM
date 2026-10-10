@@ -388,13 +388,17 @@ export function FilesView({ serverId }: { serverId: string }) {
     (key: string, value: string) => {
       setComposeFile((current) => {
         if (current === null) return current;
-        const lines = setPropertyValue(current.lines, key, value);
-        setDraft(serializeProperties(lines));
-        return { ...current, lines };
+        return { ...current, lines: setPropertyValue(current.lines, key, value) };
       });
     },
     [],
   );
+
+  // The draft is derived state while compose mode owns the file: every
+  // AST change serializes back into the draft in one commit — never from
+  // inside a setComposeFile updater (updaters must stay pure; StrictMode
+  // double-invokes them). On file open the AST serializes to the file's
+  // own bytes, so the sync is a no-op there.
 
   // §34: the registry decides on file open whether a specialized editor
   // claims this file. The decision is per FILE, not per keystroke — a
@@ -416,13 +420,15 @@ export function FilesView({ serverId }: { serverId: string }) {
     (transform: (lines: PropertyLine[]) => PropertyLine[]) => {
       setComposeFile((current) => {
         if (current === null) return current;
-        const lines = transform(current.lines);
-        setDraft(serializeProperties(lines));
-        return { ...current, lines };
+        return { ...current, lines: transform(current.lines) };
       });
     },
     [],
   );
+
+  useEffect(() => {
+    if (composeFile !== null) setDraft(serializeProperties(composeFile.lines));
+  }, [composeFile]);
 
   const scoreboardSpec = useMemo(
     () =>

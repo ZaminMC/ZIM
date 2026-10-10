@@ -984,6 +984,15 @@ pub async fn shell_command(
                     cmd::SELECT_TAB_0..=34025 => {
                         strip.select_index((id - cmd::SELECT_TAB_0) as usize);
                     }
+                    cmd::SELECT_TAB_BY_ID => {
+                        // Identity-addressed selection: the frame's mouse
+                        // path and the panel's model both know the tab's
+                        // id — never its strip position (which a reorder
+                        // can change between render and click).
+                        if let Some(target) = arg_id {
+                            strip.select_id(target);
+                        }
+                    }
                     cmd::SELECT_LAST_TAB => {
                         let len = strip.tabs.len();
                         if len > 0 {

@@ -193,8 +193,17 @@ impl SecurityJournal {
 
 /// The read-back for the developer tools: the journal's newest `cap`
 /// entries, oldest first. A missing or unreadable journal reads as
-/// empty (nothing recorded yet is an honest state, not an error).
+/// empty (nothing recorded yet is an honest state, not an error). The
+/// read itself is capped: a journal grown pathological (or replaced by
+/// something enormous) must not become an unbounded daemon allocation.
 pub fn read_journal(path: &Path, cap: usize) -> Vec<serde_json::Value> {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Vec::new();
+    };
+    const JOURNAL_READ_CAP: u64 = 16 * 1024 * 1024;
+    if meta.len() > JOURNAL_READ_CAP {
+        return Vec::new();
+    }
     let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();
     };

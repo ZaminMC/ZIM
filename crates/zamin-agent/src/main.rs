@@ -30,33 +30,47 @@ struct AgentConfig {
 
 fn parse_args() -> AgentConfig {
     let mut config = AgentConfig {
-        listen: DEFAULT_LISTEN
-            .parse()
-            .unwrap_or_else(|_| panic!("default listen address parses")),
+        listen: DEFAULT_LISTEN.parse().unwrap_or_else(|_| {
+            // A constant that fails to parse is a build error, not a usage
+            // error — but exiting with a MESSAGE beats a raw panic either
+            // way.
+            eprintln!("internal error: the default listen address does not parse");
+            std::process::exit(2);
+        }),
         endpoint: Endpoint::default_endpoint(),
         data_dir: zamin_core::platform::paths::data_dir().join("agent"),
     };
     let mut args = std::env::args().skip(1);
+    // One error path for every malformed invocation: a message and exit
+    // code 2, never a panic (exit 101 + backtrace was the old answer to
+    // a missing --listen value).
+    let usage = |message: String| -> ! {
+        eprintln!("{message}");
+        eprintln!(
+            "usage: zaminagent [--listen <addr>] [--endpoint <endpoint>] [--data-dir <dir>] [--version]"
+        );
+        std::process::exit(2);
+    };
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--listen" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--listen needs a value"));
-                config.listen = value
-                    .parse()
-                    .unwrap_or_else(|e| panic!("--listen {value}: {e}"));
+                let Some(value) = args.next() else {
+                    usage("--listen needs a value (e.g. 127.0.0.1:7443)".to_owned());
+                };
+                config.listen = value.parse().unwrap_or_else(|e| {
+                    usage(format!("--listen {value} is not a valid address: {e}"))
+                });
             }
             "--endpoint" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--endpoint needs a value"));
+                let Some(value) = args.next() else {
+                    usage("--endpoint needs a value".to_owned());
+                };
                 config.endpoint = Endpoint::from_daemon_arg(&value);
             }
             "--data-dir" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--data-dir needs a value"));
+                let Some(value) = args.next() else {
+                    usage("--data-dir needs a value".to_owned());
+                };
                 config.data_dir = PathBuf::from(value);
             }
             "--version" => {
@@ -64,8 +78,7 @@ fn parse_args() -> AgentConfig {
                 std::process::exit(0);
             }
             other => {
-                eprintln!("unknown argument {other}");
-                std::process::exit(2);
+                usage(format!("unknown argument {other}"));
             }
         }
     }

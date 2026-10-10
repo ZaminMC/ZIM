@@ -15,7 +15,7 @@ import {
 import type { JobOutcomeName } from "../integration/notifications";
 import { logWarn } from "../logger";
 import { useConnection } from "./connection";
-import { hostSpec, transportSpec, useConnections } from "./connections";
+import { hostSpec, rehydrateConnections, transportSpec, useConnections } from "./connections";
 import { forgetMetrics } from "./metrics";
 import { useServers } from "./servers";
 import { useJobs } from "./jobs";
@@ -66,6 +66,23 @@ export function reconnectWire(): void {
   void client.reconnect().catch((error: unknown) =>
     logWarn("wire", "profile switch reconnect failed", error),
   );
+}
+
+// A profile switch must reach EVERY webview, not just the one that hosted
+// the connections modal: sibling tabs keep their own daemon wires (one
+// session per webview — the host's keyed law), and their in-memory
+// `useConnections` never learns the new active profile on its own
+// (zustand's persist re-reads only at load). The shared-origin storage
+// event is the cross-realm signal this codebase already rides for the
+// favicon lane; the modal's own realm hears nothing (same-realm writes
+// fire no storage event) — its explicit `reconnectWire()` call covers it.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== "zamin.connections" && event.key !== null) return;
+    if (!started) return;
+    // Rehydrate FIRST (the transport factory reads the store), then dial.
+    void rehydrateConnections().then(() => reconnectWire());
+  });
 }
 
 // --- notifications (Phase 7 taxonomy: only while the operator is away) ---

@@ -18,6 +18,15 @@
 //! live tree aside (rollback dir) and the staged tree into place with
 //! renames. Any commit failure rolls the previous files back — the worst
 //! case is "nothing changed", never "half restored".
+//!
+//! Crash discipline: a daemon crash or power loss mid-commit used to
+//! strand the live tree inside the rollback dir — invisible to listings
+//! (excluded), and the NEXT restore treated it as ordinary live data and
+//! destroyed it with its own rollback: silent, permanent data loss. The
+//! commit now keeps a journal at the root (`.zamin-restore-journal`, a
+//! reserved name); [`recover_interrupted`] finishes or undoes an
+//! interrupted commit at the next restore or daemon start, in every
+//! crash window.
 
 use std::collections::HashSet;
 use std::fs;
@@ -27,7 +36,9 @@ use std::sync::{
     Arc,
 };
 
-use super::{classify_io, restore_rollback_path, restore_staging_path};
+use serde::{Deserialize, Serialize};
+
+use super::{classify_io, restore_rollback_path, restore_staging_path, RESTORE_JOURNAL_NAME};
 use crate::error::CoreError;
 
 /// Safety limits for restore (ADR-0009). A malicious or corrupt archive
@@ -89,6 +100,14 @@ pub fn restore_archive(
         });
     }
 
+    // A prior restore may have died mid-commit (daemon crash, power
+    // loss): recover FIRST, so this restore starts from a consistent
+    // tree and a stranded rollback dir can never be mistaken for live
+    // data (and destroyed) again.
+    if let Some(note) = recover_interrupted(root)? {
+        tracing::info!(root = %root.display(), "{note}");
+    }
+
     // Transient workspace names; a fresh uuid avoids collisions with any
     // other operation and is never recorded anywhere.
     let workspace = uuid::Uuid::now_v7();
@@ -104,7 +123,12 @@ pub fn restore_archive(
         }
     };
 
-    match commit(root, &staging, &rollback) {
+    let journal = CommitJournal {
+        path: root.join(RESTORE_JOURNAL_NAME),
+        id: workspace.to_string(),
+        staged: stats.staged_top.clone(),
+    };
+    match commit(root, &staging, &rollback, Some(&journal)) {
         Ok(()) => Ok(RestoreOutcome {
             restored_files: stats.files,
             restored_bytes: stats.bytes,
@@ -120,6 +144,9 @@ pub fn restore_archive(
 struct ExtractStats {
     files: u64,
     bytes: u64,
+    /// Top-level names the archive will land in the root — the arrivals
+    /// an `aside`-phase recovery must remove.
+    staged_top: Vec<String>,
 }
 
 fn extract_into(
@@ -148,7 +175,11 @@ fn extract_into(
     let mut seen_lower: HashSet<String> = HashSet::new();
     let mut total_bytes: u64 = 0;
     let mut entries_count: u64 = 0;
-    let mut stats = ExtractStats { files: 0, bytes: 0 };
+    let mut stats = ExtractStats {
+        files: 0,
+        bytes: 0,
+        staged_top: Vec::new(),
+    };
 
     let entries = tar
         .entries()
@@ -194,7 +225,9 @@ fn extract_into(
 
         entries_count += 1;
         let size = entry.size();
-        total_bytes += size;
+        // Header-controlled sizes: saturate the running sum — two ~2^63
+        // claims used to wrap it past the cap (and panic in debug builds).
+        total_bytes = total_bytes.saturating_add(size);
         if entries_count > max_entries || total_bytes > max_total {
             return Err(CoreError::ArchiveTooLarge {
                 found: total_bytes,
@@ -202,6 +235,13 @@ fn extract_into(
                 max_bytes: max_total,
                 max_entries,
             });
+        }
+
+        // The journal's arrivals list: top-level names only — commit
+        // moves whole top-level entries.
+        let top = rel.split('/').next().unwrap_or_default().to_owned();
+        if !top.is_empty() && !stats.staged_top.contains(&top) {
+            stats.staged_top.push(top);
         }
 
         let target = staging.join(rel);
@@ -309,13 +349,196 @@ pub(crate) enum CommitError {
     RollbackBroken(String),
 }
 
+/// The crash journal a live commit keeps. The phases advance with the
+/// commit's real progress; each write is an atomic (fsync'd) rewrite, so
+/// a crash always leaves the PREVIOUS phase on disk — and every phase
+/// has a defined recovery in [`recover_interrupted`].
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum JournalPhase {
+    /// Written before anything moves. The live tree is untouched (or the
+    /// move-aside is partial): every rollback entry simply returns.
+    Prepared,
+    /// The move-aside completed: the root holds ONLY the journal, the
+    /// whole live tree sits in the rollback dir, and staged arrivals may
+    /// be partially in. Recovery deletes the arrivals, returns the tree.
+    Aside,
+    /// The move-in completed: the root holds the restored tree; only the
+    /// old-tree deletion remained. Recovery finishes that cleanup.
+    Committed,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RestoreJournal {
+    id: String,
+    phase: JournalPhase,
+    /// Top-level staged names — the arrivals an `aside`-phase recovery
+    /// must remove from the root.
+    staged: Vec<String>,
+}
+
+/// The journal handle `commit` writes through.
+pub(crate) struct CommitJournal {
+    pub(crate) path: PathBuf,
+    pub(crate) id: String,
+    pub(crate) staged: Vec<String>,
+}
+
+impl CommitJournal {
+    pub(crate) fn write(&self, phase: JournalPhase) -> Result<(), CoreError> {
+        let entry = RestoreJournal {
+            id: self.id.clone(),
+            phase,
+            staged: self.staged.clone(),
+        };
+        let bytes = serde_json::to_vec(&entry).map_err(|e| CoreError::Io {
+            path: self.path.clone(),
+            source: std::io::Error::other(e),
+        })?;
+        crate::fsops::atomic_write(&self.path, &bytes)
+    }
+}
+
+/// Finish or undo a restore whose commit was interrupted by a crash or
+/// power loss, guided by the journal a live commit leaves at the root.
+/// Returns a human note when something was recovered, `None` when the
+/// root was already consistent.
+///
+/// Without a journal, stale STAGING dirs (inert copies of archive
+/// content — the archive itself remains on disk) are swept, but stale
+/// ROLLBACK dirs are left strictly alone: they may hold the only copy
+/// of the live tree (a pre-journal crash) and are a human's call, never
+/// something to destroy.
+pub fn recover_interrupted(root: &Path) -> Result<Option<String>, CoreError> {
+    sweep_stale_staging(root);
+    let journal_path = root.join(RESTORE_JOURNAL_NAME);
+    let Ok(raw) = fs::read_to_string(&journal_path) else {
+        return Ok(None);
+    };
+    let journal: RestoreJournal = serde_json::from_str(&raw).map_err(|e| CoreError::Io {
+        path: journal_path.clone(),
+        source: std::io::Error::other(format!("unreadable restore journal: {e}")),
+    })?;
+    let staging = root.join(format!(".zamin-restore-staging-{}", journal.id));
+    let rollback = root.join(format!(".zamin-restore-backup-{}", journal.id));
+    let note = match journal.phase {
+        JournalPhase::Prepared => {
+            // Move-aside partial (or never started): each rollback entry
+            // was moved OUT of the root by definition, so moving it back
+            // can never collide — and no arrivals exist yet (move-in only
+            // starts after the Aside rewrite).
+            move_rollback_back(root, &rollback)?;
+            let _ = fs::remove_dir_all(&staging);
+            format!(
+                "rolled back an interrupted restore ({}): the live tree is intact",
+                journal.id
+            )
+        }
+        JournalPhase::Aside => {
+            // The whole live tree sits in the rollback dir; the root holds
+            // only the journal plus staged arrivals. Remove the arrivals,
+            // then return the live tree.
+            for name in &journal.staged {
+                remove_any(&root.join(name));
+            }
+            move_rollback_back(root, &rollback)?;
+            let _ = fs::remove_dir_all(&staging);
+            format!(
+                "rolled back an interrupted restore ({}): the live tree is intact",
+                journal.id
+            )
+        }
+        JournalPhase::Committed => {
+            // The restore had fully landed; only cleanup remained. The
+            // old tree in the rollback dir was destined for deletion.
+            let _ = fs::remove_dir_all(&rollback);
+            let _ = fs::remove_dir_all(&staging);
+            format!(
+                "completed an interrupted restore ({}): the restored tree stands",
+                journal.id
+            )
+        }
+    };
+    let _ = fs::remove_file(&journal_path);
+    Ok(Some(note))
+}
+
+/// Remove a file, symlink, or whole directory — best effort, no error.
+fn remove_any(path: &Path) {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            let _ = fs::remove_dir_all(path);
+        }
+        Ok(_) => {
+            let _ = fs::remove_file(path);
+        }
+        Err(_) => {}
+    }
+}
+
+/// Every rollback entry returns to the root. A missing rollback dir is
+/// an empty one (the crash preceded its creation).
+fn move_rollback_back(root: &Path, rollback: &Path) -> Result<(), CoreError> {
+    let read = match fs::read_dir(rollback) {
+        Ok(read) => read,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(CoreError::Io {
+                path: rollback.to_path_buf(),
+                source,
+            })
+        }
+    };
+    for entry in read.flatten() {
+        let name = entry.file_name();
+        fs::rename(entry.path(), root.join(&name)).map_err(|source| CoreError::Io {
+            path: root.join(&name),
+            source,
+        })?;
+    }
+    let _ = fs::remove_dir(rollback);
+    Ok(())
+}
+
+/// Sweep staging dirs from crashed restores: inert archive content (the
+/// archive itself stays on disk), never live data.
+fn sweep_stale_staging(root: &Path) {
+    let Ok(read) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in read.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if name.starts_with(".zamin-restore-staging-") {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// Commit the staged tree over the live root: move the current contents
 /// aside into `rollback`, then move the staged tree in. Every step is a
 /// rename on one filesystem; any failure undoes everything. This function
 /// owns all the state it needs for the undo, so the rollback is complete
 /// even when the failure happens mid-move-in. `pub(crate)` so tests can
-/// drive the failure and rollback paths deterministically.
-pub(crate) fn commit(root: &Path, staging: &Path, rollback: &Path) -> Result<(), CommitError> {
+/// drive the failure and rollback paths deterministically; `journal`
+/// adds the crash discipline (see [`recover_interrupted`]) — `None` in
+/// tests that exercise only the runtime rollback.
+pub(crate) fn commit(
+    root: &Path,
+    staging: &Path,
+    rollback: &Path,
+    journal: Option<&CommitJournal>,
+) -> Result<(), CommitError> {
+    // Phase 1 — journal the intent BEFORE anything moves. Fail closed:
+    // without a journal an interrupted commit is unrecoverable, so a
+    // journal we cannot write is a commit we refuse to start.
+    if let Some(j) = journal {
+        j.write(JournalPhase::Prepared).map_err(|e| {
+            CommitError::RolledBack(format!("cannot write the restore journal: {e:?}"))
+        })?;
+    }
     if let Err(e) = fs::create_dir_all(rollback) {
         return Err(CommitError::RolledBack(format!(
             "cannot create the rollback dir: {e}"
@@ -327,23 +550,32 @@ pub(crate) fn commit(root: &Path, staging: &Path, rollback: &Path) -> Result<(),
             Ok(()) => {
                 let _ = fs::remove_dir_all(staging);
                 let _ = fs::remove_dir_all(rollback);
+                if let Some(j) = journal {
+                    let _ = fs::remove_file(&j.path);
+                }
                 CommitError::RolledBack(reason)
             }
             Err(rb) => {
                 let _ = fs::remove_dir_all(staging);
                 let _ = fs::remove_dir_all(rollback);
+                if let Some(j) = journal {
+                    let _ = fs::remove_file(&j.path);
+                }
                 CommitError::RollbackBroken(format!("{reason}; rollback failed: {rb}"))
             }
         }
     };
 
     // Move the live tree aside. The staging and rollback dirs themselves
-    // stay put.
+    // stay put — and so does the journal, whose name is reserved.
     let mut moved_aside: Vec<PathBuf> = Vec::new();
     let live: Vec<fs::DirEntry> = match fs::read_dir(root) {
         Ok(read) => read.flatten().collect(),
         Err(e) => {
             let _ = fs::remove_dir(rollback);
+            if let Some(j) = journal {
+                let _ = fs::remove_file(&j.path);
+            }
             return Err(CommitError::RolledBack(format!(
                 "cannot list the server root: {e}"
             )));
@@ -353,6 +585,7 @@ pub(crate) fn commit(root: &Path, staging: &Path, rollback: &Path) -> Result<(),
         let name = entry.file_name();
         if Some(name.as_os_str()) == staging.file_name()
             || Some(name.as_os_str()) == rollback.file_name()
+            || name.as_os_str() == std::ffi::OsStr::new(RESTORE_JOURNAL_NAME)
         {
             continue;
         }
@@ -363,6 +596,15 @@ pub(crate) fn commit(root: &Path, staging: &Path, rollback: &Path) -> Result<(),
             return Err(undo(&moved_aside, &[][..], reason));
         }
         moved_aside.push(to);
+    }
+
+    // Phase 2 — the root now holds ONLY the journal; the whole live tree
+    // is in the rollback dir.
+    if let Some(j) = journal {
+        j.write(JournalPhase::Aside).map_err(|e| {
+            let reason = format!("cannot update the restore journal: {e:?}");
+            undo(&moved_aside, &[][..], reason)
+        })?;
     }
 
     // Move the staged tree in. On failure, undo: delete what came in,
@@ -384,10 +626,21 @@ pub(crate) fn commit(root: &Path, staging: &Path, rollback: &Path) -> Result<(),
         }
     }
 
+    // Phase 3 — the restored tree stands; only cleanup remained.
+    if let Some(j) = journal {
+        j.write(JournalPhase::Committed).map_err(|e| {
+            let reason = format!("cannot update the restore journal: {e:?}");
+            undo(&moved_aside, &staged_names, reason)
+        })?;
+    }
+
     // Committed. The previous tree (held in the rollback dir) is deleted —
     // the backup archive itself stays on disk and can be restored again.
     let _ = fs::remove_dir_all(rollback);
     let _ = fs::remove_dir_all(staging);
+    if let Some(j) = journal {
+        let _ = fs::remove_file(&j.path);
+    }
     Ok(())
 }
 

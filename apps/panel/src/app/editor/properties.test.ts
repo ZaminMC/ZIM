@@ -82,4 +82,67 @@ describe("properties AST", () => {
     expect(controlFor("A Minecraft Server")).toBe("text");
     expect(controlFor("")).toBe("text");
   });
+
+  it("round-trips a CRLF file byte for byte (Java's Properties.store dialect)", () => {
+    const raw = [
+      "# Minecraft server properties",
+      "server-port=25565",
+      "motd=A Minecraft Server",
+      "",
+    ].join("\r\n");
+    expect(serializeProperties(parseProperties(raw))).toBe(raw);
+  });
+
+  it("a CRLF file's values never gain phantom carriage returns", () => {
+    const raw = ["server-port=25565", "online-mode=true"].join("\r\n");
+    const lines = parseProperties(raw);
+    expect(lines[0]?.value).toBe("25565"); // no trailing \r smuggled into the value
+    expect(lines[1]?.value).toBe("true");
+  });
+
+  it("an edit on a CRLF file re-renders the one line and keeps the file CRLF", () => {
+    const raw = ["# header", "server-port=25565", "online-mode=true"].join("\r\n");
+    const lines = setPropertyValue(parseProperties(raw), "server-port", "25566");
+    expect(serializeProperties(lines)).toBe(
+      ["# header", "server-port=25566", "online-mode=true"].join("\r\n"),
+    );
+  });
+
+  it("untouched pairs keep the file's own dialect when another pair is edited", () => {
+    const raw = ["bare-key", "colon: value", "spaced key  spaced value", "plain=1"].join("\n");
+    const lines = setPropertyValue(parseProperties(raw), "plain", "2");
+    const out = serializeProperties(lines).split("\n");
+    expect(out[0]).toBe("bare-key");
+    expect(out[1]).toBe("colon: value");
+    expect(out[2]).toBe("spaced key  spaced value");
+    expect(out[3]).toBe("plain=2");
+  });
+
+  it("a key with a space survives an edit round-trip", () => {
+    const raw = ["odd\\ key=1", "plain=2"].join("\n");
+    const lines = setPropertyValue(parseProperties(raw), "plain", "3");
+    const out = serializeProperties(lines).split("\n");
+    expect(out[0]).toBe("odd\\ key=1");
+    expect(parseProperties(out.join("\n"))[0]?.key).toBe("odd key");
+  });
+
+  it("a re-rendered pair escapes its key's structure and its value's leading spaces", () => {
+    const raw = ["plain=1"].join("\n");
+    const lines = setPropertyValue(parseProperties(raw), "plain", "  padded");
+    // The value's leading spaces are real content: escaped, or the parser
+    // would treat them as the separator's own whitespace and eat them.
+    expect(serializeProperties(lines)).toBe("plain=\\ \\ padded");
+    expect(parseProperties("plain=\\ \\ padded")[0]?.value).toBe("  padded");
+  });
+
+  it("a pair mutated directly (scoreboard-style) re-renders, its neighbors do not", () => {
+    const raw = ["# board", "title=Old", "lines=a,b"].join("\n");
+    const lines = parseProperties(raw).map((line) =>
+      line.kind === "pair" && line.key === "title" ? { ...line, value: "New" } : line,
+    );
+    const out = serializeProperties(lines).split("\n");
+    expect(out[0]).toBe("# board");
+    expect(out[1]).toBe("title=New");
+    expect(out[2]).toBe("lines=a,b");
+  });
 });

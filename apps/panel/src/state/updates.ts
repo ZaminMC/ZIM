@@ -156,12 +156,24 @@ export const useUpdates = create<UpdatesState>()(
         const offer = pendingOffer;
         if (backend === null || !offer) return;
         set({ phase: { kind: "downloading", offer } });
-        const downloaded = await backend.download();
-        if (!downloaded.ok) {
-          set({ phase: { kind: "error", message: downloaded.message } });
-          return;
+        try {
+          const downloaded = await backend.download();
+          if (!downloaded.ok) {
+            set({ phase: { kind: "error", message: downloaded.message } });
+            return;
+          }
+          set({ phase: { kind: "ready", offer } });
+        } catch (error) {
+          // A THROWN download (not a typed !ok) used to strand the phase
+          // at "downloading" — which `checkAllowed` refuses forever, and
+          // the update lane went permanently silent. Every exit lands.
+          set({
+            phase: {
+              kind: "error",
+              message: error instanceof Error ? error.message : "the download failed",
+            },
+          });
         }
-        set({ phase: { kind: "ready", offer } });
       }
 
       return {
@@ -195,24 +207,30 @@ export const useUpdates = create<UpdatesState>()(
           }
 
           checkInFlight = true;
-          set({ phase: { kind: "checking" } });
-          const result = await backend.check();
-          checkInFlight = false;
+          try {
+            set({ phase: { kind: "checking" } });
+            const result = await backend.check();
 
-          if (!result.ok) {
-            set({ phase: { kind: "error", message: result.message } });
-            return;
-          }
-          if (result.value === null) {
-            const version = get().installedVersion ?? "current";
-            set({ phase: { kind: "upToDate", version } });
-          } else {
-            pendingOffer = result.value;
-            if (get().prefs.autoInstall) {
-              await installOffer();
-            } else {
-              set({ phase: { kind: "available", offer: result.value } });
+            if (!result.ok) {
+              set({ phase: { kind: "error", message: result.message } });
+              return;
             }
+            if (result.value === null) {
+              const version = get().installedVersion ?? "current";
+              set({ phase: { kind: "upToDate", version } });
+            } else {
+              pendingOffer = result.value;
+              if (get().prefs.autoInstall) {
+                await installOffer();
+              } else {
+                set({ phase: { kind: "available", offer: result.value } });
+              }
+            }
+          } finally {
+            // try/finally: a THROWN check used to leave `checkInFlight`
+            // true forever — every later check (manual included) was
+            // refused, and the lane wedged silent.
+            checkInFlight = false;
           }
           // The cadence continues only when it was ever on.
           if (get().prefs.autoCheck) scheduleNextCheck(AUTO_CHECK_INTERVAL_MS);

@@ -151,6 +151,14 @@ pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
 /// is the only zamind this user runs) and SIGKILLs the pids. A graceful
 /// ask makes no sense here — the caller is here precisely because
 /// nothing behind the pipe answers anything.
+///
+/// `pub(crate)` beyond the heal: the tray's Quit uses the same verb as
+/// its last resort (graceful ask → bounded wait → this kill), so
+/// "no zamind.exe left behind" is a guarantee on the Quit path too.
+pub(crate) fn kill_daemons_by_image() {
+    kill_stale_daemons();
+}
+
 fn kill_stale_daemons() {
     #[cfg(windows)]
     {

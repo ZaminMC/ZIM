@@ -67,6 +67,16 @@ export const useConnections = create<ConnectionsState>()(
   ),
 );
 
+/** Re-read the persisted profiles — used by webviews that were NOT the
+ *  one where the operator switched (each webview is its own JS realm;
+ *  zustand's persist does not live-sync, but the shared-origin storage
+ *  event does — the same mechanism the favicon lane rides). Resolves when
+ *  the store reflects the new active profile, so the caller can dial the
+ *  wire AFTER the switch is visible. */
+export function rehydrateConnections(): Promise<void> {
+  return Promise.resolve(useConnections.persist.rehydrate()).then(() => undefined);
+}
+
 /** The active profile, materialized (the local profile is not stored). */
 export function activeProfile(state: {
   remotes: RemoteProfile[];

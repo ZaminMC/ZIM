@@ -22,7 +22,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -32,6 +32,7 @@ use zamin_ipc::Endpoint;
 mod autostart;
 mod daemon_ensure;
 mod shell;
+mod tray;
 
 use shell::host::ShellState;
 
@@ -85,15 +86,31 @@ pub fn drop_wire(app: &AppHandle, label: &str) {
 
 /// Drop every wire belonging to a closed window's children
 /// (`tab-{window}-{id}` labels). The window event loop has no
-/// per-webview destroyed hook, so the close path sweeps.
+/// per-webview destroyed hook, so the close path sweeps. Tear-off
+/// windows also own a FRAME webview (`{window}-frame`) whose daemon wire
+/// (the favicon lane) used to outlive the window for the process's whole
+/// life — one leaked daemon session per closed tear-off; it is swept too.
 pub fn drop_wire_window(app: &AppHandle, window_label: &str) {
-    let prefix = format!("tab-{window_label}-");
+    let prefixes = [
+        format!("tab-{window_label}-"),
+        // The main window's frame IS the window label; its wire dies with
+        // the app, not here.
+        if window_label == "main" {
+            String::new()
+        } else {
+            format!("{window_label}-frame")
+        },
+    ];
     let dead: Vec<String> = {
         let host = app.state::<HostState>();
         let guard = host.lock();
         guard
             .keys()
-            .filter(|label| label.starts_with(&prefix))
+            .filter(|label| {
+                prefixes
+                    .iter()
+                    .any(|prefix| !prefix.is_empty() && label.starts_with(prefix))
+            })
             .cloned()
             .collect()
     };
@@ -241,31 +258,6 @@ async fn daemon_ensure() -> Result<String, String> {
     daemon_ensure::ensure_daemon().await
 }
 
-/// Ask the daemon to end itself: one one-shot connection, one
-/// `daemon.shutdown` request, a two-second reply budget. The daemon's
-/// reply lands BEFORE its stop ladder finishes (it owns the wait); this
-/// only proves the ask arrived. Fire-and-forget by design: every
-/// failure mode (endpoint gone, daemon already dead) means the same
-/// thing — nothing to stop — and the caller exits regardless.
-async fn shutdown_daemon() -> Result<(), String> {
-    use zamin_protocol::envelope::{Request, RequestId};
-    use zamin_protocol::methods;
-    let endpoint = Endpoint::default_endpoint();
-    let connection = zamin_ipc::connect(endpoint)
-        .await
-        .map_err(|error| format!("daemon not reachable: {error}"))?;
-    let (mut write_half, mut read_half) = connection.split();
-    let request = Request::new(RequestId::Number(1), methods::DAEMON_SHUTDOWN, None);
-    let frame = serde_json::to_string(&request).map_err(|e| e.to_string())?;
-    zamin_bridge::send_frame(&mut write_half, &frame)
-        .await
-        .map_err(|error| format!("shutdown ask failed: {error}"))?;
-    // The reply is courtesy, not a barrier: read it with a small budget
-    // so a wedged daemon cannot hold the Quit hostage.
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), read_half.recv()).await;
-    Ok(())
-}
-
 /// `Some(enabled)` — autostart state; `None` — cannot be determined and
 /// the webview shows "unavailable".
 #[tauri::command]
@@ -316,6 +308,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(HostState::default())
         .manage(ShellState::new())
+        .manage(Arc::new(tray::TrayState::default()))
         // The shell (ADR-0033): restore the session before any webview
         // asks; the restored primary tab's webview is created lazily by
         // sync once the frame reports its size.
@@ -324,39 +317,29 @@ fn main() {
             app.state::<ShellState>().restore(&handle);
 
             // The tray (§12.1 seam): closing the window parks ZIM here
-            // instead of leaving a taskbar ghost, and the menu's Quit is
-            // the one action that ends the process. The daemon and its
-            // servers are deliberately detached (daemon_ensure.rs) —
-            // quitting the panel does not stop servers; that is the
-            // product's own topology, not an accident.
+            // instead of leaving a taskbar ghost. The tray is a LIVE
+            // SERVER STACK (the founder's "the UI window is only a
+            // client"): its own daemon wire snapshots `server.list`,
+            // rides the `events` stream, and rebuilds the menu as states
+            // move — a row per server with its state glyph, click to
+            // toggle. The daemon and its servers are deliberately
+            // detached from the PANEL (daemon_ensure.rs) — Quitting is
+            // the one action that stops them all, by design.
             use tauri::menu::{Menu, MenuItem};
             let open = MenuItem::with_id(app, "tray-open", "Open ZIM", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "tray-quit", "Quit ZIM", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
+            let tray_state: Arc<tray::TrayState> =
+                app.state::<Arc<tray::TrayState>>().inner().clone();
+            let tray_state_for_wire = tray_state.clone();
             let mut tray = tauri::tray::TrayIconBuilder::with_id("zim-tray")
                 .menu(&menu)
                 // Left click opens the window; the menu belongs to the
                 // right click, like every Windows tray icon.
                 .show_menu_on_left_click(false)
-                .tooltip("ZIM — quit stops the servers and the daemon")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "tray-open" => show_main_window(app),
-                    // The one full shutdown: the daemon is asked to stop
-                    // (it runs its graceful stop ladder for every running
-                    // server, then exits), and the panel ends with it —
-                    // Quit means nothing lingers: no tray icon, no
-                    // zamind.exe, no headless servers. The ask is
-                    // best-effort with a short budget; the panel always
-                    // exits (a daemon that already died must not wedge
-                    // the Quit).
-                    "tray-quit" => {
-                        let handle = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = shutdown_daemon().await;
-                            handle.exit(0);
-                        });
-                    }
-                    _ => {}
+                .tooltip("ZIM")
+                .on_menu_event(move |app, event| {
+                    tray::on_menu_event(app, &tray_state, event.id.as_ref());
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
@@ -372,6 +355,9 @@ fn main() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+
+            // The tray's own daemon wire: snapshot → events → live rows.
+            tray::spawn(app.handle().clone(), tray_state_for_wire);
             Ok(())
         })
         // Geometry is model-visible: every window resize re-runs the

@@ -228,17 +228,27 @@ pub fn build_package(opts: &mut PackageOptions<'_>) -> Result<PackageOutcome, Co
 
     // The commit: rename staging over the destination. Unix replaces
     // atomically; Windows refuses to replace an existing file, so there
-    // the old package is removed first — a wider window, but the record
-    // is what calls a package current, and it still points only at a
-    // complete artifact.
+    // the old package moves ASIDE first — never deleted-before-retry: a
+    // failed retry used to leave the record pointing at no package at
+    // all, while a set-aside old one is restored (or, worst case, sits
+    // next to the destination under a recognizable name).
     #[allow(unused_mut)]
     let mut renamed = std::fs::rename(opts.staging_path, opts.out_path);
     if renamed.is_err() && opts.out_path.exists() {
-        std::fs::remove_file(opts.out_path).map_err(|source| CoreError::Io {
-            path: opts.out_path.to_path_buf(),
-            source,
-        })?;
-        renamed = std::fs::rename(opts.staging_path, opts.out_path);
+        let old = crate::fsops::staging_part(
+            opts.out_path.parent().unwrap_or_else(|| Path::new(".")),
+            "package-old",
+        );
+        if std::fs::rename(opts.out_path, &old).is_ok() {
+            renamed = std::fs::rename(opts.staging_path, opts.out_path);
+            if renamed.is_err() {
+                // Put the old package back exactly where the record
+                // points.
+                let _ = std::fs::rename(&old, opts.out_path);
+            } else {
+                let _ = std::fs::remove_file(&old);
+            }
+        }
     }
     renamed.map_err(|source| CoreError::Io {
         path: opts.out_path.to_path_buf(),

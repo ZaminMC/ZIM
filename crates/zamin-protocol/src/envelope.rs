@@ -112,7 +112,10 @@ pub enum IncomingMessage {
 
 impl IncomingMessage {
     /// Classify a parsed JSON value. Returns `None` for objects that are none
-    /// of the three shapes; tolerant readers do not guess.
+    /// of the three shapes; tolerant readers do not guess. A request or
+    /// notification whose `jsonrpc` field is not exactly `"2.0"` is not
+    /// this protocol's message (JSON-RPC 2.0 §4) — the version is the
+    /// contract, and it was never validated before.
     pub fn parse(value: &Value) -> Option<IncomingMessage> {
         let obj = value.as_object()?;
         let has_method = obj.contains_key("method");
@@ -120,6 +123,9 @@ impl IncomingMessage {
         let has_result = obj.contains_key("result") || obj.contains_key("error");
 
         if has_method {
+            if obj.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
+                return None;
+            }
             if has_id {
                 Some(IncomingMessage::Request(
                     serde_json::from_value(value.clone()).ok()?,

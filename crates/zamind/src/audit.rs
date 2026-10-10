@@ -124,7 +124,28 @@ impl Audit {
             .lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let content = match std::fs::read_to_string(&self.path) {
+        // The audit has no rotation and the read pages backward from the
+        // newest — reading the WHOLE file into memory was an unbounded
+        // allocation driven by file age. The view is capped to the newest
+        // 4 MiB; a partial first line from the cut is dropped (it cannot
+        // be trusted as an entry).
+        const AUDIT_READ_CAP: u64 = 4 * 1024 * 1024;
+        let content = match std::fs::metadata(&self.path).map(|m| m.len()) {
+            Ok(size) if size > AUDIT_READ_CAP => std::fs::File::open(&self.path)
+                .and_then(|mut file| {
+                    use std::io::{Read, Seek, SeekFrom};
+                    file.seek(SeekFrom::Start(size - AUDIT_READ_CAP))?;
+                    let mut buf = Vec::new();
+                    file.read_to_end(&mut buf)?;
+                    Ok(String::from_utf8_lossy(&buf).into_owned())
+                })
+                .map(|tail| match tail.find('\n') {
+                    Some(cut) => tail[cut + 1..].to_owned(),
+                    None => tail,
+                }),
+            _ => std::fs::read_to_string(&self.path),
+        };
+        let content = match content {
             Ok(content) => content,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return AuditListResult {

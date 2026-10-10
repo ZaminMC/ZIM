@@ -223,7 +223,13 @@ impl Engine {
     ) -> Result<mpsc::Sender<ActorCommand>, EngineError> {
         let mut actors = self.inner.actors.lock().await;
         if let Some(tx) = actors.get(server_id.as_str()) {
-            return Ok(tx.clone());
+            if !tx.is_closed() {
+                return Ok(tx.clone());
+            }
+            // A closed channel means the actor task has ended (Retire
+            // breaks its run loop) — a dead entry must not wedge the id
+            // forever. Evict and spawn a fresh actor below.
+            actors.remove(server_id.as_str());
         }
         let entry = {
             let registry = self.registry_lock();
@@ -270,6 +276,30 @@ impl Engine {
                 .collect()
         };
         for (server_id, root, runtime_dir) in entries {
+            // Crash discipline (ADR-0009): a restore interrupted by a
+            // daemon crash or power loss is finished or undone NOW, from
+            // the journal the commit left at the root — before any actor
+            // supervises the tree. Without this, a stranded rollback dir
+            // waited to be destroyed by the next restore.
+            {
+                let recover_root = root.clone();
+                let outcome = tokio::task::spawn_blocking(move || {
+                    zamin_core::backup::recover_interrupted(&recover_root)
+                })
+                .await;
+                match outcome {
+                    Ok(Ok(Some(note))) => {
+                        tracing::info!(server = %server_id, "{note}");
+                    }
+                    Ok(Ok(None)) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(server = %server_id, "restore recovery failed: {e:?}");
+                    }
+                    Err(e) => {
+                        tracing::warn!(server = %server_id, "restore recovery task failed: {e}");
+                    }
+                }
+            }
             let record_path = runtime_dir.join("runtime.json");
             let Ok(bytes) = std::fs::read(&record_path) else {
                 continue;
@@ -381,24 +411,30 @@ impl Engine {
     }
 
     pub(crate) async fn describe_state(&self, server_id: &ServerId) -> ServerState {
-        let actors = self.inner.actors.lock().await;
-        match actors.get(server_id.as_str()) {
-            Some(tx) => {
-                let (reply, rx) = oneshot::channel();
-                if tx
-                    .clone()
-                    .send(ActorCommand::Describe { reply })
-                    .await
-                    .is_ok()
-                {
-                    if let Ok(snapshot) = rx.await {
-                        return snapshot.state;
-                    }
-                }
-                ServerState::Unknown
+        // Clone the sender under a short-lived guard and drop the lock
+        // BEFORE the round trip: holding the actors mutex across the
+        // per-actor await lets one busy actor (a blocking java inspect,
+        // a slow kill) stall every other describe/lifecycle/list call in
+        // the daemon — a fleet-wide amplifier.
+        let sender = {
+            let actors = self.inner.actors.lock().await;
+            actors.get(server_id.as_str()).cloned()
+        };
+        let Some(tx) = sender else {
+            return ServerState::NotRunning;
+        };
+        let (reply, rx) = oneshot::channel();
+        if tx
+            .clone()
+            .send(ActorCommand::Describe { reply })
+            .await
+            .is_ok()
+        {
+            if let Ok(snapshot) = rx.await {
+                return snapshot.state;
             }
-            None => ServerState::NotRunning,
         }
+        ServerState::Unknown
     }
 
     pub async fn get_server(&self, server_id: &ServerId) -> Result<ServerDetails, EngineError> {
@@ -1104,6 +1140,11 @@ impl Engine {
                 .map_err(|_| internal("actor is gone"))?;
             rx.await
                 .map_err(|_| internal("actor dropped the reply"))??;
+            // The actor has broken its run loop: drop the dead channel so
+            // a later re-registration of the same id lazily spawns a fresh
+            // actor instead of talking to a corpse ("actor is gone"
+            // until daemon restart).
+            self.inner.actors.lock().await.remove(server_id.as_str());
         }
         self.registry_lock()
             .remove(server_id)
@@ -1220,18 +1261,40 @@ impl Engine {
         ),
         EngineError,
     > {
-        let snapshot = if stream == StreamKind::Events && cursor.is_none() {
-            Some(EventsSnapshot {
+        // Fresh events subscriptions carry a snapshot, and the snapshot
+        // walk takes real time (per-server describe round trips). The
+        // ANCHOR is taken BEFORE the walk and the registration happens
+        // AFTER it: the hub then replays exactly the anchor→now window
+        // behind the snapshot, so events published mid-walk used to fall
+        // into the gap between snapshot and live stream — in neither.
+        let anchored = if stream == StreamKind::Events && cursor.is_none() {
+            let anchor = self.inner.hub.current_seq();
+            let snapshot = EventsSnapshot {
                 servers: self.list_servers().await,
-            })
+            };
+            let subscription = self
+                .inner
+                .hub
+                .subscribe(
+                    StreamKind::Events,
+                    server_id.clone(),
+                    Some(StreamCursor::Events { seq: anchor }),
+                )
+                .map_err(EngineError::from)?;
+            Some((snapshot, subscription))
         } else {
             None
         };
-        let subscription = self
-            .inner
-            .hub
-            .subscribe(stream, server_id, cursor)
-            .map_err(EngineError::from)?;
+        let (snapshot, subscription) = match anchored {
+            Some((snapshot, subscription)) => (Some(snapshot), subscription),
+            None => (
+                None,
+                self.inner
+                    .hub
+                    .subscribe(stream, server_id, cursor)
+                    .map_err(EngineError::from)?,
+            ),
+        };
         let result = SubscribeResult {
             subscription_id: subscription.id.clone(),
             cursor: match stream {
@@ -1639,96 +1702,99 @@ impl Engine {
             zamin_protocol::jobs::BackupTaken::Cold
         };
 
-        Ok(self.inner.jobs.spawn(
-            zamin_protocol::jobs::JobKind::BackupCreate,
-            Some(server_id.to_string()),
-            move |ctl| async move {
-                if live {
-                    ctl.progress(
-                        0,
-                        None,
-                        None,
-                        Some("asking the server to flush (save-off / save-all)"),
-                    );
-                    engine_for_save
-                        .write_stdin(&sid_for_save, "save-off".to_owned())
-                        .await
-                        .map_err(job_failure)?;
-                    engine_for_save
-                        .write_stdin(&sid_for_save, "save-all".to_owned())
-                        .await
-                        .map_err(job_failure)?;
-                    tokio::time::sleep(LIVE_SAVE_SETTLE).await;
-                }
-                if ctl.cancelled() {
+        self.inner
+            .jobs
+            .spawn(
+                zamin_protocol::jobs::JobKind::BackupCreate,
+                Some(server_id.to_string()),
+                move |ctl| async move {
+                    if live {
+                        ctl.progress(
+                            0,
+                            None,
+                            None,
+                            Some("asking the server to flush (save-off / save-all)"),
+                        );
+                        engine_for_save
+                            .write_stdin(&sid_for_save, "save-off".to_owned())
+                            .await
+                            .map_err(job_failure)?;
+                        engine_for_save
+                            .write_stdin(&sid_for_save, "save-all".to_owned())
+                            .await
+                            .map_err(job_failure)?;
+                        tokio::time::sleep(LIVE_SAVE_SETTLE).await;
+                    }
+                    if ctl.cancelled() {
+                        if live {
+                            let _ = engine_for_save
+                                .write_stdin(&sid_for_save, "save-on".to_owned())
+                                .await;
+                        }
+                        return Err(JobFailure::Cancelled);
+                    }
+
+                    let progress_ctl = ctl.clone();
+                    let archive_ctl = ctl.clone();
+                    let prune_dir = backups_dir.clone();
+                    let walk = tokio::task::spawn_blocking(move || {
+                        zamin_core::backup::create_archive(
+                            &root,
+                            &backups_dir,
+                            zamin_core::backup::BackupCreateOptions {
+                                server_id: sid_for_archive,
+                                label,
+                                taken,
+                                cancel: archive_ctl.cancel_flag(),
+                                progress: Arc::new(move |p: zamin_core::backup::CreateProgress| {
+                                    progress_ctl.progress(
+                                        p.bytes_done,
+                                        Some(p.bytes_done.max(1)),
+                                        Some("bytes"),
+                                        None,
+                                    );
+                                }),
+                            },
+                        )
+                    })
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("backup task failed: {e}"),
+                        ))
+                    })?;
+
+                    let result = match walk {
+                        Ok(outcome) => {
+                            ctl.progress(
+                                outcome.manifest.size_bytes,
+                                Some(outcome.manifest.size_bytes.max(1)),
+                                Some("bytes"),
+                                Some(&format!(
+                                    "backup {} written ({} files)",
+                                    outcome.backup_id, outcome.manifest.file_count
+                                )),
+                            );
+                            // Retention (ARCH-REVIEW §16.5): janitorial, never fatal.
+                            if let Err(e) = zamin_core::backup::prune_backups(&prune_dir, keep) {
+                                tracing::warn!("retention pruning failed: {e}");
+                            }
+                            Ok(())
+                        }
+                        Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                        Err(e) => Err(JobFailure::Error(crate::engine::to_protocol(&e))),
+                    };
+
                     if live {
                         let _ = engine_for_save
                             .write_stdin(&sid_for_save, "save-on".to_owned())
                             .await;
                     }
-                    return Err(JobFailure::Cancelled);
-                }
-
-                let progress_ctl = ctl.clone();
-                let archive_ctl = ctl.clone();
-                let prune_dir = backups_dir.clone();
-                let walk = tokio::task::spawn_blocking(move || {
-                    zamin_core::backup::create_archive(
-                        &root,
-                        &backups_dir,
-                        zamin_core::backup::BackupCreateOptions {
-                            server_id: sid_for_archive,
-                            label,
-                            taken,
-                            cancel: archive_ctl.cancel_flag(),
-                            progress: Arc::new(move |p: zamin_core::backup::CreateProgress| {
-                                progress_ctl.progress(
-                                    p.bytes_done,
-                                    Some(p.bytes_done.max(1)),
-                                    Some("bytes"),
-                                    None,
-                                );
-                            }),
-                        },
-                    )
-                })
-                .await
-                .map_err(|e| {
-                    JobFailure::Error(ProtocolError::new(
-                        ErrorCode::InternalError,
-                        format!("backup task failed: {e}"),
-                    ))
-                })?;
-
-                let result = match walk {
-                    Ok(outcome) => {
-                        ctl.progress(
-                            outcome.manifest.size_bytes,
-                            Some(outcome.manifest.size_bytes.max(1)),
-                            Some("bytes"),
-                            Some(&format!(
-                                "backup {} written ({} files)",
-                                outcome.backup_id, outcome.manifest.file_count
-                            )),
-                        );
-                        // Retention (ARCH-REVIEW §16.5): janitorial, never fatal.
-                        if let Err(e) = zamin_core::backup::prune_backups(&prune_dir, keep) {
-                            tracing::warn!("retention pruning failed: {e}");
-                        }
-                        Ok(())
-                    }
-                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
-                    Err(e) => Err(JobFailure::Error(crate::engine::to_protocol(&e))),
-                };
-
-                if live {
-                    let _ = engine_for_save
-                        .write_stdin(&sid_for_save, "save-on".to_owned())
-                        .await;
-                }
-                result
-            },
-        ))
+                    result
+                },
+            )
+            .map_err(EngineError::from)
     }
 
     /// `backup.restore`: a job that replaces the server root with the
@@ -1775,54 +1841,64 @@ impl Engine {
             }
         }
 
-        Ok(self.inner.jobs.spawn(
-            zamin_protocol::jobs::JobKind::BackupRestore,
-            Some(server_id.to_string()),
-            move |ctl| async move {
-                if ctl.cancelled() {
-                    return Err(JobFailure::Cancelled);
-                }
-                let progress_ctl = ctl.clone();
-                let extract_ctl = ctl.clone();
-                let restore = tokio::task::spawn_blocking(move || {
-                    zamin_core::backup::restore_archive(
-                        &root,
-                        &archive,
-                        &zamin_core::backup::RestoreOptions {
-                            cancel: extract_ctl.cancel_flag(),
-                            progress: Arc::new(move |p: zamin_core::backup::RestoreProgress| {
-                                progress_ctl.progress(p.entries_done, None, Some("entries"), None);
-                            }),
-                            max_entries: 0,
-                            max_total_bytes: 0,
-                        },
-                    )
-                })
-                .await
-                .map_err(|e| {
-                    JobFailure::Error(ProtocolError::new(
-                        ErrorCode::InternalError,
-                        format!("restore task failed: {e}"),
-                    ))
-                })?;
-                match restore {
-                    Ok(outcome) => {
-                        ctl.progress(
-                            outcome.restored_files,
-                            Some(outcome.restored_files.max(1)),
-                            Some("entries"),
-                            Some(&format!(
-                                "restored {} files ({} bytes)",
-                                outcome.restored_files, outcome.restored_bytes
-                            )),
-                        );
-                        Ok(())
+        self.inner
+            .jobs
+            .spawn(
+                zamin_protocol::jobs::JobKind::BackupRestore,
+                Some(server_id.to_string()),
+                move |ctl| async move {
+                    if ctl.cancelled() {
+                        return Err(JobFailure::Cancelled);
                     }
-                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
-                    Err(e) => Err(JobFailure::Error(crate::engine::to_protocol(&e))),
-                }
-            },
-        ))
+                    let progress_ctl = ctl.clone();
+                    let extract_ctl = ctl.clone();
+                    let restore = tokio::task::spawn_blocking(move || {
+                        zamin_core::backup::restore_archive(
+                            &root,
+                            &archive,
+                            &zamin_core::backup::RestoreOptions {
+                                cancel: extract_ctl.cancel_flag(),
+                                progress: Arc::new(
+                                    move |p: zamin_core::backup::RestoreProgress| {
+                                        progress_ctl.progress(
+                                            p.entries_done,
+                                            None,
+                                            Some("entries"),
+                                            None,
+                                        );
+                                    },
+                                ),
+                                max_entries: 0,
+                                max_total_bytes: 0,
+                            },
+                        )
+                    })
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("restore task failed: {e}"),
+                        ))
+                    })?;
+                    match restore {
+                        Ok(outcome) => {
+                            ctl.progress(
+                                outcome.restored_files,
+                                Some(outcome.restored_files.max(1)),
+                                Some("entries"),
+                                Some(&format!(
+                                    "restored {} files ({} bytes)",
+                                    outcome.restored_files, outcome.restored_bytes
+                                )),
+                            );
+                            Ok(())
+                        }
+                        Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                        Err(e) => Err(JobFailure::Error(crate::engine::to_protocol(&e))),
+                    }
+                },
+            )
+            .map_err(EngineError::from)
     }
 
     // --- software catalog & creation (protocol spec §7b) ---------------
@@ -2183,154 +2259,157 @@ impl Engine {
         let sid = server_id.clone();
         let root = instance_root.clone();
         let data_dir = self.inner.data_dir.clone();
-        Ok(self.inner.jobs.spawn(
-            zamin_protocol::jobs::JobKind::ServerCreate,
-            Some(server_id.to_string()),
-            move |ctl| async move {
-                if ctl.cancelled() {
-                    return Err(JobFailure::Cancelled);
-                }
-                ctl.progress(0, None, None, Some("preparing the server directory"));
-                std::fs::create_dir_all(&root).map_err(|source| {
-                    JobFailure::Error(to_protocol(&zamin_core::error::CoreError::Io {
-                        path: root.clone(),
-                        source,
-                    }))
-                })?;
+        self.inner
+            .jobs
+            .spawn(
+                zamin_protocol::jobs::JobKind::ServerCreate,
+                Some(server_id.to_string()),
+                move |ctl| async move {
+                    if ctl.cancelled() {
+                        return Err(JobFailure::Cancelled);
+                    }
+                    ctl.progress(0, None, None, Some("preparing the server directory"));
+                    std::fs::create_dir_all(&root).map_err(|source| {
+                        JobFailure::Error(to_protocol(&zamin_core::error::CoreError::Io {
+                            path: root.clone(),
+                            source,
+                        }))
+                    })?;
 
-                // Stamp the template (never overwrites; the directory is
-                // fresh by the pre-checks above).
-                if ctl.cancelled() {
-                    let _ = std::fs::remove_dir_all(&root);
-                    return Err(JobFailure::Cancelled);
-                }
-                ctl.progress(0, None, None, Some("writing server files"));
-                if let Err(e) = zamin_core::software::stamp_template(&root, &template_id) {
-                    let _ = std::fs::remove_dir_all(&root);
-                    return Err(JobFailure::Error(to_protocol(&e)));
-                }
-                if let Some(port) = params.port {
-                    patch_stamped_port(&root, port);
-                }
-
-                // Download + verify. Cancelled downloads and checksum
-                // mismatches leave nothing behind (the downloader owns
-                // that guarantee); the instance dir goes too — creation
-                // is all-or-nothing. Fabric downloads carry no published
-                // checksum (None expected): the downloader still hashes
-                // the stream, so the outcome reports what arrived.
-                let progress_ctl = ctl.clone();
-                let cancel_flag = ctl.cancel_flag();
-                let name = resolved.name.clone();
-                let sha = resolved.sha256.clone();
-                let url = resolved.url.clone();
-                let size = resolved.size;
-                let download_root = root.clone();
-                // The runtime cache lives under the daemon's data dir and
-                // is keyed by URL: a second server on the same jar (or a
-                // re-create after a failed attempt) installs from disk —
-                // offline included. A hit is re-hashed before use; a
-                // corrupted artifact is dropped, never served.
-                let cache_root = data_dir.join("cache");
-                ctl.progress(0, size, Some("bytes"), Some(&format!("downloading {name}")));
-                let options = zamin_core::software::DownloadOptions {
-                    cancel: cancel_flag,
-                    progress: Some(Arc::new(
-                        move |p: zamin_core::software::DownloadProgress| {
-                            progress_ctl.progress(p.bytes_done, p.total, Some("bytes"), None);
-                        },
-                    )),
-                    // A server jar never overwrites; fresh downloads only.
-                    replace: false,
-                };
-                let outcome = tokio::task::spawn_blocking(move || {
-                    let cache = zamin_core::cache::Cache::new(cache_root);
-                    let artifact = cache.fetch(
-                        &url,
-                        sha.as_deref().map(zamin_core::software::Verified::Sha256),
-                        "server.jar",
-                        &options,
-                    )?;
-                    zamin_core::cache::install_from_cache(
-                        &artifact.path,
-                        &artifact.digest,
-                        &download_root,
-                        "server.jar",
-                        &options,
-                    )
-                })
-                .await
-                .map_err(|e| {
-                    let _ = std::fs::remove_dir_all(&root);
-                    JobFailure::Error(ProtocolError::new(
-                        ErrorCode::InternalError,
-                        format!("download task failed: {e}"),
-                    ))
-                })?;
-                match outcome {
-                    Ok(outcome) => ctl.progress(
-                        outcome.size,
-                        Some(outcome.size.max(1)),
-                        Some("bytes"),
-                        Some(&format!(
-                            "verified {name} (sha256 {}…)",
-                            &outcome.digest[..8]
-                        )),
-                    ),
-                    Err(zamin_core::error::CoreError::Cancelled) => {
+                    // Stamp the template (never overwrites; the directory is
+                    // fresh by the pre-checks above).
+                    if ctl.cancelled() {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Cancelled);
                     }
-                    Err(e) => {
+                    ctl.progress(0, None, None, Some("writing server files"));
+                    if let Err(e) = zamin_core::software::stamp_template(&root, &template_id) {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Error(to_protocol(&e)));
                     }
-                }
+                    if let Some(port) = params.port {
+                        patch_stamped_port(&root, port);
+                    }
 
-                // Per-server configuration: jar path, the version this
-                // server runs, the Java requirement derived from the
-                // catalog, and the desired port.
-                if ctl.cancelled() {
-                    let _ = std::fs::remove_dir_all(&root);
-                    return Err(JobFailure::Cancelled);
-                }
-                ctl.progress(0, None, None, Some("writing the server configuration"));
-                let config_path = data_dir
-                    .join("servers")
-                    .join(sid.as_str())
-                    .join("config.toml");
-                let config = zamin_core::config::ServerConfigFile {
-                    schema_version: zamin_core::config::CONFIG_SCHEMA_VERSION,
-                    display_name: Some(display_name.clone()),
-                    jar: Some("server.jar".to_owned()),
-                    settings: zamin_core::config::ServerSettingsDefaults {
-                        mc_version: Some(params.version.clone()),
-                        java_major_required: java_major,
-                        port: params.port,
-                        java_path: params.java_path.clone().map(PathBuf::from),
-                        ..Default::default()
-                    },
-                };
-                if let Err(e) = zamin_core::config::save_server(&config_path, &config) {
-                    let _ = std::fs::remove_dir_all(&root);
-                    return Err(JobFailure::Error(to_protocol(&e)));
-                }
-
-                // Registration is the last step and the point of no
-                // return: from here the server exists (marker, registry,
-                // `registered` event), so failures no longer clean up.
-                if ctl.cancelled() {
-                    let _ = std::fs::remove_dir_all(&root);
-                    return Err(JobFailure::Cancelled);
-                }
-                ctl.progress(0, None, None, Some("registering the server"));
-                engine
-                    .register_server(sid, display_name, root)
+                    // Download + verify. Cancelled downloads and checksum
+                    // mismatches leave nothing behind (the downloader owns
+                    // that guarantee); the instance dir goes too — creation
+                    // is all-or-nothing. Fabric downloads carry no published
+                    // checksum (None expected): the downloader still hashes
+                    // the stream, so the outcome reports what arrived.
+                    let progress_ctl = ctl.clone();
+                    let cancel_flag = ctl.cancel_flag();
+                    let name = resolved.name.clone();
+                    let sha = resolved.sha256.clone();
+                    let url = resolved.url.clone();
+                    let size = resolved.size;
+                    let download_root = root.clone();
+                    // The runtime cache lives under the daemon's data dir and
+                    // is keyed by URL: a second server on the same jar (or a
+                    // re-create after a failed attempt) installs from disk —
+                    // offline included. A hit is re-hashed before use; a
+                    // corrupted artifact is dropped, never served.
+                    let cache_root = data_dir.join("cache");
+                    ctl.progress(0, size, Some("bytes"), Some(&format!("downloading {name}")));
+                    let options = zamin_core::software::DownloadOptions {
+                        cancel: cancel_flag,
+                        progress: Some(Arc::new(
+                            move |p: zamin_core::software::DownloadProgress| {
+                                progress_ctl.progress(p.bytes_done, p.total, Some("bytes"), None);
+                            },
+                        )),
+                        // A server jar never overwrites; fresh downloads only.
+                        replace: false,
+                    };
+                    let outcome = tokio::task::spawn_blocking(move || {
+                        let cache = zamin_core::cache::Cache::new(cache_root);
+                        let artifact = cache.fetch(
+                            &url,
+                            sha.as_deref().map(zamin_core::software::Verified::Sha256),
+                            "server.jar",
+                            &options,
+                        )?;
+                        zamin_core::cache::install_from_cache(
+                            &artifact.path,
+                            &artifact.digest,
+                            &download_root,
+                            "server.jar",
+                            &options,
+                        )
+                    })
                     .await
-                    .map_err(job_failure)?;
-                Ok(())
-            },
-        ))
+                    .map_err(|e| {
+                        let _ = std::fs::remove_dir_all(&root);
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("download task failed: {e}"),
+                        ))
+                    })?;
+                    match outcome {
+                        Ok(outcome) => ctl.progress(
+                            outcome.size,
+                            Some(outcome.size.max(1)),
+                            Some("bytes"),
+                            Some(&format!(
+                                "verified {name} (sha256 {}…)",
+                                &outcome.digest[..8]
+                            )),
+                        ),
+                        Err(zamin_core::error::CoreError::Cancelled) => {
+                            let _ = std::fs::remove_dir_all(&root);
+                            return Err(JobFailure::Cancelled);
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_dir_all(&root);
+                            return Err(JobFailure::Error(to_protocol(&e)));
+                        }
+                    }
+
+                    // Per-server configuration: jar path, the version this
+                    // server runs, the Java requirement derived from the
+                    // catalog, and the desired port.
+                    if ctl.cancelled() {
+                        let _ = std::fs::remove_dir_all(&root);
+                        return Err(JobFailure::Cancelled);
+                    }
+                    ctl.progress(0, None, None, Some("writing the server configuration"));
+                    let config_path = data_dir
+                        .join("servers")
+                        .join(sid.as_str())
+                        .join("config.toml");
+                    let config = zamin_core::config::ServerConfigFile {
+                        schema_version: zamin_core::config::CONFIG_SCHEMA_VERSION,
+                        display_name: Some(display_name.clone()),
+                        jar: Some("server.jar".to_owned()),
+                        settings: zamin_core::config::ServerSettingsDefaults {
+                            mc_version: Some(params.version.clone()),
+                            java_major_required: java_major,
+                            port: params.port,
+                            java_path: params.java_path.clone().map(PathBuf::from),
+                            ..Default::default()
+                        },
+                    };
+                    if let Err(e) = zamin_core::config::save_server(&config_path, &config) {
+                        let _ = std::fs::remove_dir_all(&root);
+                        return Err(JobFailure::Error(to_protocol(&e)));
+                    }
+
+                    // Registration is the last step and the point of no
+                    // return: from here the server exists (marker, registry,
+                    // `registered` event), so failures no longer clean up.
+                    if ctl.cancelled() {
+                        let _ = std::fs::remove_dir_all(&root);
+                        return Err(JobFailure::Cancelled);
+                    }
+                    ctl.progress(0, None, None, Some("registering the server"));
+                    engine
+                        .register_server(sid, display_name, root)
+                        .await
+                        .map_err(job_failure)?;
+                    Ok(())
+                },
+            )
+            .map_err(EngineError::from)
     }
 
     // --- java runtimes (protocol spec §7c) -----------------------------
@@ -2443,92 +2522,95 @@ impl Engine {
             .map_err(|e| internal(&format!("adoptium task failed: {e}")))?
             .map_err(|e| EngineError::Protocol(to_protocol(&e)))?;
 
-        Ok(self.inner.jobs.spawn(
-            zamin_protocol::jobs::JobKind::JavaInstall,
-            None,
-            move |ctl| async move {
-                if ctl.cancelled() {
-                    return Err(JobFailure::Cancelled);
-                }
-                ctl.progress(
-                    0,
-                    asset.size,
-                    Some("bytes"),
-                    Some(&format!(
-                        "fetching {} ({} {})",
-                        asset.package_name,
-                        std::env::consts::OS,
-                        std::env::consts::ARCH
-                    )),
-                );
-
-                let progress_ctl = ctl.clone();
-                let install_ctl = ctl.clone();
-                let outcome = tokio::task::spawn_blocking(move || {
-                    let cache = zamin_core::cache::Cache::new(cache_root);
-                    zamin_core::java::fetch::install_jdk(
-                        &managed_root,
-                        &asset,
-                        install_ctl.cancel_flag(),
-                        Arc::new(move |p: zamin_core::java::fetch::InstallProgress| match p {
-                            zamin_core::java::fetch::InstallProgress::Download {
-                                bytes_done,
-                                total,
-                            } => {
-                                progress_ctl.progress(bytes_done, total, Some("bytes"), None);
-                            }
-                            zamin_core::java::fetch::InstallProgress::Extracted {
-                                entries_done,
-                            } => {
-                                progress_ctl.progress(
-                                    entries_done,
-                                    None,
-                                    Some("entries"),
-                                    Some("extracting"),
-                                );
-                            }
-                            zamin_core::java::fetch::InstallProgress::Inspecting => {
-                                progress_ctl.progress(
-                                    0,
-                                    None,
-                                    None,
-                                    Some("inspecting the runtime"),
-                                );
-                            }
-                        }),
-                        // Cache-first: the archive outlives the install,
-                        // so the next install of the same JDK works
-                        // offline (validated by digest on every hit).
-                        Some(&cache),
-                    )
-                })
-                .await
-                .map_err(|e| {
-                    JobFailure::Error(ProtocolError::new(
-                        ErrorCode::InternalError,
-                        format!("jdk install task failed: {e}"),
-                    ))
-                })?;
-
-                match outcome {
-                    Ok(outcome) => {
-                        let message = if outcome.already_installed {
-                            format!("already installed at {}", outcome.runtime_dir.display())
-                        } else {
-                            format!(
-                                "installed {} at {}",
-                                outcome.version_string,
-                                outcome.runtime_dir.display()
-                            )
-                        };
-                        ctl.progress(1, Some(1), Some("steps"), Some(&message));
-                        Ok(())
+        self.inner
+            .jobs
+            .spawn(
+                zamin_protocol::jobs::JobKind::JavaInstall,
+                None,
+                move |ctl| async move {
+                    if ctl.cancelled() {
+                        return Err(JobFailure::Cancelled);
                     }
-                    Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
-                    Err(e) => Err(JobFailure::Error(to_protocol(&e))),
-                }
-            },
-        ))
+                    ctl.progress(
+                        0,
+                        asset.size,
+                        Some("bytes"),
+                        Some(&format!(
+                            "fetching {} ({} {})",
+                            asset.package_name,
+                            std::env::consts::OS,
+                            std::env::consts::ARCH
+                        )),
+                    );
+
+                    let progress_ctl = ctl.clone();
+                    let install_ctl = ctl.clone();
+                    let outcome = tokio::task::spawn_blocking(move || {
+                        let cache = zamin_core::cache::Cache::new(cache_root);
+                        zamin_core::java::fetch::install_jdk(
+                            &managed_root,
+                            &asset,
+                            install_ctl.cancel_flag(),
+                            Arc::new(move |p: zamin_core::java::fetch::InstallProgress| match p {
+                                zamin_core::java::fetch::InstallProgress::Download {
+                                    bytes_done,
+                                    total,
+                                } => {
+                                    progress_ctl.progress(bytes_done, total, Some("bytes"), None);
+                                }
+                                zamin_core::java::fetch::InstallProgress::Extracted {
+                                    entries_done,
+                                } => {
+                                    progress_ctl.progress(
+                                        entries_done,
+                                        None,
+                                        Some("entries"),
+                                        Some("extracting"),
+                                    );
+                                }
+                                zamin_core::java::fetch::InstallProgress::Inspecting => {
+                                    progress_ctl.progress(
+                                        0,
+                                        None,
+                                        None,
+                                        Some("inspecting the runtime"),
+                                    );
+                                }
+                            }),
+                            // Cache-first: the archive outlives the install,
+                            // so the next install of the same JDK works
+                            // offline (validated by digest on every hit).
+                            Some(&cache),
+                        )
+                    })
+                    .await
+                    .map_err(|e| {
+                        JobFailure::Error(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("jdk install task failed: {e}"),
+                        ))
+                    })?;
+
+                    match outcome {
+                        Ok(outcome) => {
+                            let message = if outcome.already_installed {
+                                format!("already installed at {}", outcome.runtime_dir.display())
+                            } else {
+                                format!(
+                                    "installed {} at {}",
+                                    outcome.version_string,
+                                    outcome.runtime_dir.display()
+                                )
+                            };
+                            ctl.progress(1, Some(1), Some("steps"), Some(&message));
+                            Ok(())
+                        }
+                        Err(zamin_core::error::CoreError::Cancelled) => Err(JobFailure::Cancelled),
+                        Err(e) => Err(JobFailure::Error(to_protocol(&e))),
+                    }
+                },
+            )
+            .map_err(EngineError::from)
     }
 
     // --- plugin catalog (ADR-0012; protocol spec §7d) -------------------
@@ -2895,7 +2977,7 @@ impl Engine {
                     Err(e) => Err(JobFailure::Error(to_protocol(&e))),
                 }
             },
-        );
+        )?;
         Ok(zamin_protocol::plugins::PluginsInstallResult {
             kind: zamin_protocol::jobs::JobKind::PluginInstall,
             job,
@@ -3530,115 +3612,117 @@ impl Engine {
         let engine = self.clone();
         let sid = server_id.clone();
         let dir_for_job = publish_dir;
-        Ok(self.inner.jobs.spawn(
-            zamin_protocol::jobs::JobKind::PublishExecute,
-            Some(server_id.to_string()),
-            move |ctl| async move {
-                // Stage 0: preparing — fresh resolve, fresh diff.
-                ctl.progress(
-                    0,
-                    Some(4),
-                    Some("stage"),
-                    Some("preparing: resolving the selection against the server"),
-                );
-                let reviews_path = dir_for_job.join("scan-reviews.json");
-                let pub_path = dir_for_job.join("publication.json");
-                let selection = config.selection.clone();
-                let root_for_resolve = root_for_job.clone();
-                let resolved = {
-                    let resolve = tokio::task::spawn_blocking(move || {
-                        zamin_core::publish::selection::resolve_selection(
-                            &root_for_resolve,
-                            &selection,
-                            Default::default(),
-                        )
-                    })
-                    .await
-                    .map_err(|e| {
-                        JobFailure::Error(ProtocolError::new(
-                            ErrorCode::InternalError,
-                            format!("publish resolve task failed: {e}"),
-                        ))
-                    })?
-                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
-                    resolve
-                };
-                if resolved.is_empty() {
-                    return Err(JobFailure::Error(
-                        zamin_protocol::publish::nothing_selected_error(),
-                    ));
-                }
-                if ctl.cancelled() {
-                    return Err(JobFailure::Cancelled);
-                }
+        self.inner
+            .jobs
+            .spawn(
+                zamin_protocol::jobs::JobKind::PublishExecute,
+                Some(server_id.to_string()),
+                move |ctl| async move {
+                    // Stage 0: preparing — fresh resolve, fresh diff.
+                    ctl.progress(
+                        0,
+                        Some(4),
+                        Some("stage"),
+                        Some("preparing: resolving the selection against the server"),
+                    );
+                    let reviews_path = dir_for_job.join("scan-reviews.json");
+                    let pub_path = dir_for_job.join("publication.json");
+                    let selection = config.selection.clone();
+                    let root_for_resolve = root_for_job.clone();
+                    let resolved = {
+                        let resolve = tokio::task::spawn_blocking(move || {
+                            zamin_core::publish::selection::resolve_selection(
+                                &root_for_resolve,
+                                &selection,
+                                Default::default(),
+                            )
+                        })
+                        .await
+                        .map_err(|e| {
+                            JobFailure::Error(ProtocolError::new(
+                                ErrorCode::InternalError,
+                                format!("publish resolve task failed: {e}"),
+                            ))
+                        })?
+                        .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
+                        resolve
+                    };
+                    if resolved.is_empty() {
+                        return Err(JobFailure::Error(
+                            zamin_protocol::publish::nothing_selected_error(),
+                        ));
+                    }
+                    if ctl.cancelled() {
+                        return Err(JobFailure::Cancelled);
+                    }
 
-                // Stage 1: scanning — the gate runs again on fresh disk.
-                ctl.progress(
-                    1,
-                    Some(4),
-                    Some("stage"),
-                    Some("scanning the selection for secrets"),
-                );
-                let running = engine.describe_state(&sid).await == ServerState::Running;
-                let scan_report = {
-                    let root_for_scan = root_for_job.clone();
-                    let resolved_for_scan = resolved.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let reviews = load_reviews(&reviews_path)?;
-                        let scan = zamin_core::publish::secrets::scan(
-                            &resolved_for_scan,
-                            &zamin_core::publish::secrets::ScanContext {
-                                discord_srv_active: discord_srv_loaded(&root_for_scan, running),
-                            },
-                            &reviews,
-                        );
-                        Ok::<_, zamin_core::error::CoreError>(scan)
-                    })
-                    .await
-                    .map_err(|e| {
-                        JobFailure::Error(ProtocolError::new(
-                            ErrorCode::InternalError,
-                            format!("publish scan task failed: {e}"),
-                        ))
-                    })?
-                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?
-                };
-                let blocking = zamin_core::publish::secrets::blocking(&scan_report);
-                if !blocking.is_empty() && !confirm_unsafe {
-                    return Err(JobFailure::Error(
-                        zamin_protocol::publish::secrets_detected_error(&blocking),
-                    ));
-                }
-                if ctl.cancelled() {
-                    return Err(JobFailure::Cancelled);
-                }
+                    // Stage 1: scanning — the gate runs again on fresh disk.
+                    ctl.progress(
+                        1,
+                        Some(4),
+                        Some("stage"),
+                        Some("scanning the selection for secrets"),
+                    );
+                    let running = engine.describe_state(&sid).await == ServerState::Running;
+                    let scan_report = {
+                        let root_for_scan = root_for_job.clone();
+                        let resolved_for_scan = resolved.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let reviews = load_reviews(&reviews_path)?;
+                            let scan = zamin_core::publish::secrets::scan(
+                                &resolved_for_scan,
+                                &zamin_core::publish::secrets::ScanContext {
+                                    discord_srv_active: discord_srv_loaded(&root_for_scan, running),
+                                },
+                                &reviews,
+                            );
+                            Ok::<_, zamin_core::error::CoreError>(scan)
+                        })
+                        .await
+                        .map_err(|e| {
+                            JobFailure::Error(ProtocolError::new(
+                                ErrorCode::InternalError,
+                                format!("publish scan task failed: {e}"),
+                            ))
+                        })?
+                        .map_err(|e| JobFailure::Error(to_protocol(&e)))?
+                    };
+                    let blocking = zamin_core::publish::secrets::blocking(&scan_report);
+                    if !blocking.is_empty() && !confirm_unsafe {
+                        return Err(JobFailure::Error(
+                            zamin_protocol::publish::secrets_detected_error(&blocking),
+                        ));
+                    }
+                    if ctl.cancelled() {
+                        return Err(JobFailure::Cancelled);
+                    }
 
-                // Stage 2: packaging — staging + fsync + rename inside
-                // the publish dir. The owned clone moves into the
-                // blocking closure; the manifest comes back out for the
-                // provider's receipt.
-                ctl.progress(
-                    2,
-                    Some(4),
-                    Some("stage"),
-                    Some("packaging the selected files"),
-                );
-                let title = if config.title.trim().is_empty() {
-                    sid.to_string()
-                } else {
-                    config.title.trim().to_owned()
-                };
-                let version = config.version.trim().to_owned();
-                let resolved_for_package = resolved.clone();
-                let dir_for_package = dir_for_job.clone();
-                let provider_id = provider.id().to_owned();
-                let progress_ctl = ctl.clone();
-                let cancel_flag = ctl.cancel_flag();
-                let title_for_package = title.clone();
-                let version_for_package = version.clone();
-                let description = config.description.clone();
-                let changelog = config.changelog.clone();
-                let (package_sha, package_bytes, manifest) =
+                    // Stage 2: packaging — staging + fsync + rename inside
+                    // the publish dir. The owned clone moves into the
+                    // blocking closure; the manifest comes back out for the
+                    // provider's receipt.
+                    ctl.progress(
+                        2,
+                        Some(4),
+                        Some("stage"),
+                        Some("packaging the selected files"),
+                    );
+                    let title = if config.title.trim().is_empty() {
+                        sid.to_string()
+                    } else {
+                        config.title.trim().to_owned()
+                    };
+                    let version = config.version.trim().to_owned();
+                    let resolved_for_package = resolved.clone();
+                    let dir_for_package = dir_for_job.clone();
+                    let provider_id = provider.id().to_owned();
+                    let progress_ctl = ctl.clone();
+                    let cancel_flag = ctl.cancel_flag();
+                    let title_for_package = title.clone();
+                    let version_for_package = version.clone();
+                    let description = config.description.clone();
+                    let changelog = config.changelog.clone();
+                    let (package_sha, package_bytes, manifest) =
                     tokio::task::spawn_blocking(
                         move || -> Result<
                             (String, u64, zamin_core::publish::package::PublishManifest),
@@ -3687,83 +3771,84 @@ impl Engine {
                         ))
                     })?
                     .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
-                if ctl.cancelled() {
-                    return Err(JobFailure::Cancelled);
-                }
+                    if ctl.cancelled() {
+                        return Err(JobFailure::Cancelled);
+                    }
 
-                // Stage 3: uploading — the provider answers, then and
-                // only then the publication record commits (§42: the
-                // record names what actually went out).
-                let upload_message = format!("uploading via {}", provider.display_name());
-                ctl.progress(3, Some(4), Some("stage"), Some(upload_message.as_str()));
-                let receipt = {
-                    let package_path = dir_for_job.join("package.zip");
-                    let settings = config.provider_settings.clone();
-                    let credential = credential.clone();
-                    let package_sha = package_sha.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let package = ProviderPackageRef {
-                            path: &package_path,
-                            sha512: &package_sha,
-                            size_bytes: package_bytes,
-                            manifest: &manifest,
-                        };
-                        provider.upload(&package, &settings, credential.as_deref())
-                    })
-                    .await
-                    .map_err(|e| {
-                        JobFailure::Error(ProtocolError::new(
-                            ErrorCode::InternalError,
-                            format!("publish upload task failed: {e}"),
-                        ))
-                    })?
-                    .map_err(|e| JobFailure::Error(to_protocol(&e)))?
-                };
-
-                let record = PublicationRecord {
-                    schema_version: PUBLICATION_SCHEMA_VERSION,
-                    published_at_ms: now_ms_unix(),
-                    title,
-                    version: Some(version).filter(|v| !v.is_empty()),
-                    changelog: Some(config.changelog.clone()).filter(|c| !c.is_empty()),
-                    provider_id: receipt.provider_id.clone(),
-                    receipt,
-                    package_sha512: package_sha,
-                    package_bytes,
-                    files: resolved
-                        .into_iter()
-                        .map(|(path, f)| {
-                            (
-                                path,
-                                PublicationFile {
-                                    sha512: f.sha512,
-                                    size: f.size,
-                                },
-                            )
+                    // Stage 3: uploading — the provider answers, then and
+                    // only then the publication record commits (§42: the
+                    // record names what actually went out).
+                    let upload_message = format!("uploading via {}", provider.display_name());
+                    ctl.progress(3, Some(4), Some("stage"), Some(upload_message.as_str()));
+                    let receipt = {
+                        let package_path = dir_for_job.join("package.zip");
+                        let settings = config.provider_settings.clone();
+                        let credential = credential.clone();
+                        let package_sha = package_sha.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let package = ProviderPackageRef {
+                                path: &package_path,
+                                sha512: &package_sha,
+                                size_bytes: package_bytes,
+                                manifest: &manifest,
+                            };
+                            provider.upload(&package, &settings, credential.as_deref())
                         })
-                        .collect(),
-                };
-                {
-                    let pub_path = pub_path.clone();
-                    tokio::task::spawn_blocking(move || save_publication(&pub_path, &record))
                         .await
                         .map_err(|e| {
                             JobFailure::Error(ProtocolError::new(
                                 ErrorCode::InternalError,
-                                format!("publish commit task failed: {e}"),
+                                format!("publish upload task failed: {e}"),
                             ))
                         })?
-                        .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
-                }
-                ctl.progress(
-                    4,
-                    Some(4),
-                    Some("stage"),
-                    Some("completed: the publication is recorded"),
-                );
-                Ok(())
-            },
-        ))
+                        .map_err(|e| JobFailure::Error(to_protocol(&e)))?
+                    };
+
+                    let record = PublicationRecord {
+                        schema_version: PUBLICATION_SCHEMA_VERSION,
+                        published_at_ms: now_ms_unix(),
+                        title,
+                        version: Some(version).filter(|v| !v.is_empty()),
+                        changelog: Some(config.changelog.clone()).filter(|c| !c.is_empty()),
+                        provider_id: receipt.provider_id.clone(),
+                        receipt,
+                        package_sha512: package_sha,
+                        package_bytes,
+                        files: resolved
+                            .into_iter()
+                            .map(|(path, f)| {
+                                (
+                                    path,
+                                    PublicationFile {
+                                        sha512: f.sha512,
+                                        size: f.size,
+                                    },
+                                )
+                            })
+                            .collect(),
+                    };
+                    {
+                        let pub_path = pub_path.clone();
+                        tokio::task::spawn_blocking(move || save_publication(&pub_path, &record))
+                            .await
+                            .map_err(|e| {
+                                JobFailure::Error(ProtocolError::new(
+                                    ErrorCode::InternalError,
+                                    format!("publish commit task failed: {e}"),
+                                ))
+                            })?
+                            .map_err(|e| JobFailure::Error(to_protocol(&e)))?;
+                    }
+                    ctl.progress(
+                        4,
+                        Some(4),
+                        Some("stage"),
+                        Some("completed: the publication is recorded"),
+                    );
+                    Ok(())
+                },
+            )
+            .map_err(EngineError::from)
     }
 
     /// Broadcast a registry-driven transition (registration, removal).

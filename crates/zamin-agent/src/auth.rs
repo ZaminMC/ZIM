@@ -29,22 +29,34 @@ pub enum TokenError {
     Randomness,
 }
 
-/// Load the token from `path`, generating one on first use. The file is
-/// one base64url line; 0600.
+/// Load the token from `path`, generating one on FIRST USE only. The file
+/// is one base64url line; 0600.
+///
+/// Regeneration is gated on NotFound specifically: any other read failure
+/// (EACCES, EIO, a Windows sharing violation during an AV scan) used to
+/// fall through to regeneration — silently rotating the token and
+/// breaking every pinned client with no trace. Now the error is the
+/// answer: loud, actionable, nothing overwritten.
 pub fn load_or_generate_token(path: &Path) -> Result<String, TokenError> {
-    if let Ok(existing) = fs::read_to_string(path) {
-        let token = existing.trim();
-        if token.is_empty() {
-            return Err(TokenError::Empty);
+    match fs::read_to_string(path) {
+        Ok(existing) => {
+            let token = existing.trim();
+            if token.is_empty() {
+                return Err(TokenError::Empty);
+            }
+            Ok(token.to_owned())
         }
-        return Ok(token.to_owned());
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let token = generate_token()?;
+            write_private(path, format!("{token}\n"))?;
+            tracing::info!("generated a new agent token at {path:?}");
+            Ok(token)
+        }
+        Err(source) => Err(TokenError::Io(source)),
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let token = generate_token()?;
-    write_private(path, format!("{token}\n"))?;
-    Ok(token)
 }
 
 pub fn generate_token() -> Result<String, TokenError> {

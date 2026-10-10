@@ -51,6 +51,33 @@ pub fn idempotent_get<T>(
     }
 }
 
+/// Cap one metadata body read. The catalog endpoints are configurable
+/// (mirrors, self-hosted): a hostile or broken metadata endpoint must not
+/// stream unbounded bytes into daemon memory through every catalog call.
+/// Eight MiB is generous — the largest real catalog document is tens of
+/// KiB — while the byte stream stays a bounded allocation. Non-UTF-8
+/// bytes degrade lossily instead of dropping the whole body.
+pub const METADATA_BODY_CAP: u64 = 8 * 1024 * 1024;
+
+/// Read one metadata response body as a (lossy) string, capped by
+/// [`METADATA_BODY_CAP`]. Every metadata client reads through here.
+pub fn read_capped_string(response: ureq::Response) -> Result<String, io::Error> {
+    use std::io::Read;
+    let mut limited = response.into_reader().take(METADATA_BODY_CAP + 1);
+    let mut buf = Vec::new();
+    limited.read_to_end(&mut buf)?;
+    if buf.len() as u64 > METADATA_BODY_CAP {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "metadata response exceeds the {} MiB cap",
+                METADATA_BODY_CAP / (1024 * 1024)
+            ),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 /// True only when the transport error's source chain carries a
 /// reset-class io error — the socket died before a response existed.
 /// A malformed status line (no io error in the chain) and every

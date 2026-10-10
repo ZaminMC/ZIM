@@ -118,6 +118,13 @@ pub const NEW_WINDOW: u32 = 50018;
 pub const CLOSE_OTHER_TABS: u32 = 50019;
 pub const CLOSE_TABS_TO_THE_RIGHT: u32 = 50020;
 
+/// ⓩ Local: select a tab BY ID. Chromium's IDC_SELECT_TAB_0..7
+/// (34018..34025) is an INDEX arithmetic that only covers the first
+/// eight tabs — deriving mouse clicks from it overflowed into
+/// DUPLICATE_TAB (34027) and RESTORE_TAB (34028) from the ninth tab on.
+/// Every selection that knows its tab's identity routes here instead.
+pub const SELECT_TAB_BY_ID: u32 = 50024;
+
 /// ⓩ Local: open the ACTIVE tab's developer tools (Chromium routes
 /// through IDC_DEV_TOOLS; the devtools feature gates the release build).
 pub const DEV_TOOLS: u32 = 50021;

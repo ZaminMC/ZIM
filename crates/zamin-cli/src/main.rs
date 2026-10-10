@@ -604,6 +604,15 @@ type CmdResult = Result<(), Failure>;
 /// verification is allowed but loudly announced.
 async fn connect_remote(cli: &Cli, addr: String) -> Result<Client, Failure> {
     let trust = if let Some(hex) = &cli.fingerprint {
+        // Structurally wrong pins fail HERE with a usable message, not at
+        // TLS time with the generic "does not match the pinned
+        // fingerprint": a pin is 64 hex digits (SHA-256).
+        if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(Failure::error(format!(
+                "--fingerprint must be 64 hex digits (SHA-256); this one is {} characters and not a fingerprint.",
+                hex.len()
+            )));
+        }
         zamin_agent::client::Trust::Fingerprint(hex.clone())
     } else if cli.insecure_skip_verify {
         eprintln!(

@@ -217,15 +217,46 @@ pub async fn server_list_ping(addr: &str, host: &str, port: u16) -> std::io::Res
         stream.write_all(&ping_packet(nonce)).await?;
         stream.flush().await?;
 
-        // The reply is at most a status JSON; 256 KiB covers every sane
-        // server (vanilla caps its own response well below this).
-        let mut buf = vec![0u8; 256 * 1024];
-        let read = stream.read(&mut buf).await?;
-        buf.truncate(read);
+        // Read until the response frame (length-prefixed) is complete: a
+        // single read() returns only what the first TCP segment(s)
+        // happened to carry, and a status JSON split across segments used
+        // to fail varint/JSON parsing as a "bad status response" — a
+        // spuriously "unreachable" server on loaded networks. The reply
+        // is at most a status JSON; 256 KiB covers every sane server
+        // (vanilla caps its own response well below this), and the outer
+        // timeout bounds the whole loop.
+        const MAX_STATUS_BYTES: usize = 256 * 1024;
+        let mut buf: Vec<u8> = Vec::with_capacity(8192);
+        let mut chunk = [0u8; 16384];
+        let parsed = 'read: {
+            loop {
+                if let Some(parsed) = parse_status_response(&buf) {
+                    break 'read Ok(parsed);
+                }
+                if buf.len() >= MAX_STATUS_BYTES {
+                    break 'read Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "bad status response",
+                    ));
+                }
+                match stream.read(&mut chunk).await {
+                    Ok(0) => {
+                        // EOF: the server closed — one final attempt on
+                        // whatever arrived before it cut us off.
+                        break 'read parse_status_response(&buf).ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "bad status response",
+                            )
+                        });
+                    }
+                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    Err(e) => break 'read Err(e),
+                }
+            }
+        };
 
-        let (status, pong) = parse_status_response(&buf).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "bad status response")
-        })?;
+        let (status, pong) = parsed?;
         if pong == Some(nonce) {
             // Latency rides the pong round trip; approximate from the
             // socket-level exchange since we measure after the fact.

@@ -6,17 +6,47 @@
 use std::io;
 use std::path::Path;
 
-/// Write `contents` to `path` with private-by-default permissions. The
-/// file is created or truncated, then (on POSIX) tightened to 0600 before
-/// the call returns.
+/// Write `contents` to `path` private-by-default and ATOMICALLY.
+///
+/// The write rides a unique temp sibling created with mode 0600 at open
+/// time (POSIX), fsynced, then renamed over the target. That closes three
+/// holes the old write-then-chmod shape carried: (1) no window in which
+/// the secret exists world-readable, (2) a crash mid-write can never
+/// leave a truncated secret under its final name, (3) `create_new`
+/// (O_EXCL) refuses a pre-existing name — including a pre-planted
+/// symlink — so the write can never be redirected through one. Windows
+/// relies on the per-user profile's default ACLs for privacy; the
+/// atomicity and symlink refusal still apply.
 pub fn write_private_file(path: &Path, contents: &str) -> io::Result<()> {
-    std::fs::write(path, contents)?;
+    use std::ffi::OsString;
+    use std::io::Write;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut name = path
+        .file_name()
+        .map_or_else(|| OsString::from("zamin-secret"), |n| n.to_os_string());
+    name.push(format!(".tmp-{}", uuid::Uuid::now_v7().simple()));
+    let tmp = path.with_file_name(name);
+
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    Ok(())
+    let mut file = options.open(&tmp)?;
+    let written = file
+        .write_all(contents.as_bytes())
+        .and_then(|_| file.sync_all());
+    drop(file);
+    if let Err(source) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(source);
+    }
+    std::fs::rename(&tmp, path)
 }
 
 #[cfg(test)]

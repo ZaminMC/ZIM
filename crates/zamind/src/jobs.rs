@@ -22,6 +22,13 @@ use crate::hub::HubHandle;
 /// Finished job records kept for `jobs.list` before the oldest is dropped.
 const MAX_FINISHED_JOBS: usize = 50;
 
+/// Ceiling on concurrently RUNNING jobs. Every job is a spawned task
+/// over real disk work (backup walks, archive extracts, downloads);
+/// without a cap, a client retry storm could pile unbounded concurrent
+/// `backup.create`s onto one machine. The refusal is the daemon's own
+/// `DAEMON_BUSY` — retry after something finishes.
+const MAX_RUNNING_JOBS: usize = 16;
+
 /// How a job task can end, other than successfully. Cancellation is
 /// data (an outcome), not an error.
 #[derive(Debug)]
@@ -111,12 +118,37 @@ impl JobRunner {
 
     /// Register a job and run `task` on the async runtime. The returned
     /// `Job` is already `running`; progress and completion arrive as
-    /// events, and the record stays queryable via `list`/`get`.
-    pub fn spawn<F, Fut>(&self, kind: JobKind, server_id: Option<String>, task: F) -> Job
+    /// events, and the record stays queryable via `list`/`get`. Refuses
+    /// with `DAEMON_BUSY` while too many jobs are already running.
+    pub fn spawn<F, Fut>(
+        &self,
+        kind: JobKind,
+        server_id: Option<String>,
+        task: F,
+    ) -> Result<Job, ProtocolError>
     where
         F: FnOnce(JobCtl) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<(), JobFailure>> + Send + 'static,
     {
+        {
+            let jobs = self
+                .inner
+                .jobs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let running = jobs
+                .values()
+                .filter(|record| record.job.state == JobState::Running)
+                .count();
+            if running >= MAX_RUNNING_JOBS {
+                return Err(ProtocolError::new(
+                    ErrorCode::DaemonBusy,
+                    format!(
+                        "Too many jobs are running ({running}); wait for one to finish before starting another."
+                    ),
+                ));
+            }
+        }
         let job_id = Uuid::now_v7();
         let cancel = Arc::new(AtomicBool::new(false));
         let now = now_ms();
@@ -172,15 +204,34 @@ impl JobRunner {
         let future = task(ctl);
 
         let _task = tokio::spawn(async move {
-            let result = future.await;
+            use futures_util::FutureExt;
+            // A panicking job future must still land in a terminal state:
+            // the record used to stay `running` forever (cancel armed for
+            // nobody, prune never collecting it) — one phantom job per
+            // panic, and the running cap slowly leaking.
+            let result = std::panic::AssertUnwindSafe(future).catch_unwind().await;
             let (outcome, error) = match result {
-                Ok(()) => (JobOutcome::Succeeded, None),
-                Err(failure) => failure.into_outcome_and_error(),
+                Ok(Ok(())) => (JobOutcome::Succeeded, None),
+                Ok(Err(failure)) => failure.into_outcome_and_error(),
+                Err(panic) => {
+                    let message = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_owned())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "the job task panicked".to_owned());
+                    (
+                        JobOutcome::Failed,
+                        Some(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!("The job task panicked: {message}"),
+                        )),
+                    )
+                }
             };
             runner.finish(job_id, outcome, error);
         });
 
-        job
+        Ok(job)
     }
 
     fn finish(&self, job_id: Uuid, outcome: JobOutcome, error: Option<ProtocolError>) {

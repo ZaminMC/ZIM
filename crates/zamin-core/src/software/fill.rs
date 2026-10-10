@@ -85,9 +85,8 @@ impl FillClient {
                 .map_err(Box::new)
         })
         .map_err(|e| http_error(&url, *e))?;
-        let body = response
-            .into_string()
-            .map_err(|e| CoreError::HttpTransport {
+        let body =
+            crate::http::read_capped_string(response).map_err(|e| CoreError::HttpTransport {
                 url: url.clone(),
                 message: e.to_string(),
             })?;
@@ -153,9 +152,8 @@ impl FillClient {
                 .map_err(Box::new)
         })
         .map_err(|e| http_error(&url, *e))?;
-        let body = response
-            .into_string()
-            .map_err(|e| CoreError::HttpTransport {
+        let body =
+            crate::http::read_capped_string(response).map_err(|e| CoreError::HttpTransport {
                 url: url.clone(),
                 message: e.to_string(),
             })?;

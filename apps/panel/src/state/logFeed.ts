@@ -19,6 +19,14 @@ import { logWarn } from "../logger";
 
 export const PAGE_LINES = 200;
 
+/** Ceiling on the in-memory feed: history pages + live lines combined.
+ * The buffer used to grow without bound — every batch copied the whole
+ * array and busy servers dragged the webview toward OOM over days.
+ * Beyond the cap the OLDEST HISTORY is dropped first (live lines are the
+ * operator's "now" and stay); `cursor` goes to 0 when history is fully
+ * trimmed so loadOlder simply stops at the floor. */
+export const MAX_FEED_LINES = 20_000;
+
 export function asProtocolError(error: unknown): ProtocolErrorObject {
   if (error instanceof Object && "code" in error) {
     const candidate = error as Partial<ProtocolErrorObject>;
@@ -125,7 +133,19 @@ export function useLogFeed(serverId: string) {
     setState((s) => {
       if (s.lines === null) return s; // pre-seam lines buffer in `pending`
       const newCount = atBottomRef.current ? 0 : s.newCount + batch.length;
-      return { ...s, lines: [...s.lines, ...batch], newCount };
+      let lines = [...s.lines, ...batch];
+      let liveStart = s.liveStart;
+      if (lines.length > MAX_FEED_LINES) {
+        // Trim oldest HISTORY first; only when history is gone do live
+        // lines fall off the head (a console pinned to the tail keeps its
+        // exact view either way — atBottom scroll position is anchored to
+        // the bottom, not an offset).
+        const excess = lines.length - MAX_FEED_LINES;
+        const fromHistory = Math.min(excess, liveStart);
+        liveStart -= fromHistory;
+        lines = lines.slice(excess);
+      }
+      return { ...s, lines, liveStart, newCount };
     });
   }, []);
 
@@ -228,9 +248,13 @@ export function useLogFeed(serverId: string) {
 
         // The seed is the seam: everything buffered before it (ring tail
         // included) merges against the file history — overlap stripped
-        // inside; from then on the stream is purely live.
-        const history = await seedHistory([...pending]);
+        // inside; from then on the stream is purely live. Lines that
+        // arrived WHILE the seed was in flight ride behind it (the
+        // reconnect path's order; clearing `pending` BEFORE the residual
+        // computation used to silently drop them).
+        const buffered = [...pending];
         pending.length = 0;
+        const history = await seedHistory(buffered);
         const residual = stripLiveOverlap(history ?? [], [...pending]);
         pending.length = 0;
         seamOpen = true;

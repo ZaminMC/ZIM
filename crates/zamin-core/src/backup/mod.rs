@@ -17,8 +17,8 @@ mod tests;
 
 pub use create::{create_archive, BackupCreateOptions, BackupCreateOutcome, CreateProgress};
 pub use restore::{
-    restore_archive, RestoreOptions, RestoreOutcome, RestoreProgress, RESTORE_MAX_ENTRIES,
-    RESTORE_MAX_TOTAL_BYTES,
+    recover_interrupted, restore_archive, RestoreOptions, RestoreOutcome, RestoreProgress,
+    RESTORE_MAX_ENTRIES, RESTORE_MAX_TOTAL_BYTES,
 };
 
 use std::io;
@@ -53,6 +53,12 @@ pub struct BackupManifest {
     pub taken: BackupTaken,
 }
 
+/// The root-level file a live restore commit journals its progress into
+/// (crash discipline — see `restore::recover_interrupted`). A RESERVED
+/// name: never archived, never extracted from an archive, and never moved
+/// aside by the commit itself.
+pub const RESTORE_JOURNAL_NAME: &str = ".zamin-restore-journal";
+
 /// Directories that must never enter an archive or a restore: working
 /// staging areas of the file manager and of concurrent restore/backup
 /// operations. The daemon's own state lives outside the root and needs no
@@ -63,6 +69,7 @@ pub fn is_excluded(top_level: &str) -> bool {
         || top_level.starts_with(".zamin-backup-staging-")
         || top_level.starts_with(".zamin-restore-staging-")
         || top_level.starts_with(".zamin-restore-backup-")
+        || top_level == RESTORE_JOURNAL_NAME
 }
 
 /// Read every manifest in a backups directory, oldest first. Archives

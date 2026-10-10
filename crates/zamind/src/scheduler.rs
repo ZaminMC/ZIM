@@ -92,10 +92,13 @@ async fn tick(engine: &Engine, firing: &Arc<Mutex<HashSet<String>>>) {
                 continue;
             }
             let engine = engine.clone();
-            let firing = firing.clone();
+            let slot = FiringSlot {
+                firing: firing.clone(),
+                id: schedule.id.clone(),
+            };
             let server_id = id.clone();
             tokio::spawn(async move {
-                fire(&engine, &server_id, schedule, now_ms, &firing).await;
+                fire(&engine, &server_id, schedule, now_ms, slot).await;
             });
         }
     }
@@ -106,12 +109,16 @@ async fn tick(engine: &Engine, firing: &Arc<Mutex<HashSet<String>>>) {
 /// a server that is not running); the record lands once the action is
 /// dispatched; the action's own outcome is the action's story (lifecycle
 /// events, job records, the console), not the clock's.
+///
+/// The `slot` releases the firing gate on EVERY exit — including a
+/// panic (a panicking dispatch used to leave the id in the set forever:
+/// that schedule silently never fired again until daemon restart).
 async fn fire(
     engine: &Engine,
     server_id: &ServerId,
     schedule: Schedule,
     now_ms: i64,
-    firing: &Arc<Mutex<HashSet<String>>>,
+    slot: FiringSlot,
 ) {
     let outcome: Result<bool, String> = match &schedule.action {
         ScheduleAction::Restart => {
@@ -154,7 +161,21 @@ async fn fire(
             schedule.id
         ),
     }
-    return_firing(firing, &schedule.id);
+    drop(slot);
+}
+
+/// The firing gate's release, as an RAII value: `insert_firing` claims
+/// the id, and dropping the slot (normally OR through a panic unwind)
+/// releases it.
+struct FiringSlot {
+    firing: Arc<Mutex<HashSet<String>>>,
+    id: String,
+}
+
+impl Drop for FiringSlot {
+    fn drop(&mut self) {
+        return_firing(&self.firing, &self.id);
+    }
 }
 
 fn insert_firing(firing: &Mutex<HashSet<String>>, id: &str) -> bool {

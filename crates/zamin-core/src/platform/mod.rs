@@ -317,26 +317,48 @@ pub trait ProcessOps: Send + Sync {
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
 
+        // Bounded and lossy on purpose: a hostile `javaPath` binary could
+        // stream unbounded bytes (or invalid UTF-8 — the old
+        // read_to_string dropped EVERYTHING on the first bad byte).
         let stdout_reader = std::thread::spawn(move || {
-            let mut buf = String::new();
+            let mut buf = Vec::new();
             if let Some(pipe) = stdout_pipe.as_mut() {
-                let _ = pipe.read_to_string(&mut buf);
+                let mut limited = pipe.take(RUN_CAPTURE_MAX_OUTPUT_BYTES as u64);
+                let _ = limited.read_to_end(&mut buf);
             }
-            buf
+            String::from_utf8_lossy(&buf).into_owned()
         });
         let stderr_reader = std::thread::spawn(move || {
-            let mut buf = String::new();
+            let mut buf = Vec::new();
             if let Some(pipe) = stderr_pipe.as_mut() {
-                let _ = pipe.read_to_string(&mut buf);
+                let mut limited = pipe.take(RUN_CAPTURE_MAX_OUTPUT_BYTES as u64);
+                let _ = limited.read_to_end(&mut buf);
             }
-            buf
+            String::from_utf8_lossy(&buf).into_owned()
         });
 
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    let stdout = stdout_reader.join().unwrap_or_default();
-                    let stderr = stderr_reader.join().unwrap_or_default();
+                    // The child has exited, but its pipe writers may NOT
+                    // have: a grandchild that inherited stdout holds it
+                    // open, and the old unbounded join() hung the whole
+                    // inspect on exactly that. Bound the drain; the rare
+                    // detached reader (whose pipe never closes) leaks one
+                    // thread instead of hanging the caller forever.
+                    let drain_deadline = std::time::Instant::now() + RUN_CAPTURE_DRAIN_GRACE;
+                    let (stdout, stderr) = match (
+                        join_bounded(stdout_reader, drain_deadline),
+                        join_bounded(stderr_reader, drain_deadline),
+                    ) {
+                        (Ok(stdout), Ok(stderr)) => (stdout, stderr),
+                        _ => {
+                            return Err(PlatformError::RunTimedOut {
+                                program: spec.program.clone(),
+                                timeout,
+                            });
+                        }
+                    };
                     return Ok(RunOutput {
                         exit_code: status.code().unwrap_or(-1),
                         stdout,
@@ -357,6 +379,34 @@ pub trait ProcessOps: Send + Sync {
                 Err(source) => return Err(PlatformError::Io(source)),
             }
         }
+    }
+}
+
+/// Cap one captured stream: `java -version` output is a few hundred
+/// bytes; a megabyte is already 500x generous and bounds a hostile
+/// binary's flood.
+const RUN_CAPTURE_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+
+/// How long a dead child's pipes may take to close before the capture
+/// gives up on the remaining output.
+const RUN_CAPTURE_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Join a reader thread with a deadline. On timeout the reader is
+/// detached (its pipe never closes — a grandchild inherited it); one
+/// leaked thread is the honest price of not hanging the caller forever.
+fn join_bounded(
+    handle: std::thread::JoinHandle<String>,
+    deadline: std::time::Instant,
+) -> Result<String, ()> {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        if let Ok(value) = handle.join() {
+            let _ = tx.send(value);
+        }
+    });
+    match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+        Ok(value) => Ok(value),
+        Err(_) => Err(()),
     }
 }
 

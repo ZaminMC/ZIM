@@ -56,7 +56,10 @@ describe("ScoreboardEditor", () => {
     fireEvent.change(screen.getByLabelText("Line 1"), {
       target: { value: "Players: 13" },
     });
-    expect(serialize()).toBe("title=T\nline.1=Players\\: 13\nline.2=Money\\: $100\n");
+    // Only the TOUCHED row re-renders (its colon is real content → the
+    // re-render escapes it); line.2 keeps its own raw bytes — the
+    // line-preservation contract, not a whole-file re-serialization.
+    expect(serialize()).toBe("title=T\nline.1=Players\\: 13\nline.2=Money: $100\n");
   });
 
   it("add and remove edit the rows structurally", () => {
