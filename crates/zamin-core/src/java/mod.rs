@@ -15,6 +15,13 @@ use crate::platform::{process, SpawnLimits, SpawnSpec};
 
 pub const INSPECT_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// ETXTBSY's raw code (Linux) — the one transient exec race the inspect
+/// retry forgives. `ErrorKind::ExecutableFileBusy` would read better but
+/// the crate's MSRV predates it (1.77 vs 1.83).
+fn is_text_file_busy(error: &std::io::Error) -> bool {
+    cfg!(target_os = "linux") && error.raw_os_error() == Some(26)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct JavaInfo {
     pub path: PathBuf,
@@ -100,12 +107,40 @@ pub fn inspect(java_path: &Path) -> Result<JavaInfo, CoreError> {
         SpawnLimits::default(),
     );
     let started = Instant::now();
-    let output = process().run_capture(&spec, INSPECT_TIMEOUT).map_err(|e| {
-        CoreError::JavaInspectFailed {
-            path: java_path.to_path_buf(),
-            reason: e.to_string(),
+    // ETXTBSY's grace: execve that meets an open WRITE handle on the
+    // file answers "Text file busy", and a freshly extracted binary can
+    // carry a writer's fd for one scheduling tick under load — the
+    // first CI run of the offline-install roundtrip tripped it. The
+    // retry is narrow and bounded: only ETXTBSY, five chances while the
+    // handle closes, every other error rides at once.
+    let output = {
+        let mut captured = None;
+        let mut busy: Option<std::io::Error> = None;
+        for attempt in 0..5u32 {
+            match process().run_capture(&spec, INSPECT_TIMEOUT) {
+                Ok(out) => {
+                    captured = Some(out);
+                    break;
+                }
+                Err(crate::error::PlatformError::Io(e)) if is_text_file_busy(&e) => {
+                    busy = Some(e);
+                    std::thread::sleep(Duration::from_millis(40 * u64::from(attempt + 1)));
+                }
+                Err(e) => {
+                    return Err(CoreError::JavaInspectFailed {
+                        path: java_path.to_path_buf(),
+                        reason: e.to_string(),
+                    })
+                }
+            }
         }
-    })?;
+        captured.ok_or_else(|| CoreError::JavaInspectFailed {
+            path: java_path.to_path_buf(),
+            reason: busy
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "the inspect probe never ran".to_string()),
+        })?
+    };
     let _ = started.elapsed();
 
     let mut properties = BTreeMap::new();
