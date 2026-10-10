@@ -12,6 +12,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { invokeHost, listenHost, type Unlisten } from "../integration/tauri";
 import type { Destination } from "../state/destinations";
+import { parseJoinTail } from "../state/destinations";
 import { navigateHost } from "../state/shellLane";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
 import { useUi } from "../state/ui";
@@ -126,12 +127,11 @@ function destinationFromQuery(): Destination | null {
     }
     case "join": {
       // "host:port" — the host side may be empty (the port-only dialect).
+      // parseJoinTail owns the spelling: the last colon is the port, a
+      // colon-less tail is not a produced URL (the old slice would have
+      // invented a host from the port's own digits).
       const tail = url.split("/")[3] ?? url.split("/")[2] ?? "";
-      const sep = tail.lastIndexOf(":");
-      const port = Number(tail.slice(sep + 1));
-      if (!Number.isInteger(port) || port <= 0 || port > 65535) return { kind: "missing", url };
-      const host = tail.slice(0, sep);
-      return { kind: "join", ...(host === "" ? {} : { host }), port };
+      return parseJoinTail(tail) ?? { kind: "missing", url };
     }
     default: return { kind: "missing", url };
   }

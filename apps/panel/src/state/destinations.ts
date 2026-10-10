@@ -266,6 +266,23 @@ const INTERNAL_URL = /^zim:\/\/([^/?#]+)\/?(?:([^/?#]+))?$/;
  *  an IPv4, a hostname, or a bracketed IPv6; the port is 1-65535. */
 const JOIN = /^(?:\[?([a-zA-Z0-9._-]+|\[[0-9a-fA-F:]+\])\]?)?:(\d{1,5})$|^\[?([a-zA-Z0-9._-]+)\]?$/;
 
+/** The tail of a PRODUCED join URL (destinationUrl() writes
+ *  `zim://join/{host}:{port}` — the omnibox rests on that string, so a
+ *  re-commit must navigate, not fall to Missing; the user's own
+ *  "No page at zim://join/…" screenshot was exactly that fall). The last
+ *  colon is the port separator, so an IPv6 host keeps its colons; the
+ *  host spelling stays raw so url() → parse → url() round-trips
+ *  exactly (§61: identity preserved). A tail with no colon is not a URL
+ *  destinationUrl() can produce — null, and the caller answers Missing. */
+export function parseJoinTail(tail: string): JoinDestination | null {
+  const sep = tail.lastIndexOf(":");
+  if (sep === -1) return null;
+  const port = Number(tail.slice(sep + 1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const host = tail.slice(0, sep);
+  return host === "" ? { kind: "join", port } : { kind: "join", host, port };
+}
+
 /** Parse what the operator typed, before any store is consulted. */
 export function parseAddressInput(text: string): AddressRequest {
   const trimmed = text.trim();
@@ -286,6 +303,14 @@ export function parseAddressInput(text: string): AddressRequest {
     }
     if (page === "console" && internal[2]) {
       return { kind: "internal", destination: { kind: "console", serverId: internal[2] } };
+    }
+    // The join URL dialect — the closed loop with destinationUrl(): every
+    // URL a join tab can rest on must re-navigate to that tab.
+    if (page === "join" && internal[2]) {
+      const parsed = parseJoinTail(internal[2]);
+      return parsed
+        ? { kind: "internal", destination: parsed }
+        : { kind: "internal", destination: { kind: "missing", url: trimmed } };
     }
     // An unknown internal page is a real destination request the shell
     // answers honestly (no such page) — not silently a web search.

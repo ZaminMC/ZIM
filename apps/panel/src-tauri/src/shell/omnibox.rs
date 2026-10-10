@@ -69,6 +69,15 @@ pub fn classify(text: &str) -> AddressRequest {
                 server_id: arg.into(),
             });
         }
+        // The join URL dialect (§7): Destination::url writes
+        // `zim://join/{host}:{port}` and the omnibox RESTS on that string —
+        // a re-commit must navigate, not fall to Missing (the user's own
+        // "No page at zim://join/…" screenshot was exactly that fall).
+        // Destination::parse owns the spelling, so the closed loop
+        // url → parse → url stays one law in one place.
+        if page == "join" && !arg.is_empty() {
+            return AddressRequest::Internal(Destination::parse(trimmed));
+        }
         if INTERNAL_PAGES.contains(&page) {
             return AddressRequest::Internal(Destination::parse(trimmed));
         }
@@ -96,6 +105,19 @@ pub fn classify(text: &str) -> AddressRequest {
             }
         }
     } else if is_host_charset(trimmed) {
+        // A bare word could be a port ("25565") — only digits qualify,
+        // and an out-of-range bare number is a query, never a join (the
+        // TS twin's law in parseAddressInput). Any other host-charset
+        // word joins by default port 0 — the Join page speaks the
+        // verdict (§7: nothing is invented, the page answers honestly).
+        if trimmed.len() <= 5 && trimmed.bytes().all(|b| b.is_ascii_digit()) {
+            if let Ok(port) = trimmed.parse::<u16>() {
+                if (1..=65535).contains(&port) {
+                    return AddressRequest::Join { host: None, port };
+                }
+            }
+            return AddressRequest::Query(trimmed.to_owned());
+        }
         return AddressRequest::Join {
             host: Some(normalize_host(trimmed)),
             port: 0,
@@ -153,6 +175,9 @@ mod tests {
                 port: 25565
             }
         );
+        // An out-of-range bare number is a query, never a join (the TS
+        // twin's law in parseAddressInput).
+        assert_eq!(classify("99999"), AddressRequest::Query("99999".into()));
         assert_eq!(
             classify("box.example.com"),
             AddressRequest::Join {
@@ -164,6 +189,50 @@ mod tests {
         assert_eq!(
             classify("host:99999"),
             AddressRequest::Query("host:99999".into())
+        );
+    }
+
+    #[test]
+    fn the_join_url_round_trips() {
+        // The omnibox rests on a join tab's produced URL — a re-commit
+        // must navigate to that tab, not fall to Missing (the user's
+        // "No page at zim://join/…" screenshot).
+        assert_eq!(
+            classify("zim://join/localhost:25565"),
+            AddressRequest::Internal(Destination::Join {
+                host: Some("localhost".into()),
+                port: 25565
+            })
+        );
+        // The port-only spelling url() writes for a host-less join.
+        assert_eq!(
+            classify("zim://join/:25565"),
+            AddressRequest::Internal(Destination::Join {
+                host: None,
+                port: 25565
+            })
+        );
+        // The last colon is the port separator — an IPv6 host keeps its
+        // own colons.
+        assert_eq!(
+            classify("zim://join/::1:25565"),
+            AddressRequest::Internal(Destination::Join {
+                host: Some("::1".into()),
+                port: 25565
+            })
+        );
+        // Not a produced URL → the honest Missing, never a guess.
+        assert_eq!(
+            classify("zim://join/nonsense"),
+            AddressRequest::Internal(Destination::Missing {
+                url: "zim://join/nonsense".into()
+            })
+        );
+        assert_eq!(
+            classify("zim://join/box:99999"),
+            AddressRequest::Internal(Destination::Missing {
+                url: "zim://join/box:99999".into()
+            })
         );
     }
 

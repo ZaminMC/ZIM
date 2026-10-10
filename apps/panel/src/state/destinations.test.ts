@@ -14,6 +14,7 @@ import {
   hostHint,
   joinAddress,
   parseAddressInput,
+  parseJoinTail,
   resolveJoin,
   restingAddress,
   searchServers,
@@ -110,6 +111,54 @@ describe("parseAddressInput", () => {
       kind: "internal",
       destination: { kind: "missing", url: "zim://nope/" },
     });
+  });
+
+  it("re-commits the join url the omnibox rests on (the closed url loop)", () => {
+    // destinationUrl() writes zim://join/… for a join tab; a re-commit of
+    // that string must navigate, not fall to Missing (the user's own
+    // "No page at zim://join/…" screenshot was that fall).
+    expect(parseAddressInput("zim://join/localhost:25565")).toEqual({
+      kind: "internal",
+      destination: { kind: "join", host: "localhost", port: 25565 },
+    });
+    // The port-only spelling url() writes for a host-less join.
+    expect(parseAddressInput("zim://join/:25565")).toEqual({
+      kind: "internal",
+      destination: { kind: "join", port: 25565 },
+    });
+    // The last colon is the port separator — an IPv6 host keeps its own.
+    expect(parseAddressInput("zim://join/::1:25565")).toEqual({
+      kind: "internal",
+      destination: { kind: "join", host: "::1", port: 25565 },
+    });
+    // Not a produced URL → the honest Missing, never a guess.
+    expect(parseAddressInput("zim://join/nonsense")).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "zim://join/nonsense" },
+    });
+    expect(parseAddressInput("zim://join/box:99999")).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "zim://join/box:99999" },
+    });
+  });
+
+  it("parseJoinTail keeps the produced-url law: last colon is the port", () => {
+    expect(parseJoinTail("localhost:25565")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25565,
+    });
+    expect(parseJoinTail(":25565")).toEqual({ kind: "join", port: 25565 });
+    expect(parseJoinTail("::1:25565")).toEqual({
+      kind: "join",
+      host: "::1",
+      port: 25565,
+    });
+    // A colon-less tail is not a produced URL — null, never an invented
+    // host (the old slice turned "zim://join/25565" into host "2556").
+    expect(parseJoinTail("25565")).toBeNull();
+    expect(parseJoinTail("nonsense")).toBeNull();
+    expect(parseJoinTail("box:99999")).toBeNull();
   });
 
   it("parses the join dialect, normalizing bind-all and loopback", () => {

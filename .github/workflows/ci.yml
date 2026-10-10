@@ -97,3 +97,10 @@ jobs:
       - name: Clippy (the shell crate)
         working-directory: apps/panel/src-tauri
         run: cargo clippy --all-targets -- -D warnings
+      # The compile gate caught the shell's rot only at the spelling
+      # level — tests kept rotting behind green CIs (the omnibox's
+      # bare-port law and three pinned-block tests failed for weeks
+      # unrun). The gate now executes the laws too.
+      - name: Tests (the shell crate)
+        working-directory: apps/panel/src-tauri
+        run: cargo test

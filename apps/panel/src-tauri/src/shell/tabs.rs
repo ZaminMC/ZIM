@@ -771,14 +771,23 @@ mod tests {
     #[test]
     fn pinned_block_invariant_holds_on_insert() {
         let mut strip = Strip::new();
+        // The fresh strip's own New tab stays unpinned, so the law under
+        // test is the BLOCK's contiguity, not "everything before the new
+        // tab is pinned" — an unpinned tab may lawfully sit between the
+        // block and an end-append (Chrome appends at the end; the clamp
+        // only forbids landing INSIDE the block).
         let a = strip.append(Destination::Servers, true);
         let b = strip.append(Destination::Jobs, true);
         strip.set_pinned(a, true);
         strip.set_pinned(b, true);
-        // A foreground append lands after the pinned block.
         let c = strip.append(Destination::About, true);
+        let edge = strip.block_edge(false);
+        // The pinned block is a contiguous prefix…
+        assert!(strip.tabs[..edge].iter().all(|t| t.pinned));
+        assert!(!strip.tabs[edge].pinned);
+        // …and the insert never lands inside it.
         let index = strip.index_of(c).unwrap();
-        assert!(strip.tabs[..index].iter().all(|t| t.pinned));
+        assert!(index >= edge);
         assert!(!strip.tabs[index].pinned);
     }
 
@@ -893,26 +902,31 @@ mod tests {
     #[test]
     fn reorder_drop_lifts_the_tab_out_before_inserting() {
         let mut strip = Strip::new();
+        let fresh = strip.tabs[0].id;
         let a = strip.append(Destination::Servers, true);
         let b = strip.append(Destination::Jobs, true);
         let c = strip.append(Destination::About, true);
-        // Drag a (index 0) past both others: the insertion index runs
-        // over the REMAINING tabs [b, c], so 2 lands after c.
-        strip.reorder_drop(a, 2);
+        // Drag a past all the others: the insertion index runs over the
+        // REMAINING tabs [fresh, b, c], so 3 lands after c.
+        strip.reorder_drop(a, 3);
         let order: Vec<TabId> = strip.tabs.iter().map(|t| t.id).collect();
-        assert_eq!(order, vec![b, c, a]);
+        assert_eq!(order, vec![fresh, b, c, a]);
     }
 
     #[test]
     fn a_pinned_tab_dropped_beyond_the_block_unpins() {
         let mut strip = Strip::new();
+        // The fresh New tab joins the pinned block, so the block edge is
+        // exactly where the pinned tabs end.
+        let fresh = strip.tabs[0].id;
+        strip.set_pinned(fresh, true);
         let a = strip.append(Destination::Servers, true);
-        // b exists to make the block edge 1 (its id is never read).
+        // b exists to make the block's edge honest (its id is never read).
         let _b = strip.append(Destination::Jobs, true);
         strip.set_pinned(a, true);
-        // The block edge is 1 (b is the first unpinned tab); dropping a
-        // at index 1 among the others lands it after the block → unpin.
-        strip.reorder_drop(a, 1);
+        // Block [fresh, a], edge 2; dropping a at 2 lands it at/after the
+        // unpinned block → unpin, and it rides to the end.
+        strip.reorder_drop(a, 2);
         let tab = strip.tabs.iter().find(|t| t.id == a).unwrap();
         assert!(!tab.pinned);
         assert_eq!(strip.tabs.last().unwrap().id, a);
