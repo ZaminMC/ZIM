@@ -171,7 +171,7 @@ pub mod windows {
     // RegCreateKeyEx never makes intermediates, so the chain builds one
     // component at a time.
     #[cfg(test)]
-    fn ensure_test_key() -> Result<(), String> {
+    pub(super) fn ensure_test_key() -> Result<(), String> {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let mut walked = String::new();
         for component in TEST_RUN_KEY.split('\\') {
@@ -326,14 +326,14 @@ mod windows_tests {
         // binary (Defender ASR); the production path's access rights are
         // the same code these lines execute.
         windows::ensure_test_key().expect("the test key creates");
-        windows::set_at(false).expect("clearing a value that may not exist");
+        windows::set_at(TEST_RUN_KEY, false).expect("clearing a value that may not exist");
         assert_eq!(
             windows::get_at(TEST_RUN_KEY).expect("readable"),
             Some(false)
         );
-        windows::set_at(true).expect("autostart on");
+        windows::set_at(TEST_RUN_KEY, true).expect("autostart on");
         assert_eq!(windows::get_at(TEST_RUN_KEY).expect("readable"), Some(true));
-        windows::set_at(false).expect("autostart off");
+        windows::set_at(TEST_RUN_KEY, false).expect("autostart off");
         assert_eq!(
             windows::get_at(TEST_RUN_KEY).expect("readable"),
             Some(false)
