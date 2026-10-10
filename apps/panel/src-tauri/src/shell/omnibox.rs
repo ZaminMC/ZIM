@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::shell::tabs::Destination;
+use crate::shell::tabs::{Destination, Strip, TabId};
 
 /// One parsed address request — the closed classification of everything
 /// an operator can type (the founder's dialect order preserved):
@@ -150,6 +150,83 @@ pub fn classify(text: &str) -> AddressRequest {
     }
 
     AddressRequest::Query(trimmed.to_owned())
+}
+
+// --- the commit's landing (AutocompleteEditModel::OpenURL) -------------------
+//
+// The edit model classifies; the disposition decides WHERE the request
+// lands. Upstream's OpenURL carries the displacement: kCurrentTab (the
+// plain Enter) navigates the tab the field sits in; Alt-Enter's
+// kNEW_FOREGROUND_TAB opens a fresh foreground tab that takes the
+// activation and inherits the previous active as its opener (the
+// TabStripModel::AppendWebContents law Strip::insert already speaks).
+
+/// What a committed request did to the model — the command layer's
+/// receipt. The query case carries the tab that must hear the discovery
+/// query (under Alt-Enter that is the NEW tab, not the one the hand was
+/// in; the text waits on the tab itself, hello delivers it at boot).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Landing {
+    Destination {
+        tab: TabId,
+        destination: Destination,
+    },
+    Query {
+        tab: TabId,
+        text: String,
+    },
+}
+
+/// The commit's model law, shared by every entry dialect (typed Enter,
+/// Alt-Enter, paste-and-go): classify outside, land here. `new_tab`
+/// false demands an active tab (None = the caller's refusal); true
+/// never refuses — a fresh foreground tab exists to take the request.
+pub fn land(strip: &mut Strip, request: AddressRequest, new_tab: bool) -> Option<Landing> {
+    match request {
+        AddressRequest::Internal(destination) => {
+            if new_tab {
+                let tab = strip.append(destination.clone(), true);
+                Some(Landing::Destination { tab, destination })
+            } else {
+                let active = strip.active?;
+                strip.navigate(active, destination.clone());
+                Some(Landing::Destination {
+                    tab: active,
+                    destination,
+                })
+            }
+        }
+        AddressRequest::Join { host, port } => {
+            let destination = Destination::Join { host, port };
+            if new_tab {
+                let tab = strip.append(destination.clone(), true);
+                Some(Landing::Destination { tab, destination })
+            } else {
+                let active = strip.active?;
+                strip.navigate(active, destination.clone());
+                Some(Landing::Destination {
+                    tab: active,
+                    destination,
+                })
+            }
+        }
+        AddressRequest::Query(text) => {
+            // The search dialect rides the new-tab page in BOTH
+            // dispositions — plain Enter turns the current tab into the
+            // discovery page, Alt-Enter opens a fresh one (the query is
+            // never dropped either way).
+            let tab = if new_tab {
+                strip.append(Destination::New, true)
+            } else {
+                let active = strip.active?;
+                strip.navigate(active, Destination::New);
+                active
+            };
+            let tab_obj = strip.tabs.iter_mut().find(|t| t.id == tab)?;
+            tab_obj.pending_query = Some(text.clone());
+            Some(Landing::Query { tab, text })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -333,5 +410,150 @@ mod tests {
             classify("best modpack 2026"),
             AddressRequest::Query("best modpack 2026".into())
         );
+    }
+
+    // --- the landing (OpenURL's disposition law) ---------------------------
+
+    #[test]
+    fn plain_enter_lands_in_the_tab_the_hand_is_in() {
+        let mut strip = Strip::new();
+        let first = strip.active.unwrap();
+        strip.navigate(first, Destination::Servers);
+        let landing = land(
+            &mut strip,
+            AddressRequest::Internal(Destination::Settings),
+            false,
+        )
+        .unwrap();
+        // Same tab, new destination — the history turned, the count did not.
+        assert_eq!(
+            landing,
+            Landing::Destination {
+                tab: first,
+                destination: Destination::Settings
+            }
+        );
+        assert_eq!(strip.tabs.len(), 1);
+        assert_eq!(strip.active, Some(first));
+        assert_eq!(*strip.tabs[0].destination(), Destination::Settings);
+        // The query dialect never waits on a plain commit: no pending text.
+        assert_eq!(strip.tabs[0].pending_query, None);
+    }
+
+    #[test]
+    fn alt_enter_lands_a_fresh_foreground_tab_with_the_opener() {
+        let mut strip = Strip::new();
+        let first = strip.active.unwrap();
+        let landing = land(
+            &mut strip,
+            AddressRequest::Internal(Destination::Settings),
+            true,
+        )
+        .unwrap();
+        let Landing::Destination { tab, destination } = landing else {
+            panic!("a destination landing");
+        };
+        assert_ne!(tab, first);
+        assert_eq!(destination, Destination::Settings);
+        // The fresh tab: second in the strip, ACTIVE (foreground), its
+        // opener the tab the omnibox sat in — AppendWebContents' law.
+        assert_eq!(strip.tabs.len(), 2);
+        assert_eq!(strip.active, Some(tab));
+        assert_eq!(*strip.tabs[1].destination(), Destination::Settings);
+        assert_eq!(strip.tabs[1].opener, Some(first));
+        // The ONE activation law: the selection collapsed to the new tab.
+        assert!(strip.selection.contains(&tab));
+        assert_eq!(strip.selection.len(), 1);
+        // The old tab's history never moved.
+        assert_eq!(*strip.tabs[0].destination(), Destination::New);
+    }
+
+    #[test]
+    fn alt_enter_join_opens_a_fresh_join_tab() {
+        let mut strip = Strip::new();
+        let landing = land(
+            &mut strip,
+            AddressRequest::Join {
+                host: Some("localhost".into()),
+                port: 25565,
+            },
+            true,
+        )
+        .unwrap();
+        let Landing::Destination { destination, .. } = landing else {
+            panic!("a destination landing");
+        };
+        assert_eq!(
+            destination,
+            Destination::Join {
+                host: Some("localhost".into()),
+                port: 25565
+            }
+        );
+        assert_eq!(strip.tabs.len(), 2);
+    }
+
+    #[test]
+    fn alt_enter_query_waits_on_the_new_tab_itself() {
+        let mut strip = Strip::new();
+        let first = strip.active.unwrap();
+        let landing = land(&mut strip, AddressRequest::Query("paper".into()), true).unwrap();
+        let Landing::Query { tab, text } = landing else {
+            panic!("a query landing");
+        };
+        assert_ne!(tab, first);
+        assert_eq!(text, "paper");
+        assert_eq!(strip.active, Some(tab));
+        assert_eq!(*strip.tabs[1].destination(), Destination::New);
+        // The text waits ON THE TAB — its webview does not exist yet
+        // (sync creates it), so hello is the delivery that cannot race.
+        assert_eq!(strip.tabs[1].pending_query.as_deref(), Some("paper"));
+        assert_eq!(strip.tabs[0].pending_query, None);
+    }
+
+    #[test]
+    fn plain_query_rings_the_current_tab_and_waits_there() {
+        let mut strip = Strip::new();
+        let first = strip.active.unwrap();
+        let landing = land(&mut strip, AddressRequest::Query("paper".into()), false).unwrap();
+        let Landing::Query { tab, .. } = landing else {
+            panic!("a query landing");
+        };
+        assert_eq!(tab, first);
+        assert_eq!(strip.tabs.len(), 1);
+        assert_eq!(*strip.tabs[0].destination(), Destination::New);
+        assert_eq!(strip.tabs[0].pending_query.as_deref(), Some("paper"));
+    }
+
+    #[test]
+    fn a_current_tab_commit_without_an_active_tab_is_refused() {
+        let mut strip = Strip::new();
+        // The empty strip: every tab pulled (the model's own close law
+        // would mint a fresh New tab — this shape is the raw refusal case).
+        strip.tabs.clear();
+        strip.active = None;
+        strip.selection.clear();
+        strip.anchor = None;
+        // Alt-Enter never refuses — the fresh tab exists to take it.
+        assert!(
+            land(
+                &mut strip,
+                AddressRequest::Internal(Destination::Settings),
+                true
+            )
+            .is_some()
+        );
+        strip.tabs.clear();
+        strip.active = None;
+        // The plain commit has no hand to land in — the caller's refusal.
+        assert!(
+            land(
+                &mut strip,
+                AddressRequest::Internal(Destination::Settings),
+                false
+            )
+            .is_none()
+        );
+        assert!(land(&mut strip, AddressRequest::Query("x".into()), false).is_none());
     }
 }

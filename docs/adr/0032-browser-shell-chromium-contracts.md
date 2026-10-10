@@ -68,10 +68,19 @@ never fake what the host provides.** Concretely, three lanes:
    dialect classification already runs before resolution
    (`parseAddressInput`: internal URLs → host:port joins → free-text
    discovery, §58/§7) and resolution is registry-driven
-   (P0 §13–§14: port + bind, no id-substitution). Next lanes, in
-   order: Escape-restores-pre-edit-text, paste-and-go on the join
-   dialect, inline result classification (destination vs search
-   announced before commit).
+   (P0 §13–§14: port + bind, no id-substitution). The edit model
+   landed 2026-10-10 (PROVENANCE.md's omnibox section): Escape's
+   two-stage restore (the first Esc reverts the display and KEEPS the
+   focus with the permanent text selected; a bare Esc leaves),
+   Alt-Enter's kNEW_FOREGROUND_TAB disposition (`land()` in
+   `shell/omnibox.rs` — the classified request takes a fresh foreground
+   tab that inherits the opener; a query waits on the tab itself and
+   hello delivers it to the webview sync has not created yet),
+   paste-and-go (Paste edits the field, Paste and go commits the
+   clipboard text straight through the classifier), and the inline
+   classification announced before the commit (the field's note names
+   join address / search / ZIM page / no ZIM page). The suggestion
+   popup (providers, inline autocomplete) stays the next lane.
 
 3. **The tab machinery follows the model/render split Chromium uses.**
    Drag (ADR-0018), groups (§49), pinned tabs (§52), tab tear-off and
@@ -93,7 +102,7 @@ the browser's *discipline*, with the panel's own nouns.
 |---|---|
 | IDC command table + chords + field rules | **Reused as behavior** (`browserKeys.ts` + conformance tests) |
 | Omnibox input classification order | **Reused** (§58 dialects parse before any resolution) |
-| Omnibox edit model (select-all, Escape restore, paste-and-go) | **Adapting** (dialects live; edit model in the next lanes) |
+| Omnibox edit model (select-all, Escape restore, Alt-Enter, paste-and-go) | **Adapted** (2026-10-10: Escape's two stages, OpenURL's dispositions through `land()`, the paste verbs, the pre-commit announcement; the suggestion popup is the remaining lane) |
 | TabStrip model/render split | **Adapted** (tabs store renders the strip; drag/group/pin/restore ride the model) |
 | TabDragController edge cases | **Adapting** (ADR-0018 covers reorder + insertion edge; thresholds/tear-in next) |
 | Tab restore service | **Adapted** (§90 close memory + reopen in the tabs store) |

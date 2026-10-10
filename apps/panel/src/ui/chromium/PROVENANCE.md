@@ -73,6 +73,33 @@ for that law; `frame.css` and `FrameApp.tsx` only consume it.
   through dismiss_popup (no fade); upstream fades it. The click/keypress
   and leave hides DO fade (200ms) before the widget closes.
 
+### The omnibox edit model (ADR-0032 lane 2, 2026-10-10)
+
+| Upstream file | Ported into | What it governs |
+| --- | --- | --- |
+| `components/omnibox/browser/omnibox_edit_model.{h,cc}` | `shell/omnibox.rs` (`land`, the disposition law), `FrameApp.tsx` (Escape's two stages), `frameIpc.ts` (`omniboxCommit(text, newTab)`) | OnEscapeKeyPressed: the first Esc with edited text restores the pre-edit text (display reverts, focus STAYS, all selected — blur is NOT the law), a bare Esc leaves the field; OpenURL's dispositions — plain Enter kCurrentTab (the tab the hand is in), Alt-Enter kNEW_FOREGROUND_TAB (a fresh foreground tab that takes the activation and inherits the opener) |
+| `chrome/browser/ui/views/omnibox/omnibox_view_views.{h,cc}` | `FrameApp.tsx` (`onContextMenu`, the paste menu), `frameIpc.ts` (`clipboardText`) | ShowContextMenu's paste verbs — Paste (the text enters the field as an edit; the operator owns the commit) and Paste and go (the clipboard text commits straight through the classifier, the field never edits); select-all on focus |
+| `components/omnibox/browser/autocomplete_input.h` | `shell/omnibox.rs` (`classify`) | the classification that runs before any landing (ported earlier; the landing consumes it) |
+| tab delivery: `chrome/browser/ui/tabs/tab_strip_model.cc`'s query-carrying navigation | `shell/tabs.rs` (`Tab::pending_query`), `shell/host.rs` (`shell_tab_hello`'s `query` field) | Alt-Enter with a search dialect: the query waits ON THE TAB (in-memory only), hello delivers it at boot — a webview that does not exist when the query lands still receives it; a reload re-delivers (results survive a reload), a restored session never resurrects one |
+
+### The omnibox edit model's deliberate deltas
+
+- **One paste verb, not two**: upstream splits "Paste and go" from
+  "Paste and search" by keyword-provider state; ZIM has no keyword
+  providers — the single "Paste and go" commits through the same
+  classifier a typed Enter uses, and the announcement note names what it
+  was (join address / search / ZIM page) as it lands.
+- **No suggestion popup yet**: upstream's first Esc also closes the
+  autocomplete popup; the shell's classifier rides a note
+  (`.omnibox-note`), so Esc's restore path handles the whole contract.
+  The popup lane (providers, inline autocomplete) stays the documented
+  next lane.
+- **The announcement instead of destination-display**: the inline
+  classification is named BEFORE the commit (`join address —
+  host:port`, `search`, `ZIM page · settings`, `no ZIM page`) in the
+  field's own note; upstream shows the same facts as the green
+  destination chip inside the popup.
+
 ## Deliberate deltas (documented, not silent)
 
 - **No C++/Views toolkit**: the port targets the webview — paths are SVG,

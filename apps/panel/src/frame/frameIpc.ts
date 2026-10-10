@@ -91,13 +91,30 @@ export type AddressRequest =
   | { Join: { host: string | null; port: number } }
   | { Query: string };
 
-export const omniboxCommit = (text: string): Promise<CommitOutcome> =>
+export const omniboxCommit = (text: string, newTab = false): Promise<CommitOutcome> =>
   isTauri()
-    ? invokeHost<CommitOutcome>("shell_omnibox_commit", { text })
+    ? invokeHost<CommitOutcome>("shell_omnibox_commit", { text, new_tab: newTab })
     : Promise.resolve({ kind: "query", text });
 
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>
   isTauri() ? invokeHost("shell_omnibox_classify", { text }) : Promise.resolve(null);
+
+/** The clipboard's TEXT, honestly empty when nothing can be read — a
+ *  denied permission is an empty paste, never a thrown menu. The
+ *  plugin's readText is the sanctioned route (the capability names the
+ *  omnibox's paste verbs); the DOM clipboard is the fallback. */
+export const clipboardText = async (): Promise<string> => {
+  try {
+    const clipboard = await import("@tauri-apps/plugin-clipboard-manager");
+    return (await clipboard.readText()) || "";
+  } catch {
+    try {
+      return (await navigator.clipboard.readText()) || "";
+    } catch {
+      return "";
+    }
+  }
+};
 
 /** Open the application-owned popup overlay (tab-menu | app-menu |
  *  group-editor | hover-card), anchored at frame coordinates. The group

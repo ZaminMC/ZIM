@@ -17,7 +17,8 @@
     "updater:default",
     "process:allow-restart",
     "opener:allow-default-urls",
-    "clipboard-manager:allow-write-image"
+    "clipboard-manager:allow-write-image",
+    "clipboard-manager:allow-read-text"
   ],
   "webviews": [
     "main",

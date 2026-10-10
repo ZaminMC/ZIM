@@ -25,7 +25,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,
@@ -783,6 +783,10 @@ pub fn shell_tab_hello(
         "can_back": tab.history_index > 0,
         "can_forward": tab.history_index + 1 < tab.history.len(),
         "reload": tab.reload,
+        // The omnibox's waiting search dialect (the query may have landed
+        // before this webview existed — Alt-Enter's fresh tab): the page
+        // takes it once at boot, the same text the live event carries.
+        "query": tab.pending_query,
     }))
 }
 
@@ -1264,63 +1268,63 @@ pub fn shell_omnibox_classify(text: String) -> crate::shell::omnibox::AddressReq
     crate::shell::omnibox::classify(&text)
 }
 
-/// The omnibox commit: classify, then drive the model. Async per the
-/// re-entrancy law (a query can create a tab webview inside `sync`).
+/// The omnibox commit: classify, then land through the model's OpenURL
+/// law. Async per the re-entrancy law (a query can create a tab webview
+/// inside `sync`). `new_tab` — Alt-Enter's NEW_FOREGROUND_TAB: the
+/// classified request takes a fresh foreground tab instead of the hand's
+/// tab (paste-and-go rides the same door with the plain disposition).
 #[tauri::command]
 pub async fn shell_omnibox_commit(
     window: tauri::Webview,
     text: String,
+    new_tab: Option<bool>,
     state: State<'_, ShellState>,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
-    use crate::shell::omnibox::AddressRequest;
+    use crate::shell::omnibox::{Landing, land};
     let window_name = window_label_of(&window);
     // An omnibox commit is an interaction: any open popup yields.
     dismiss_popup(&app, &state, &window_name);
     let request = crate::shell::omnibox::classify(&text);
-    let outcome = {
+    let (outcome, query) = {
         let mut inner = state.lock();
         let strip = inner.strip(&window_name);
-        let Some(active) = strip.active else {
+        let Some(landing) = land(strip, request, new_tab.unwrap_or(false)) else {
             return Err("no active tab".into());
         };
-        match request {
-            AddressRequest::Internal(destination) => {
-                // Chromium's omnibox law (AutocompleteController's commit
-                // path): whatever the operator typed lands on the tab
-                // THEY are in — typed chrome://settings navigates THIS
-                // tab even when a sibling already rests on settings. The
-                // old singleton-focus shape hijacked the commit to
-                // another tab ("paste the settings url and it takes you
-                // to a different tab that has it enabled"); it is gone.
-                strip.navigate(active, destination);
-                serde_json::json!({ "kind": "navigated" })
-            }
-            AddressRequest::Join { host, port } => {
-                // §7's honest join, completed: the address lands on its
-                // own Join destination IN THE ACTIVE TAB, and the Join
-                // page consults the daemon (registry, server-list ping)
-                // for the verdict. No webview navigates to a raw address.
-                strip.navigate(active, Destination::Join { host, port });
-                serde_json::json!({ "kind": "navigated" })
-            }
-            AddressRequest::Query(text) => {
-                // Chromium's law again: a typed search navigates the
-                // CURRENT tab. ZIM's "search results" are the discovery
-                // search on the new-tab page, so the active tab navigates
-                // there and the query rides the tab's own event lane
-                // (shell://discover-query — the page consumes it once and
-                // runs the search). The text is never dropped.
-                strip.navigate(active, Destination::New);
-                let label = tab_label(&window_name, active);
-                let _ = app.emit_to(label, "shell://discover-query", &text);
+        let outcome = match &landing {
+            // Chromium's omnibox law (AutocompleteController's commit
+            // path): whatever the operator typed lands on the tab THEY
+            // are in — typed chrome://settings navigates THIS tab even
+            // when a sibling already rests on settings. The old
+            // singleton-focus shape hijacked the commit to another tab
+            // ("paste the settings url and it takes you to a different
+            // tab that has it enabled"); it is gone.
+            Landing::Destination { .. } => serde_json::json!({ "kind": "navigated" }),
+            Landing::Query { text, .. } => {
                 serde_json::json!({ "kind": "query", "text": text })
             }
+        };
+        // The query's delivery is the MODEL's, not the timing's: the
+        // text waits on the tab (`pending_query`), so a fresh Alt-Enter
+        // tab — whose webview does not exist until the sync below —
+        // still receives it through hello. The live emit below is the
+        // fast path for a page that is already listening.
+        let query = match &landing {
+            Landing::Query { tab, text } => Some((tab_label(&window_name, *tab), text.clone())),
+            _ => None,
         };
         // The commit mutated the active tab's history — the mutation
         // saves, here, not in the sync below.
         inner.save();
+        (outcome, query)
     };
+    // A live page hears the query immediately; a booting one takes the
+    // same text from hello. (An emit to a webview that does not exist
+    // is a no-op — the pending copy carries the delivery.)
+    if let Some((label, text)) = query {
+        let _ = app.emit_to(&label, "shell://discover-query", &text);
+    }
     emit_tab_state(&app, &state, &window_name);
     sync(&app, &state, &window_name)?;
     Ok(outcome)

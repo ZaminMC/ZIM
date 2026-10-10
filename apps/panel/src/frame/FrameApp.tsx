@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bootFrame,
+  clipboardText,
   demoLayoutStrip,
   demoLayoutStripVertical,
   dismissPopup,
@@ -222,6 +223,17 @@ export function FrameApp() {
   } | null>(null);
   const [omniboxText, setOmniboxText] = useState<string | null>(null);
   const [joinNote, setJoinNote] = useState<string | null>(null);
+  // The omnibox's own context menu (OmniboxViewViews::ShowContextMenu):
+  // Paste / Paste and go over the field's client point. `clipEmpty` is
+  // the read's verdict at open time — a denied clipboard is an honest
+  // disabled row, never a menu that lies.
+  const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const [clipEmpty, setClipEmpty] = useState(true);
+  // The classifier's latest-wins guard: keystrokes outrun their answers,
+  // and a stale classification must never repaint the note.
+  const classifySeq = useRef(0);
   // The boot must never fail silently: a white window teaches nothing.
   // Three spaced retries, then an honest error panel with a manual retry.
   const [bootError, setBootError] = useState<string | null>(null);
@@ -885,6 +897,25 @@ export function FrameApp() {
     };
   }, [menu]);
 
+  // The omnibox's paste menu answers to the same native laws (an outside
+  // press or Escape closes it; a leave via the mouse does too).
+  useEffect(() => {
+    if (!pasteMenu) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest(".context"))
+        setPasteMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPasteMenu(null);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pasteMenu]);
+
   // The update lane (ADR-0024): ONE lane, owned by the frame webview —
   // the only React root that lives for the whole session (hidden-to-tray
   // included). Chrome's own surface law: the update NEVER paints as a
@@ -1154,19 +1185,32 @@ export function FrameApp() {
     ? dragDy(blockSourceSlot.y, blockSourceSlot.height)
     : null;
 
-  const commitOmnibox = async () => {
+  const commitOmnibox = async (newTab = false) => {
     if (omniboxText == null) return;
-    // A join commit lands the address on its own Join destination (§7) —
-    // the page speaks the verdict; the frame only clears itself.
-    await omniboxCommit(omniboxText);
+    // The disposition rides the key: plain Enter navigates the tab the
+    // hand is in; Alt-Enter opens the classified request in a NEW
+    // FOREGROUND tab (OpenURL's law — the host lands it either way).
+    await omniboxCommit(omniboxText, newTab);
     setOmniboxText(null);
+    setJoinNote(null);
   };
 
-  const classifyNow = async () => {
-    if (omniboxText == null) return;
-    const request = await omniboxClassify(omniboxText);
+  const classifyNow = async (text: string) => {
+    const ticket = ++classifySeq.current;
+    const request = await omniboxClassify(text);
+    if (ticket !== classifySeq.current) return; // a newer keystroke owns the note
     if (!request) return setJoinNote(null);
-    if ("Internal" in request) return setJoinNote(null);
+    if ("Internal" in request) {
+      // The announcement lane (ADR-0032's inline classification): the
+      // destination is named BEFORE the commit, like upstream's
+      // destination-display — a join reads its host:port, a search reads
+      // "search", an internal page names itself. The new-tab page and
+      // the field's own resting state are silent.
+      const kind = request.Internal.kind;
+      if (kind === "new") return setJoinNote(null);
+      if (kind === "missing") return setJoinNote("no ZIM page");
+      return setJoinNote(`ZIM page · ${kind}`);
+    }
     if ("Join" in request) {
       setJoinNote(
         request.Join.host
@@ -1704,24 +1748,93 @@ export function FrameApp() {
               placeholder="Search servers, or type an address"
               onChange={(e) => {
                 setOmniboxText(e.target.value);
-                void classifyNow();
+                void classifyNow(e.target.value);
               }}
               onFocus={(e) => e.currentTarget.select()}
               onBlur={() => {
                 setOmniboxText(null);
                 setJoinNote(null);
               }}
+              onContextMenu={(e) => {
+                // OmniboxViewViews::ShowContextMenu — the field owns its
+                // menu: Paste, Paste and go. The clipboard's verdict is
+                // read at open time; an empty clipboard disables both.
+                e.preventDefault();
+                setPasteMenu({ x: e.clientX, y: e.clientY });
+                void clipboardText().then((text) =>
+                  setClipEmpty(text.length === 0),
+                );
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  void commitOmnibox();
+                  // OpenURL's disposition law: the plain Enter commits
+                  // into the tab the hand is in; Alt-Enter opens a NEW
+                  // FOREGROUND tab for the same request.
+                  void commitOmnibox(e.altKey);
                   omniboxRef.current?.blur();
                 } else if (e.key === "Escape") {
-                  setOmniboxText(null);
-                  omniboxRef.current?.blur();
+                  // OnEscapeKeyPressed's two-stage law: the FIRST Esc
+                  // with edited text restores the pre-edit text — the
+                  // display reverts, focus STAYS, the permanent text
+                  // selects all (blur is NOT the law). A second Esc,
+                  // nothing left to revert, leaves the field.
+                  e.stopPropagation();
+                  if (omniboxText != null) {
+                    setOmniboxText(null);
+                    setJoinNote(null);
+                    const field = omniboxRef.current;
+                    if (field) {
+                      field.focus();
+                      field.select();
+                    }
+                  } else {
+                    omniboxRef.current?.blur();
+                  }
                 }
               }}
             />
             {joinNote ? <span className="omnibox-note">{joinNote}</span> : null}
+            {pasteMenu ? (
+              <div
+                className="context"
+                style={{ left: pasteMenu.x, top: pasteMenu.y }}
+                onMouseLeave={() => setPasteMenu(null)}
+              >
+                <button
+                  disabled={clipEmpty}
+                  onClick={() => {
+                    setPasteMenu(null);
+                    void clipboardText().then((text) => {
+                      if (!text) return;
+                      // Plain paste: the text enters the field edited —
+                      // the operator still owns the commit.
+                      setOmniboxText(text);
+                      void classifyNow(text);
+                      omniboxRef.current?.focus();
+                    });
+                  }}
+                >
+                  Paste
+                </button>
+                <button
+                  disabled={clipEmpty}
+                  onClick={() => {
+                    setPasteMenu(null);
+                    void clipboardText().then((text) => {
+                      if (!text) return;
+                      // Paste and go: the clipboard text commits
+                      // straight through the classifier (kCurrentTab) —
+                      // the field never edits, the landing page speaks.
+                      void omniboxCommit(text, false);
+                      setOmniboxText(null);
+                      setJoinNote(null);
+                    });
+                  }}
+                >
+                  Paste and go
+                </button>
+              </div>
+            ) : null}
             {/* The bookmark star lives INSIDE the field's right end — the
               placement the omnibox owns upstream; it never sits as a
               stray button past the field. */}

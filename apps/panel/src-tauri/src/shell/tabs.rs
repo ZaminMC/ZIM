@@ -183,6 +183,15 @@ pub struct Tab {
     /// The tab's contents zoom factor (Chromium's per-contents zoom).
     #[serde(default = "default_zoom")]
     pub zoom: f32,
+    /// The discovery query waiting for this tab's page (the omnibox's
+    /// search dialect). The tab may not HAVE a webview when the query
+    /// lands — Alt-Enter's fresh foreground tab boots after the sync —
+    /// so the model holds the text and hello delivers it at boot; a live
+    /// page also hears the event. A reload re-delivers (the search
+    /// survives a reload, as upstream's results page does); a restored
+    /// session never resurrects one — the field is in-memory only.
+    #[serde(skip)]
+    pub pending_query: Option<String>,
 }
 
 fn default_zoom() -> f32 {
@@ -207,6 +216,7 @@ impl Tab {
             muted: false,
             reload: 0,
             zoom: 1.0,
+            pending_query: None,
         }
     }
 }
@@ -776,6 +786,7 @@ impl Strip {
                 muted: false,
                 reload: 0,
                 zoom: 1.0,
+                pending_query: None,
             },
         );
         self.activate(id);
@@ -801,6 +812,10 @@ impl Strip {
                 muted: source.muted,
                 reload: 0,
                 zoom: source.zoom,
+                // A duplicated search tab re-runs the search (upstream's
+                // duplicate carries the results URL; ours carries the
+                // query that produces it).
+                pending_query: source.pending_query.clone(),
             },
         );
         self.active = Some(new_id);
@@ -1256,8 +1271,8 @@ mod tests {
         // ctrl-walk: the active gains company.
         assert!(strip.toggle_selection(ids[2]));
         assert_eq!(strip.selection.len(), 2); // the active + the toggled
-                                              // A second ctrl-click on the ACTIVE deselects it — the first
-                                              // selected is promoted (DeselectTabAt's law, size > 1 branch).
+        // A second ctrl-click on the ACTIVE deselects it — the first
+        // selected is promoted (DeselectTabAt's law, size > 1 branch).
         assert!(strip.toggle_selection(ids[4]));
         assert_eq!(strip.selection, BTreeSet::from([ids[2]]));
         assert_eq!(strip.active, Some(ids[2]));
@@ -1869,13 +1884,15 @@ mod tests {
         strip.group_add(group, b);
         strip.group_remove(b);
         assert!(strip.groups.contains_key(&group));
-        assert!(strip
-            .tabs
-            .iter()
-            .find(|t| t.id == a)
-            .unwrap()
-            .group
-            .is_some());
+        assert!(
+            strip
+                .tabs
+                .iter()
+                .find(|t| t.id == a)
+                .unwrap()
+                .group
+                .is_some()
+        );
     }
 
     #[test]

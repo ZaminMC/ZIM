@@ -170,12 +170,19 @@ export function App() {
     }
     let disposed = false;
     const unlisteners: Promise<Unlisten>[] = [];
-    void invokeHost<{ fallback: boolean; destination?: Destination; reload?: number }>(
-      "shell_tab_hello",
-    ).then((hello) => {
+    void invokeHost<{
+      fallback: boolean;
+      destination?: Destination;
+      reload?: number;
+      query?: string | null;
+    }>("shell_tab_hello").then((hello) => {
       if (disposed || hello.fallback || !hello.destination) return;
       setDestination(hello.destination);
       setReloadToken(hello.reload ?? 0);
+      // The omnibox's waiting search dialect (Alt-Enter's fresh tab: the
+      // query landed before this webview existed, the model held it, the
+      // same store the live event writes).
+      if (hello.query) useTabs.getState().setDiscoveryQuery(hello.query);
     });
     unlisteners.push(
       listenHost<{
