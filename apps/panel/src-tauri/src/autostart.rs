@@ -112,43 +112,78 @@ pub mod linux {
 
 #[cfg(windows)]
 pub mod windows {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE};
     use winreg::RegKey;
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const RUN_VALUE_NAME: &str = "ZIM";
-
-    fn open_run_key() -> Result<RegKey, String> {
-        RegKey::predef(HKEY_CURRENT_USER)
-            .open_subkey(RUN_KEY)
-            .map_err(|error| format!("cannot open the Run key: {error}"))
-    }
+    /// The roundtrip's own hive location: the REAL Run key is
+    /// autorun-protected and CI policy denies the write to a cargo test
+    /// binary (Defender ASR, "Access is denied"), so the mechanics prove
+    /// themselves on a quiet subkey while the real path answers
+    /// read-only. The production path stays the literal Run key.
+    #[cfg(test)]
+    pub(crate) const TEST_RUN_KEY: &str = r"Software\ZIM\Tests\AutostartRun";
 
     pub fn get() -> Result<Option<bool>, String> {
-        let key = open_run_key()?;
-        Ok(Some(key.get_value::<String, _>(RUN_VALUE_NAME).is_ok()))
+        get_at(RUN_KEY)
     }
 
     pub fn set(enabled: bool) -> Result<(), String> {
+        set_at(RUN_KEY, enabled)
+    }
+
+    pub(super) fn get_at(path: &str) -> Result<Option<bool>, String> {
+        let key = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(path, KEY_QUERY_VALUE)
+            .map_err(|error| format!("cannot open the key: {error}"))?;
+        Ok(Some(key.get_value::<String, _>(RUN_VALUE_NAME).is_ok()))
+    }
+
+    pub(super) fn set_at(path: &str, enabled: bool) -> Result<(), String> {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         if !enabled {
             let key = hkcu
-                .open_subkey_with_flags(RUN_KEY, KEY_SET_VALUE)
-                .map_err(|error| format!("cannot open the Run key: {error}"))?;
+                .open_subkey_with_flags(path, KEY_SET_VALUE)
+                .map_err(|error| format!("cannot open the key: {error}"))?;
             key.delete_value(RUN_VALUE_NAME)
                 .or_else(|error| match error.kind() {
                     std::io::ErrorKind::NotFound => Ok(()),
                     _ => Err(error),
                 })
-                .map_err(|error| format!("could not delete the Run value: {error}"))?;
+                .map_err(|error| format!("could not delete the value: {error}"))?;
             return Ok(());
         }
         let exe = std::env::current_exe()
             .map_err(|error| format!("cannot resolve the panel path: {error}"))?;
         let command = format!("\"{}\"", exe.display());
-        let key = open_run_key()?;
+        // The write needs KEY_SET_VALUE — the read-only open the old
+        // enable path used was refused everywhere (the toggle could
+        // never turn ON; the roundtrip test's first real run caught it).
+        let key = hkcu
+            .open_subkey_with_flags(path, KEY_SET_VALUE)
+            .map_err(|error| format!("cannot open the key: {error}"))?;
         key.set_value(RUN_VALUE_NAME, &command)
-            .map_err(|error| format!("could not write the Run value: {error}"))
+            .map_err(|error| format!("could not write the value: {error}"))
+    }
+
+    // The tests' subkey does not exist until a test creates it — and
+    // RegCreateKeyEx never makes intermediates, so the chain builds one
+    // component at a time.
+    #[cfg(test)]
+    fn ensure_test_key() -> Result<(), String> {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let mut walked = String::new();
+        for component in TEST_RUN_KEY.split('\\') {
+            if !walked.is_empty() {
+                walked.push('\\');
+            }
+            walked.push_str(component);
+            hkcu.create_subkey(&walked)
+                .map(|_| ())
+                .map_err(|error| format!("could not create the test key: {error}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -282,14 +317,40 @@ mod tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::windows;
+    use super::windows::TEST_RUN_KEY;
 
     #[test]
     fn run_key_roundtrip() {
-        windows::set(false).expect("clearing a value that may not exist");
-        assert_eq!(windows::get().expect("readable"), Some(false));
-        windows::set(true).expect("autostart on");
-        assert_eq!(windows::get().expect("readable"), Some(true));
-        windows::set(false).expect("autostart off");
-        assert_eq!(windows::get().expect("readable"), Some(false));
+        // The mechanics on the tests' own subkey — the real Run key is
+        // autorun-protected and CI policy denies the write to this
+        // binary (Defender ASR); the production path's access rights are
+        // the same code these lines execute.
+        windows::ensure_test_key().expect("the test key creates");
+        windows::set_at(false).expect("clearing a value that may not exist");
+        assert_eq!(
+            windows::get_at(TEST_RUN_KEY).expect("readable"),
+            Some(false)
+        );
+        windows::set_at(true).expect("autostart on");
+        assert_eq!(windows::get_at(TEST_RUN_KEY).expect("readable"), Some(true));
+        windows::set_at(false).expect("autostart off");
+        assert_eq!(
+            windows::get_at(TEST_RUN_KEY).expect("readable"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn the_real_run_key_is_readable() {
+        // The read-only smoke of the production path: the literal Run
+        // key opens and answers — the write is exercised by the
+        // roundtrip above on the same code.
+        let state = windows::get();
+        if state.is_err() {
+            // A runner without the key at all: absence is an honest
+            // answer, not a failure — but Access-denied on a READ is
+            // worth naming, so the panic carries the sentence.
+            panic!("the real Run key is not readable: {:?}", state);
+        }
     }
 }
