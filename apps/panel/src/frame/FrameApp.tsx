@@ -29,6 +29,8 @@ import {
   omniboxCommit,
   onSnapshot,
   onFocusAddress,
+  onUpdateInstall,
+  onUpdateRestart,
   reportFrameSize,
   revealSlot,
   shellCommand,
@@ -251,6 +253,18 @@ export function FrameApp() {
   // The demo menu's inline group naming (the popup overlay's form in the
   // real shell; the demo has no popup host).
   const [demoGroupFor, setDemoGroupFor] = useState<number | null>(null);
+  // The strip's "live" posture: one painted frame after the first
+  // snapshot. Chromium's law (TabStrip::AddTab's animation flag): a tab
+  // ADDED to a standing strip animates in; the strip's own INITIAL
+  // build (boot, session restore) mounts settled — a restore of eight
+  // tabs growing from zero would be a glitch, not an animation. The
+  // attribute gates the CSS @starting-style insert law.
+  const [stripLive, setStripLive] = useState(false);
+  useEffect(() => {
+    if (!snap || stripLive) return;
+    const frame = requestAnimationFrame(() => setStripLive(true));
+    return () => cancelAnimationFrame(frame);
+  }, [snap, stripLive]);
 
   // -- The hover card's machine — the port of TabHoverCardController -----
   // The state machine rides refs (the pointer handlers and the
@@ -873,18 +887,44 @@ export function FrameApp() {
 
   // The update lane (ADR-0024): ONE lane, owned by the frame webview —
   // the only React root that lives for the whole session (hidden-to-tray
-  // included). The frame used to run a private plugin cadence with a
-  // click-to-apply pill; on Windows `update.install()` ends the process,
-  // so that pill was a forced shutdown. The store's lane splits download
-  // (safe, automatic when enabled) from apply (the explicit restart), and
-  // this pill renders exactly its phases. Content pages keep their own
-  // manual checks; an offer is bound to the context that checked it, so
-  // the pill only ever speaks for the frame's own lane.
+  // included). Chrome's own surface law: the update NEVER paints as a
+  // toolbar pill over the chrome — it is a badge on the ⋮ button and an
+  // item INSIDE the ⋮ menu (the badge says "something needs you", the
+  // menu's first row speaks the phase and carries the verb). The
+  // toolbar pills are gone; the ⋮ renders both halves.
   useEffect(() => {
     if (!isTauri()) return;
     void startUpdates();
     return () => stopUpdates();
   }, []);
+  useEffect(() => {
+    const offInstall = onUpdateInstall(() => void installNow());
+    const offRestart = onUpdateRestart(() => void restart());
+    return () => {
+      void offInstall.then((off) => off());
+      void offRestart.then((off) => off());
+    };
+  }, [installNow, restart]);
+  // The ⋮ menu's opener payload: the lane's phase at open time (the
+  // menu is short-lived; the moment of open is the honest truth it can
+  // speak). Idle phases carry no item — no badge, no row.
+  const updateMeta = (() => {
+    const phase = updatePhase;
+    if (
+      phase.kind === "available" ||
+      phase.kind === "downloading" ||
+      phase.kind === "ready"
+    ) {
+      return {
+        update: {
+          kind: phase.kind,
+          version: phase.offer.version,
+          sentence: updatesSentence(phase),
+        },
+      };
+    }
+    return null;
+  })();
 
   // The browser keyboard contract (ADR-0032), frame side. Every key is
   // also the sniffer's verdict: a live hover card hides (kEvent), the
@@ -1169,6 +1209,7 @@ export function FrameApp() {
           className="strip"
           ref={stripRef}
           data-tauri-drag-region
+          data-live={stripLive || undefined}
           aria-orientation={vertical ? "vertical" : "horizontal"}
           data-declutter={
             snap.tabs.length >=
@@ -1693,44 +1734,66 @@ export function FrameApp() {
               <IconStar />
             </button>
           </div>
-          {/* The update pill lives IN the toolbar's flow — it used to
-            float fixed over the toolbar's right side and read as an
-            overlap of the chrome it covered. A flex item cannot overlap
-            anything: the omnibox gives way, the dots stay clear. */}
-          {updatePhase.kind === "available" ? (
-            <button className="update-pill" onClick={() => void installNow()}>
-              {updatesSentence(updatePhase)}
-            </button>
-          ) : null}
-          {updatePhase.kind === "downloading" ? (
-            <span className="update-pill update-pill--busy">
-              {updatesSentence(updatePhase)}
-            </span>
-          ) : null}
-          {updatePhase.kind === "ready" ? (
-            <button className="update-pill" onClick={() => void restart()}>
-              {updatesSentence(updatePhase)}
-            </button>
-          ) : null}
           {/* The three-dot menu — the browser-level actions live here and
             nowhere else; server management stays in the server's own
-            views. The popup overlay anchors under the button. */}
+            views. The popup overlay anchors under the button; an update
+            in the lane wears the badge (the menu's first row carries
+            the verb). */}
           <button
-            className="tool"
-            aria-label="Customize and control ZIM"
+            className={updateMeta ? "tool dots-update" : "tool"}
+            aria-label={
+              updateMeta
+                ? "Customize and control ZIM — update pending"
+                : "Customize and control ZIM"
+            }
             title="Customize and control ZIM"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
-              void shellPopup("app-menu", null, rect.left, rect.bottom + 4);
+              void shellPopup(
+                "app-menu",
+                null,
+                rect.left,
+                rect.bottom + 4,
+                null,
+                null,
+                updateMeta,
+              );
             }}
           >
             <IconDots />
           </button>
         </div>
 
-        {/* Bookmarks bar (IDC_SHOW_BOOKMARK_BAR posture). */}
+        {/* Bookmarks bar (IDC_SHOW_BOOKMARK_BAR posture). The bar is a
+          DROP TARGET — bookmark_utils.cc's drop path: a URL dragged
+          onto the bar becomes a node (never a remove; `add` is the
+          law). The dragged address is classified by the omnibox's own
+          law, host-side, so one dialect decides what can live here. */}
         {snap.bookmarks_bar_visible ? (
-          <div className="bookmarks">
+          <div
+            className="bookmarks"
+            onDragOver={(e) => {
+              // Any drag that carries an address may land here.
+              if (
+                e.dataTransfer.types.includes("text/uri-list") ||
+                e.dataTransfer.types.includes("text/plain")
+              ) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }
+            }}
+            onDrop={(e) => {
+              const url =
+                e.dataTransfer.getData("text/uri-list") ||
+                e.dataTransfer.getData("text/plain");
+              const address = url.split("\n")[0]?.trim() ?? "";
+              if (address === "") return;
+              e.preventDefault();
+              void import("@tauri-apps/api/core").then(({ invoke }) =>
+                invoke("shell_bookmark_add", { url: address }).catch(() => {}),
+              );
+            }}
+          >
             {snap.bookmarks.length === 0 ? (
               <span className="bookmarks-empty">
                 Ctrl+D bookmarks the tab you're on

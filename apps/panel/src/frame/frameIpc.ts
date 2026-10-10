@@ -113,9 +113,10 @@ export const shellPopup = (
   y: number,
   groupId: number | null = null,
   card: Record<string, unknown> | null = null,
+  meta: Record<string, unknown> | null = null,
 ): Promise<boolean> =>
   isTauri()
-    ? invokeHost<boolean>("shell_popup", { kind, tabId, groupId, x, y, card })
+    ? invokeHost<boolean>("shell_popup", { kind, tabId, groupId, x, y, card, meta })
     : Promise.resolve(true);
 
 /** Slide or refresh the LIVE hover card (content + anchor in one
@@ -265,6 +266,19 @@ export function onFocusAddress(handler: () => void): Promise<Unlisten> {
   // subscribing through @tauri-apps/api outside Tauri would throw.
   if (!isTauri()) return Promise.resolve(() => {});
   return listenHost("shell://focus-address", () => handler());
+}
+
+/** The ⋮ menu's update verbs ring the frame — the popup overlay
+ *  dispatches the command, the host relays it here (the lane's one
+ *  owner; the overlay webview holds no updater of its own). */
+export function onUpdateInstall(handler: () => void): Promise<Unlisten> {
+  if (!isTauri()) return Promise.resolve(() => {});
+  return listenHost("shell://update-install", () => handler());
+}
+
+export function onUpdateRestart(handler: () => void): Promise<Unlisten> {
+  if (!isTauri()) return Promise.resolve(() => {});
+  return listenHost("shell://update-restart", () => handler());
 }
 
 // -- View-side geometry mirrors (tested against the model's law) -------------

@@ -62,7 +62,7 @@ Implemented for the daemon's first release; the file set is specified now, imple
 
 | Namespace | Methods |
 |---|---|
-| `daemon` | `daemon.hello`, `daemon.status` |
+| `daemon` | `daemon.hello`, `daemon.status`, `daemon.ping` (the heartbeat probe), `daemon.shutdown` (the tray Quit's ask: the reply lands first, then the daemon stops every running server through the graceful ladder and exits — the asker keeps a short reply budget and ends its own process regardless) |
 | `server` | `server.list`, `server.get`, `server.register` (register an existing directory), `server.create` (Phase 6: download, stamp, and register a fresh server — §7b), `server.update`, `server.remove`, `server.start`, `server.stop`, `server.restart`, `server.kill`, `server.stdin` (one console line; output arrives on the logs stream), `server.discover` (§64, ADR-0027) |
 | `discovery` (ADR-0027) | `discovery.roots.get`, `discovery.roots.set` |
 | `extensions` (§56/§57, ADR-0031) | `extensions.list` — the declaration half of the permission model: valid manifests with their claimed permissions, folders that could not be read named in-band, `contributionsActive: false` until the execution model lands |

@@ -55,7 +55,14 @@ const BUDGETS = {
   // lazy stylesheet (internalPage.module.css) — the next room's CSS
   // cost drops to its page-specific rules alone. Entry untouched
   // throughout: the boot path's CSS line did not move.
-  totalCssGzip: 21 * 1024,
+  // 21 → 26 KB at the Chromium tab strip backport (ADR-0033's frame):
+  // the frame's face is no longer homegrown — frame.css now paints the
+  // ported law (GetPath() bodies, squarcle hover, group chips and
+  // underlines, separators, the hover card and the popup overlay's
+  // menus, the ⋮ update badge). The overage the backport shipped with
+  // is negotiated here in writing, per this file's own rule; the entry
+  // stylesheet still holds its own line (the boot path did not grow).
+  totalCssGzip: 26 * 1024,
   // The entry stylesheet's own line (the cold start's CSS), kept
   // explicit so a chrome-only regression cannot hide inside the total.
   entryCssGzip: 11 * 1024,

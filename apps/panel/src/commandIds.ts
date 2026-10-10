@@ -37,6 +37,10 @@ export const CMD = {
   DEV_TOOLS: 50021,
   OPEN_LOGS: 50022,
   TOGGLE_VERTICAL_STRIP: 50023,
+  // The update lane's verbs — the ⋮ menu's item rings the frame (the
+  // lane's one owner): download-when-offered / restart-to-apply.
+  UPDATE_INSTALL: 50030,
+  UPDATE_RESTART: 50031,
   // The group editor (tab_group_editor_bubble_view.cc's writes, routed
   // through the command lane — no upstream browser IDCs exist for them).
   RENAME_GROUP: 50024,

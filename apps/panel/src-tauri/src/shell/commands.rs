@@ -130,3 +130,9 @@ pub const OPEN_LOGS: u32 = 50022;
 /// tab objects render as a left rail or the horizontal band. No
 /// upstream IDC (Chromium has no shipped vertical-strip verb).
 pub const TOGGLE_VERTICAL_STRIP: u32 = 50023;
+
+/// ⓩ Local: the update lane's verbs — the ⋮ menu's item asks the frame
+/// (the lane's one owner) to download-when-offered or restart-to-apply.
+/// Chrome's own "Update Chromium" menu item is the shape.
+pub const UPDATE_INSTALL: u32 = 50030;
+pub const UPDATE_RESTART: u32 = 50031;

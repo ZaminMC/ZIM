@@ -16,6 +16,7 @@ import { parseJoinTail } from "../state/destinations";
 import { navigateHost } from "../state/shellLane";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
 import { useUi } from "../state/ui";
+import { useTabs } from "../state/tabs";
 import { startWire } from "../state/wire";
 import { useConnection } from "../state/connection";
 import { sortedServers, useServers } from "../state/servers";
@@ -187,6 +188,16 @@ export function App() {
         if (disposed) return;
         if (tab.destination) setDestination(tab.destination);
         if (tab.reload != null) setReloadToken(tab.reload);
+      }),
+    );
+    // The omnibox's search dialect (Chromium's law: a typed query
+    // navigates the CURRENT tab): the host navigated this tab to the
+    // new-tab page and rings the query here — the page consumes it once
+    // and runs the discovery search. The text is never dropped.
+    unlisteners.push(
+      listenHost<string>("shell://discover-query", (text) => {
+        if (disposed) return;
+        useTabs.getState().setDiscoveryQuery(text);
       }),
     );
     // The frame's Ctrl+K arrives through the host (a CustomEvent never

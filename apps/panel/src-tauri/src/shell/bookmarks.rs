@@ -60,9 +60,24 @@ impl Bookmarks {
         }
     }
 
-    /// isBookmarked — the star's resting state. Wired with the omnibox
-    /// star's filled posture (a later phase); the ported API keeps it.
-    #[allow(dead_code)]
+    /// The DROP verb (bookmark_utils.cc's drop onto the bar): a URL
+    /// dragged onto the bar ADDS — it never removes an existing node the
+    /// way the star's toggle would. A destination already bookmarked
+    /// stays put (one node per destination, the model's own law).
+    pub fn add(&mut self, destination: Destination, title: String) -> bool {
+        if self.is_bookmarked(&destination) {
+            return false;
+        }
+        self.items.push(Bookmark {
+            id: Self::fresh_id(),
+            title,
+            destination,
+        });
+        true
+    }
+
+    /// isBookmarked — the star's resting state and the drop verb's
+    /// one-node-per-destination guard.
     pub fn is_bookmarked(&self, destination: &Destination) -> bool {
         self.items.iter().any(|b| &b.destination == destination)
     }
@@ -91,6 +106,16 @@ mod tests {
         assert!(marks.is_bookmarked(&d));
         marks.toggle(d.clone(), "Server s1".into());
         assert!(marks.items.is_empty());
+    }
+
+    #[test]
+    fn drop_adds_without_removing() {
+        let mut marks = Bookmarks::default();
+        let d = Destination::Settings;
+        assert!(marks.add(d.clone(), "Settings".into()));
+        // A second drop of the same address is a no-op, never a remove.
+        assert!(!marks.add(d.clone(), "Settings".into()));
+        assert_eq!(marks.items.len(), 1);
     }
 
     #[test]

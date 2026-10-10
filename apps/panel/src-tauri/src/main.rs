@@ -21,10 +21,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::ipc::Channel;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::mpsc;
 use zamin_ipc::Endpoint;
 
@@ -53,17 +54,54 @@ impl Connected {
     }
 }
 
+// One connection slot PER WEBVIEW, keyed by the webview's label — the
+// Chromium law this used to violate: every renderer owns its channel to
+// the browser process for its whole life; a sibling connecting never
+// tears an existing one down. The single-slot shape made every tab's
+// `daemon_connect` REPLACE the previous webview's wire: the loser's
+// down-channel fired, its client dropped into reconnect, the two tabs
+// stole the slot from each other in a loop, and the operator read
+// "ZIM is not answering" on whichever tab had lost the latest round.
+// The daemon is a session server (one task per accepted connection),
+// so N tab wires cost N cheap sessions — the honest topology.
 #[derive(Default)]
-struct HostState(Mutex<Option<Connected>>);
+struct HostState(Mutex<HashMap<String, Connected>>);
 
 impl HostState {
-    fn lock(&self) -> MutexGuard<'_, Option<Connected>> {
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, Connected>> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Drop one webview's wire — the webview is gone (tab closed, orphan
+/// swept), so its connection and pumps must not outlive it.
+pub fn drop_wire(app: &AppHandle, label: &str) {
+    if let Some(connected) = app.state::<HostState>().lock().remove(label) {
+        connected.shutdown();
+    }
+}
+
+/// Drop every wire belonging to a closed window's children
+/// (`tab-{window}-{id}` labels). The window event loop has no
+/// per-webview destroyed hook, so the close path sweeps.
+pub fn drop_wire_window(app: &AppHandle, window_label: &str) {
+    let prefix = format!("tab-{window_label}-");
+    let dead: Vec<String> = {
+        let guard = app.state::<HostState>().lock();
+        guard
+            .keys()
+            .filter(|label| label.starts_with(&prefix))
+            .cloned()
+            .collect()
+    };
+    for label in dead {
+        drop_wire(app, &label);
     }
 }
 
 #[tauri::command]
 async fn daemon_connect(
+    window: tauri::Webview,
     endpoint: Option<String>,
     remote_addr: Option<String>,
     remote_token: Option<String>,
@@ -142,24 +180,34 @@ async fn daemon_connect(
         }
     });
 
+    // This webview's OWN slot — a sibling's connect never touches it
+    // (the keyed law above). A re-connect from this same webview (its
+    // client's retry) replaces only its own wire.
+    let label = window.label().to_owned();
     let mut guard = state.lock();
-    if let Some(previous) = guard.take() {
+    if let Some(previous) = guard.insert(
+        label,
+        Connected {
+            outgoing: outgoing_tx,
+            read_pump,
+            batch_forwarder,
+            write_pump,
+        },
+    ) {
         previous.shutdown();
     }
-    *guard = Some(Connected {
-        outgoing: outgoing_tx,
-        read_pump,
-        batch_forwarder,
-        write_pump,
-    });
     Ok("connected".into())
 }
 
 #[tauri::command]
-async fn daemon_send(frame: String, state: State<'_, HostState>) -> Result<(), String> {
+async fn daemon_send(
+    window: tauri::Webview,
+    frame: String,
+    state: State<'_, HostState>,
+) -> Result<(), String> {
     let outgoing = state
         .lock()
-        .as_ref()
+        .get(window.label())
         .map(|connected| connected.outgoing.clone())
         .ok_or_else(|| "not connected to the daemon".to_owned())?;
     outgoing
@@ -169,8 +217,8 @@ async fn daemon_send(frame: String, state: State<'_, HostState>) -> Result<(), S
 }
 
 #[tauri::command]
-async fn daemon_close(state: State<'_, HostState>) -> Result<(), String> {
-    if let Some(connected) = state.lock().take() {
+async fn daemon_close(window: tauri::Webview, state: State<'_, HostState>) -> Result<(), String> {
+    if let Some(connected) = state.lock().remove(window.label()) {
         connected.shutdown();
     }
     Ok(())
@@ -183,6 +231,31 @@ async fn daemon_close(state: State<'_, HostState>) -> Result<(), String> {
 #[tauri::command]
 async fn daemon_ensure() -> Result<String, String> {
     daemon_ensure::ensure_daemon().await
+}
+
+/// Ask the daemon to end itself: one one-shot connection, one
+/// `daemon.shutdown` request, a two-second reply budget. The daemon's
+/// reply lands BEFORE its stop ladder finishes (it owns the wait); this
+/// only proves the ask arrived. Fire-and-forget by design: every
+/// failure mode (endpoint gone, daemon already dead) means the same
+/// thing — nothing to stop — and the caller exits regardless.
+async fn shutdown_daemon() -> Result<(), String> {
+    use zamin_protocol::envelope::{Request, RequestId};
+    use zamin_protocol::methods;
+    let endpoint = Endpoint::default_endpoint();
+    let connection = zamin_ipc::connect(endpoint)
+        .await
+        .map_err(|error| format!("daemon not reachable: {error}"))?;
+    let (mut write_half, mut read_half) = connection.split();
+    let request = Request::new(RequestId::Number(1), methods::DAEMON_SHUTDOWN, None);
+    let frame = serde_json::to_string(&request).map_err(|e| e.to_string())?;
+    zamin_bridge::send_frame(&mut write_half, &frame)
+        .await
+        .map_err(|error| format!("shutdown ask failed: {error}"))?;
+    // The reply is courtesy, not a barrier: read it with a small budget
+    // so a wedged daemon cannot hold the Quit hostage.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), read_half.recv()).await;
+    Ok(())
 }
 
 /// `Some(enabled)` — autostart state; `None` — cannot be determined and
@@ -249,12 +322,24 @@ fn main() {
                 // Left click opens the window; the menu belongs to the
                 // right click, like every Windows tray icon.
                 .show_menu_on_left_click(false)
-                .tooltip("ZIM — servers keep running in the background")
+                .tooltip("ZIM — quit stops the servers and the daemon")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "tray-open" => show_main_window(app),
-                    // The one full shutdown: the run loop ends, the tray
-                    // icon goes with the process, nothing lingers.
-                    "tray-quit" => app.exit(0),
+                    // The one full shutdown: the daemon is asked to stop
+                    // (it runs its graceful stop ladder for every running
+                    // server, then exits), and the panel ends with it —
+                    // Quit means nothing lingers: no tray icon, no
+                    // zamind.exe, no headless servers. The ask is
+                    // best-effort with a short budget; the panel always
+                    // exits (a daemon that already died must not wedge
+                    // the Quit).
+                    "tray-quit" => {
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = shutdown_daemon().await;
+                            handle.exit(0);
+                        });
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -331,6 +416,7 @@ fn main() {
             shell::host::shell_omnibox_commit,
             shell::host::shell_bookmarks,
             shell::host::shell_bookmark_remove,
+            shell::host::shell_bookmark_add,
             shell::host::shell_drag,
             shell::host::shell_window_resized,
             shell::host::shell_popup,
@@ -352,11 +438,22 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building the ZIM host")
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
-                app.state::<ShellState>().flush();
-                if code.is_none() {
-                    api.prevent_exit();
+            match event {
+                tauri::RunEvent::ExitRequested { code, api, .. } => {
+                    app.state::<ShellState>().flush();
+                    if code.is_none() {
+                        api.prevent_exit();
+                    }
                 }
+                // A tear-off (or any non-tray window) closed for real:
+                // its tabs' wires must not linger as dead sessions on
+                // the daemon.
+                tauri::RunEvent::WindowEvent { event, label, .. } => {
+                    if matches!(event, tauri::WindowEvent::Destroyed) && label != "main" {
+                        drop_wire_window(app, &label);
+                    }
+                }
+                _ => {}
             }
         });
 }

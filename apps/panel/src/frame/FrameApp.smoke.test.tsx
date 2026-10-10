@@ -5,8 +5,9 @@
 // model's slots, the active tab carries its surface class, close closes,
 // new tab news.
 
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -14,6 +15,18 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { FrameApp } from "./FrameApp";
+
+// The bookmark bar's drop verb speaks straight to the host (it is a
+// frame-native surface, not a shell command) — the mock records the
+// invoke so the law is pinned without a Tauri harness.
+const bookmarkInvoked: Array<Record<string, unknown> | undefined> = [];
+vi.mock("@tauri-apps/api/core", () => ({
+  Channel: class {},
+  invoke: (_cmd: string, args?: Record<string, unknown>) => {
+    bookmarkInvoked.push(args);
+    return Promise.resolve(true);
+  },
+}));
 
 // The demo fixture: frameIpc's ?demo lane obeys the same command IDs the
 // host does, so the smoke test runs the real view against the real
@@ -344,8 +357,7 @@ describe("<FrameApp /> against the demo fixture", () => {
 // hides and re-arms the FULL delay), the 300ms reshow buffer, the strip
 // leave's fade, and the chip's group card.
 
-import { act } from "@testing-library/react";
-import { vi } from "vitest";
+import { useUpdates } from "../state/updates";
 
 describe("<FrameApp /> the hover card's machine", () => {
   beforeEach(() => {
@@ -541,5 +553,72 @@ describe("<FrameApp /> the hover card's machine", () => {
     expect(card.textContent).toContain("survival (2 tabs)");
     expect(card.textContent).toContain("•  Server survival");
     expect(card.textContent).toContain("•  Console hub");
+  });
+});
+
+// -- The update notice + the bookmarks bar's drop ----------------------------
+// Chrome's surface law for updates: the ⋮ button carries the badge, the
+// ⋮ menu carries the verb — never a pill floating over the chrome. The
+// bar's drop verb adds the dragged address through the host's classifier.
+
+describe("<FrameApp /> the update notice and the bar's drop", () => {
+  beforeEach(() => {
+    history.replaceState(null, "", "/frame.html?demo");
+    useUpdates.setState({ phase: { kind: "idle" } });
+  });
+  afterEach(() => {
+    cleanup();
+    useUpdates.setState({ phase: { kind: "idle" } });
+  });
+
+  async function bootStrip(): Promise<ReturnType<typeof render>> {
+    const view = render(<FrameApp />);
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "New tab" }).length).toBeGreaterThan(0);
+    });
+    return view;
+  }
+
+  it("an update in the lane badges the ⋮ button — and no toolbar pill survives", async () => {
+    useUpdates.setState({
+      phase: {
+        kind: "ready",
+        offer: { version: "0.5.0", notes: "", pubDate: "2026-10-10T00:00:00Z" },
+      },
+    });
+    const { container } = await bootStrip();
+    expect(container.querySelector(".dots-update")).not.toBeNull();
+    expect(container.querySelector(".update-pill")).toBeNull();
+  });
+
+  it("an idle lane leaves the ⋮ badge off", async () => {
+    const { container } = await bootStrip();
+    expect(container.querySelector(".dots-update")).toBeNull();
+  });
+
+  it("a URL dropped on the bar asks the host to ADD it (never a toggle)", async () => {
+    const { container } = await bootStrip();
+    // The demo boots with the bar hidden — Ctrl+Shift+B (the ported
+    // IDC_SHOW_BOOKMARK_BAR posture) shows it first.
+    fireEvent.keyDown(window, { key: "B", ctrlKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(container.querySelector(".bookmarks")).not.toBeNull();
+    });
+    const bar = container.querySelector<HTMLElement>(".bookmarks")!;
+    const getData = (type: string) =>
+      type === "text/uri-list" ? "zim://settings/" : "";
+    fireEvent.dragOver(bar, {
+      dataTransfer: { types: ["text/uri-list"], getData },
+    });
+    fireEvent.drop(bar, {
+      dataTransfer: { types: ["text/uri-list"], getData },
+    });
+    await waitFor(() => {
+      expect(bookmarkInvoked.some((args) => args?.url === "zim://settings/")).toBe(
+        true,
+      );
+    });
+    const command = bookmarkInvoked.find((args) => args?.url !== undefined);
+    expect(command?.url).toBe("zim://settings/");
   });
 });

@@ -177,6 +177,28 @@ async fn session_loop(
             continue;
         }
 
+        if request.method == methods::DAEMON_SHUTDOWN {
+            // The one method that ends the daemon (tray Quit's ask):
+            // reply FIRST — the asker keeps a two-second budget and ends
+            // its own process regardless — then stop every running
+            // server through the engine's graceful ladder and exit. The
+            // ladder runs detached from this session; nothing waits on
+            // it but the process's own exit.
+            outbound
+                .reply(Response::ok(
+                    request.id.clone(),
+                    serde_json::json!({ "quitting": true }),
+                ))
+                .await;
+            let engine = engine.clone();
+            tokio::spawn(async move {
+                engine.shutdown_all().await;
+                tracing::info!("daemon shutdown: all servers settled, exiting");
+                std::process::exit(0);
+            });
+            continue;
+        }
+
         let request_key = request
             .parse_params::<serde_json::Value>()
             .ok()

@@ -1149,6 +1149,54 @@ impl Engine {
         })
     }
 
+    /// The daemon's last duty (`daemon.shutdown`, the tray Quit's ask):
+    /// stop every running server through the same graceful ladder the
+    /// Stop button uses, then wait — bounded — for the fleet to settle.
+    /// The caller exits the process when this returns; a server that
+    /// has not stopped within the budget is left to its actor's own
+    /// escalation (the ladder owns the kill phase), never a hard kill
+    /// from here.
+    pub async fn shutdown_all(&self) {
+        const STOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+        let busy = |state: zamin_protocol::server::ServerState| {
+            matches!(
+                state,
+                zamin_protocol::server::ServerState::Running
+                    | zamin_protocol::server::ServerState::Starting
+            )
+        };
+        for summary in self
+            .list_servers()
+            .await
+            .into_iter()
+            .filter(|s| busy(s.state))
+        {
+            match ServerId::parse(&summary.server_id) {
+                Ok(server_id) => {
+                    if let Err(error) = self.lifecycle(&server_id, LifecycleKind::Stop).await {
+                        tracing::warn!(server = %summary.server_id, "shutdown stop failed: {error}");
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(server = %summary.server_id, "shutdown: bad id: {error}");
+                }
+            }
+        }
+        // The ladder is asynchronous — the actors' tick loop drives each
+        // stop — so the wait polls the registry instead of the replies.
+        let deadline = tokio::time::Instant::now() + STOP_BUDGET;
+        loop {
+            if !self.list_servers().await.into_iter().any(|s| busy(s.state)) {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!("shutdown budget elapsed with servers still stopping");
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+
     pub async fn write_stdin(&self, server_id: &ServerId, line: String) -> Result<(), EngineError> {
         let tx = self.actor_for(server_id).await?;
         let (reply, rx) = oneshot::channel();

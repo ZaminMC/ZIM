@@ -82,7 +82,21 @@ body {
      and the neighbors' shapes read through the overlap zones. */
   transition:
     width 200ms cubic-bezier(0.2, 0, 0, 1),
-    left 200ms cubic-bezier(0.2, 0, 0, 1);
+    left 200ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 120ms ease-out;
+}
+
+/* Chromium's insert law (TabStrip::StartInsertTabAnimation): a tab ADDED
+   to a standing strip GROWS from zero into its slot while its neighbors
+   slide (their own left transition); the strip's initial build (boot,
+   session restore) mounts settled. The [data-live] gate flips one
+   painted frame after the first snapshot (FrameApp's stripLive), so a
+   restore of many tabs never plays the growth — new tabs after boot do. */
+@starting-style {
+  .strip[data-live] .tab {
+    width: 0;
+    opacity: 0;
+  }
 }
 
 /* GetPath() (horizontal_tab_style_views.cc): the chrome tab — top corners
@@ -449,18 +463,29 @@ body {
   border: none;
   background: transparent;
   color: var(--frame-fg-dim);
-  border-radius: 50%;
   cursor: default;
-  transition:
-    background 120ms ease-out,
-    color 120ms ease-out;
-  /* The hover paints the CONTROL INK (tab_strip_color_mixer.cc's
-     kColorTabStripControlButtonInkDrop: max-contrast ink at 16%) as a
-     CIRCLE around the +, not a band-wide rect. */
+  /* Chromium's new-tab button paints its hover as a 28 DIP CIRCLE
+     centered behind the + (NewTabButton::GetPaintRect's ink drop), not
+     a band-wide rect: the pseudo-element carries it so the button's own
+     hit area stays the strip's height. */
+}
+.new-tab::before {
+  content: "";
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background 120ms ease-out;
 }
 .new-tab:hover {
-  background: var(--frame-hover-strong);
   color: var(--frame-fg);
+}
+.new-tab:hover::before {
+  background: var(--frame-hover-strong);
+}
+.new-tab svg {
+  position: relative; /* the icon rides above its own circle */
 }
 
 .window-controls {
@@ -710,44 +735,35 @@ body {
   box-shadow: 0 0 0 3px var(--frame-accent-soft);
 }
 
-/* The update notice lives INSIDE the band — the frame webview is only
-   the header (83px, 111 with bookmarks), so a bottom-fixed toast would
-   be clipped off by the webview's edge (0.4.3's invisible pill). It
-   rides the toolbar's flex flow (see the block below). */
-.update-pill {
-  /* In the toolbar's flow — the fixed/right/top float used to hang
-     OVER the toolbar's right side and read as an overlap of the chrome
-     it covered. A flex item occupies space; the omnibox gives way. */
-  position: static;
-  flex: none;
-  margin-left: 6px;
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: none;
-  border-radius: 14px;
-  padding: 6px 12px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  background: var(--frame-accent);
-  color: var(--frame-accent-contrast);
-  box-shadow: var(--shadow-m);
-  cursor: pointer;
+/* The update notice is Chrome's own shape: a badge on the ⋮ button (the
+   eye's "something needs you" catch) and the verb inside the menu —
+   never a pill floating over the chrome (the 0.4.x toolbar pill read as
+   an overlap of what it covered; the menu owns the lane now). */
+.tool.dots-update {
+  position: relative;
 }
-.update-pill:hover {
-  background: var(--accent-strong);
+.tool.dots-update::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--frame-accent, #1a73e8);
+  border: 2px solid var(--frame-bg);
+  /* The badge's own attention pulse — compositor-only, and the global
+     reduced-motion floor silences it (ADR-0030). */
+  animation: dots-pulse 2s ease-in-out infinite;
 }
-
-/* The downloading state is not a control — nothing is clickable while the
-   package fetches, so the pill renders as a span: no hover glow, no
-   pointer, quieter surface. */
-.update-pill--busy {
-  background: var(--frame-surface);
-  color: var(--text-muted);
-  cursor: default;
-  box-shadow: var(--shadow-m);
+@keyframes dots-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 /* Reduced motion floor (ADR-0030): no stylesheet can outrun it. */
@@ -755,6 +771,9 @@ body {
   .tab,
   .tab * {
     transition: none !important;
+  }
+  .tool.dots-update::after {
+    animation: none;
   }
 }
 

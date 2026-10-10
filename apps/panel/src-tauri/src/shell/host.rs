@@ -454,6 +454,11 @@ struct PopupState {
     /// content is the frame's law-dressed snapshot, re-dressed on every
     /// slide/update. Menus carry none.
     card: Option<serde_json::Value>,
+    /// The opener's own context for the menu's live state — the frame
+    /// passes the update lane's phase so the ⋮ menu's item speaks the
+    /// truth of the moment it opened (Chrome's menu button badge +
+    /// "Update Chromium" item ride the same shape).
+    meta: Option<serde_json::Value>,
 }
 
 /// The overlay's rect for a kind anchored at (x, y): the menu's drop
@@ -580,7 +585,8 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
     // Webview hygiene: a tab the model no longer knows (closed,
     // detached, moved between windows) must not survive as a hidden
     // child — its renderer would keep running forever. Remove every
-    // orphan of this window.
+    // orphan of this window — and its daemon wire with it (a closed
+    // tab's session must not linger on the daemon).
     let live: std::collections::HashSet<String> = snap
         .tabs
         .iter()
@@ -590,6 +596,7 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
         let label = webview.label();
         if label.starts_with(&format!("tab-{window_label}-")) && !live.contains(label) {
             let _ = webview.close();
+            crate::drop_wire(app, label);
         }
     }
 
@@ -741,8 +748,11 @@ pub fn shell_tab_hello(
     }))
 }
 
-/// A content webview navigates (ServerView → Fleet, §61 singleton
-/// identity: an existing resting tab of the same identity is focused).
+/// A content webview navigates (ServerView → Fleet, a Join verdict's
+/// "go to the server"): the calling tab navigates — Chromium's law, the
+/// same one the omnibox and every UI verb obey (the anchor tab is the
+/// one under the operator's hand; no resting sibling may hijack the
+/// ride).
 #[tauri::command]
 pub async fn shell_tab_navigate(
     window: tauri::Webview,
@@ -757,41 +767,10 @@ pub async fn shell_tab_navigate(
     {
         let mut inner = state.lock();
         let strip = inner.strip(&window_name);
-        let identity = destination_identity(&destination);
-        if let Some(existing) = strip
-            .tabs
-            .iter()
-            .find(|t| destination_identity(t.destination()) == identity)
-            .map(|t| t.id)
-        {
-            strip.select(existing);
-        } else {
-            strip.navigate(tab_id, destination);
-        }
+        strip.navigate(tab_id, destination);
     }
     emit_tab_state(&app, &state, &window_name);
     sync(&app, &state, &window_name)
-}
-
-fn destination_identity(d: &Destination) -> String {
-    match d {
-        Destination::New => "new".into(),
-        Destination::DevTools => "devtools".into(),
-        Destination::Servers => "servers".into(),
-        Destination::Server { server_id } => format!("server:{server_id}"),
-        Destination::Console { server_id } => format!("console:{server_id}"),
-        Destination::Join { host, port } => {
-            format!("join:{}:{port}", host.clone().unwrap_or_default())
-        }
-        Destination::Settings => "settings".into(),
-        Destination::Jobs => "jobs".into(),
-        Destination::Audit => "audit".into(),
-        Destination::About => "about".into(),
-        Destination::Feedback => "feedback".into(),
-        Destination::Extensions => "extensions".into(),
-        Destination::Downloads => "downloads".into(),
-        Destination::Missing { url } => format!("missing:{url}"),
-    }
 }
 
 /// Tab-local verbs the content layer drives: back / forward / reload.
@@ -895,7 +874,8 @@ pub async fn shell_command(
             // Window verbs touch the OS, not the model — deferred below.
             // NEW_WINDOW tears off a fresh window from the model too.
             // DEV_TOOLS and OPEN_LOGS are OS-facing too (devtools pane,
-            // the log folder in the platform file manager).
+            // the log folder in the platform file manager). The update
+            // verbs ring the frame webview — the lane's owner.
             cmd::WINDOW_MINIMIZE
             | cmd::WINDOW_TOGGLE_MAXIMIZE
             | cmd::WINDOW_CLOSE
@@ -903,7 +883,9 @@ pub async fn shell_command(
             | cmd::TOGGLE_PALETTE
             | cmd::NEW_WINDOW
             | cmd::DEV_TOOLS
-            | cmd::OPEN_LOGS => {
+            | cmd::OPEN_LOGS
+            | cmd::UPDATE_INSTALL
+            | cmd::UPDATE_RESTART => {
                 window_verb = Some(id);
             }
             _ => {
@@ -1115,16 +1097,16 @@ pub async fn shell_command(
                         else {
                             return Err("NAVIGATE_ACTIVE: bad destination".into());
                         };
-                        // §61 singleton identity through the active tab.
-                        let identity = destination_identity(&destination);
-                        if let Some(existing) = strip
-                            .tabs
-                            .iter()
-                            .find(|t| destination_identity(t.destination()) == identity)
-                            .map(|t| t.id)
-                        {
-                            strip.select(existing);
-                        } else if let Some(active) = strip.active {
+                        // Chromium's law (the omnibox and every UI verb
+                        // share it): the address a UI surface carries
+                        // lands on the tab that is ALIVE UNDER THE USER'S
+                        // HAND — never a teleport to some resting sibling
+                        // that happens to hold the same page. The
+                        // singleton-focus shape sent a bookmark click or
+                        // a ⋮ menu verb flying to ANOTHER tab while the
+                        // operator's own tab stayed where it was ("the
+                        // app does not care about the url").
+                        if let Some(active) = strip.active {
                             strip.navigate(active, destination);
                         }
                     }
@@ -1207,6 +1189,18 @@ pub async fn shell_command(
                 .map_err(|e| format!("could not open the log folder: {e}"))?;
             return Ok(());
         }
+        // The update lane lives in the frame webview (the one React root
+        // that survives the whole session — hidden-to-tray included);
+        // the ⋮ menu's update verbs ring the frame's bell. Frame-local
+        // truth, no model change, no sync.
+        Some(cmd::UPDATE_INSTALL) => {
+            let _ = app.emit_to(frame_label(&window_name), "shell://update-install", ());
+            return Ok(());
+        }
+        Some(cmd::UPDATE_RESTART) => {
+            let _ = app.emit_to(frame_label(&window_name), "shell://update-restart", ());
+            return Ok(());
+        }
         _ => {}
     }
     emit_tab_state(&app, &state, &window_name);
@@ -1241,57 +1235,34 @@ pub async fn shell_omnibox_commit(
         };
         match request {
             AddressRequest::Internal(destination) => {
-                // Singleton identity (§61): a resting tab of the same
-                // identity is focused, else the active tab navigates.
-                let identity = destination_identity(&destination);
-                if let Some(existing) = strip
-                    .tabs
-                    .iter()
-                    .find(|t| destination_identity(t.destination()) == identity)
-                    .map(|t| t.id)
-                {
-                    strip.select(existing);
-                } else {
-                    strip.navigate(active, destination);
-                }
+                // Chromium's omnibox law (AutocompleteController's commit
+                // path): whatever the operator typed lands on the tab
+                // THEY are in — typed chrome://settings navigates THIS
+                // tab even when a sibling already rests on settings. The
+                // old singleton-focus shape hijacked the commit to
+                // another tab ("paste the settings url and it takes you
+                // to a different tab that has it enabled"); it is gone.
+                strip.navigate(active, destination);
                 serde_json::json!({ "kind": "navigated" })
             }
             AddressRequest::Join { host, port } => {
                 // §7's honest join, completed: the address lands on its
-                // own destination (singleton identity — the same address
-                // refocuses its resting tab), and the Join page consults
-                // the daemon (registry, server-list ping) for the
-                // verdict. No webview navigates to a raw address.
-                let destination = Destination::Join { host, port };
-                let identity = destination_identity(&destination);
-                if let Some(existing) = strip
-                    .tabs
-                    .iter()
-                    .find(|t| destination_identity(t.destination()) == identity)
-                    .map(|t| t.id)
-                {
-                    strip.select(existing);
-                } else {
-                    strip.navigate(active, destination);
-                }
+                // own Join destination IN THE ACTIVE TAB, and the Join
+                // page consults the daemon (registry, server-list ping)
+                // for the verdict. No webview navigates to a raw address.
+                strip.navigate(active, Destination::Join { host, port });
                 serde_json::json!({ "kind": "navigated" })
             }
             AddressRequest::Query(text) => {
-                // A discovery query lands on the new tab (§22): focused
-                // if it already rests, created if it does not.
-                let resting = strip
-                    .tabs
-                    .iter()
-                    .find(|t| t.destination() == &Destination::New)
-                    .map(|t| t.id);
-                match resting {
-                    Some(id) => {
-                        strip.select(id);
-                    }
-                    None => {
-                        strip.append(Destination::New, true);
-                    }
-                }
+                // Chromium's law again: a typed search navigates the
+                // CURRENT tab. ZIM's "search results" are the discovery
+                // search on the new-tab page, so the active tab navigates
+                // there and the query rides the tab's own event lane
+                // (shell://discover-query — the page consumes it once and
+                // runs the search). The text is never dropped.
+                strip.navigate(active, Destination::New);
+                let label = tab_label(&window_name, active);
+                let _ = app.emit_to(label, "shell://discover-query", &text);
                 serde_json::json!({ "kind": "query", "text": text })
             }
         }
@@ -1320,6 +1291,40 @@ pub async fn shell_bookmark_remove(
     sync(&app, &state, &window_name)
 }
 
+/// The bar's DROP verb (bookmark_utils.cc's drop path): a URL dragged
+/// onto the bookmarks bar becomes a node. The address is classified by
+/// the SAME law the omnibox speaks (one dialect): an internal page or a
+/// join address lands as its destination; bare search text has no
+/// address to keep and is honestly refused (false). A drop never
+/// removes — `add` is the law, not the star's toggle.
+#[tauri::command]
+pub async fn shell_bookmark_add(
+    window: tauri::Webview,
+    url: String,
+    state: State<'_, ShellState>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    use crate::shell::omnibox::AddressRequest;
+    let window_name = window_label_of(&window);
+    let added = {
+        let mut inner = state.lock();
+        match crate::shell::omnibox::classify(&url) {
+            AddressRequest::Internal(destination) => {
+                let title = destination.label();
+                inner.bookmarks.add(destination, title)
+            }
+            AddressRequest::Join { host, port } => {
+                let destination = Destination::Join { host, port };
+                let title = destination.label();
+                inner.bookmarks.add(destination, title)
+            }
+            AddressRequest::Query(_) => false,
+        }
+    };
+    sync(&app, &state, &window_name)?;
+    Ok(added)
+}
+
 /// Open a popup overlay for a window: the application-owned menu,
 /// form, or hover card that replaced the NATIVE gray popup. The overlay
 /// is a transparent child webview (the newest child, so it floats above
@@ -1339,6 +1344,7 @@ pub async fn shell_popup(
     x: f64,
     y: f64,
     card: Option<serde_json::Value>,
+    meta: Option<serde_json::Value>,
     state: State<'_, ShellState>,
     app: AppHandle,
 ) -> Result<bool, String> {
@@ -1392,7 +1398,7 @@ pub async fn shell_popup(
     let _ = app.emit_to(
         &label,
         "shell://popup-boot",
-        serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id }),
+        serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id, "meta": meta }),
     );
     let is_card = kind == "hover-card";
     state.lock().popups.insert(
@@ -1402,6 +1408,7 @@ pub async fn shell_popup(
             tab: tab_id,
             group: group_id.map(|g| g as GroupId),
             card: if is_card { card } else { None },
+            meta,
         },
     );
     // Focus follows the popup: Escape and the arrow keys work from the
@@ -1427,14 +1434,24 @@ pub fn shell_popup_boot(
     state: State<'_, ShellState>,
 ) -> Result<serde_json::Value, String> {
     let window_name = window_label_of(&window);
-    let (kind, tab_id, group_id) = {
+    let (kind, tab_id, group_id, meta) = {
         let inner = state.lock();
         match inner.popups.get(&window_name) {
-            Some(popup) => (popup.kind.clone(), popup.tab, popup.group),
-            None => ("unknown".into(), None, None),
+            Some(popup) => (
+                popup.kind.clone(),
+                popup.tab,
+                popup.group,
+                popup.meta.clone(),
+            ),
+            None => ("unknown".into(), None, None, None),
         }
     };
     let mut context = serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id });
+    // The opener's live state (the update lane's phase, app-menu only)
+    // rides verbatim — the host never re-dresses it.
+    if let Some(meta) = meta {
+        context["meta"] = meta;
+    }
     if kind == "hover-card" {
         // The card's content is the frame's dressed payload, relayed
         // verbatim — the host never re-dresses it (one law home).

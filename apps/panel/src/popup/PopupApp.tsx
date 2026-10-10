@@ -71,6 +71,16 @@ interface PopupGroupRef {
   color: number;
 }
 
+/** The opener's live state — the app menu's update item (Chrome's menu
+ *  button badge + "Update Chromium" row ride the same shape). The frame
+ *  passes the update lane's phase at open time; a menu is short-lived,
+ *  so the moment of open is the honest truth it can speak. */
+export interface PopupUpdateMeta {
+  kind: "available" | "downloading" | "ready";
+  version?: string;
+  sentence: string;
+}
+
 interface PopupContext {
   kind: string;
   tab_id: number | null;
@@ -98,6 +108,8 @@ interface PopupContext {
   collapsed?: boolean;
   /** The hover card's dressed display payload (kind "hover-card"). */
   card?: HoverCardPayload;
+  /** The opener's live state (the app menu's update item). */
+  meta?: { update?: PopupUpdateMeta };
 }
 
 const isTauri = (): boolean =>
@@ -595,6 +607,31 @@ export function PopupApp() {
           role="menu"
           onPointerDown={(e) => e.stopPropagation()}
         >
+          {/* The update item — Chrome's own "Update Chromium" shape: the
+            FIRST row of the menu, its verb speaks the lane's phase. A
+            download-in-flight is stated, never clickable (the apply is
+            the restart, and that arrives as `ready`). */}
+          {ctx.meta?.update ? (
+            <MenuItem
+              glyph={
+                ctx.meta.update.kind === "ready" ? <IconReload /> : <IconDownload />
+              }
+              label={
+                ctx.meta.update.kind === "ready"
+                  ? "Restart to update"
+                  : ctx.meta.update.kind === "downloading"
+                    ? "Updating ZIM…"
+                    : `Download ZIM ${ctx.meta.update.version ?? "update"}`
+              }
+              onClick={
+                ctx.meta.update.kind === "ready"
+                  ? () => void run(CMD.UPDATE_RESTART)
+                  : ctx.meta.update.kind === "available"
+                    ? () => void run(CMD.UPDATE_INSTALL)
+                    : undefined
+              }
+            />
+          ) : null}
           <MenuItem
             glyph={<IconPlus />}
             label="New tab"
@@ -705,10 +742,18 @@ function MenuItem({
   label: string;
   hint?: string;
   tick?: boolean;
-  onClick: () => void;
+  /** Undefined = the row states a truth it cannot act on (a download
+   *  in flight owns no verb — the apply is the restart, later). */
+  onClick?: () => void;
 }) {
   return (
-    <button className="menu-item" role="menuitem" onClick={onClick} type="button">
+    <button
+      className="menu-item"
+      role="menuitem"
+      onClick={onClick}
+      type="button"
+      disabled={onClick === undefined}
+    >
       <span className="glyph" aria-hidden>
         {glyph}
       </span>

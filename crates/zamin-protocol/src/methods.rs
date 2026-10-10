@@ -7,6 +7,11 @@ pub const DAEMON_STATUS: &str = "daemon.status";
 /// reading, surfaces as a ping timeout instead of a 10 s reply silence.
 /// The session loop answers inline (never spawned): THAT is the test.
 pub const DAEMON_PING: &str = "daemon.ping";
+/// The one method that ends the daemon (tray Quit's ask): the reply
+/// lands first, then the daemon stops every running server through the
+/// graceful stop ladder and exits the process. The asker keeps a short
+/// reply budget and exits its own process regardless.
+pub const DAEMON_SHUTDOWN: &str = "daemon.shutdown";
 
 pub const SERVER_LIST: &str = "server.list";
 pub const SERVER_GET: &str = "server.get";

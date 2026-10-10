@@ -464,6 +464,69 @@ describe("<PopupApp /> the app menu", () => {
       arg: { destination: { kind: "devtools" } },
     });
   });
+
+  it("the update item rides the opener's meta: ready carries the restart verb", async () => {
+    await renderAppMenu({
+      meta: {
+        update: { kind: "ready", version: "0.5.0", sentence: "ready" },
+      },
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: /Restart to update/ }));
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    expect(invoked.find((c) => c.cmd === "shell_command")?.args).toEqual({
+      id: CMD.UPDATE_RESTART,
+      arg: null,
+    });
+  });
+
+  it("an available update downloads through the menu's first row", async () => {
+    await renderAppMenu({
+      meta: {
+        update: { kind: "available", version: "0.5.0", sentence: "available" },
+      },
+    });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Download ZIM 0\.5\.0/ }),
+    );
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    expect(invoked.find((c) => c.cmd === "shell_command")?.args).toEqual({
+      id: CMD.UPDATE_INSTALL,
+      arg: null,
+    });
+  });
+
+  it("a download in flight is STATED, never clickable (the apply is the restart)", async () => {
+    await renderAppMenu({
+      meta: {
+        update: {
+          kind: "downloading",
+          version: "0.5.0",
+          sentence: "downloading",
+        },
+      },
+    });
+    const row = screen.getByRole("menuitem", { name: /Updating ZIM/ });
+    expect(row.getAttribute("disabled")).not.toBeNull();
+    fireEvent.click(row);
+    expect(
+      invoked.some(
+        (c) =>
+          c.cmd === "shell_command" &&
+          (c.args?.id === CMD.UPDATE_INSTALL || c.args?.id === CMD.UPDATE_RESTART),
+      ),
+    ).toBe(false);
+  });
+
+  it("no meta, no update row — the idle lane stays silent in the menu", async () => {
+    await renderAppMenu();
+    expect(screen.queryByRole("menuitem", { name: /Restart to update/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Updating ZIM/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Download ZIM/ })).toBeNull();
+  });
 });
 
 describe("<PopupApp /> the keyboard contract", () => {

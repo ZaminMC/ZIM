@@ -47,7 +47,7 @@ sustained ingestion ≈ 42k lines/s (burst after a slow-subscriber stall
 Panel budgets are enforced by `apps/panel/perf/budgets.mjs` (`npm run
 perf:budgets`, after `npm run build`): gzip sizes of the built chunks —
 entry ≤ 96 KB, any single chunk ≤ 96 KB, total JS ≤ 184 KB, total CSS
-≤ 21 KB with the entry stylesheet's own line held at ≤ 11 KB. The cold-start payload was cut with code splitting: the entry
+≤ 26 KB with the entry stylesheet's own line held at ≤ 11 KB. The cold-start payload was cut with code splitting: the entry
 chunk went from 147 KB to 68 KB gzip by splitting the console and the
 three operator modals into their own chunks; the console loads when the
 tab first renders, not at boot. The ADR-0019 raise (170 → 184 KB JS,
@@ -92,7 +92,18 @@ batch: its page-specific rules ride their own lazy chunk, and the
 internal pages' chrome (page, heading, notes, evidence rows) was
 factored into one shared lazy stylesheet, `internalPage.module.css`, so
 the next room pays only its own rules. The entry stylesheet's line did
-not move in either raise. Boot progress is
+not move in either raise.
+
+The ADR-0033 raise (21 → 26 KB CSS) is the Chromium tab strip backport:
+the frame's face is no longer homegrown. `frame.css` now paints the
+ported law — GetPath() tab bodies as SVG, the detached-squarcle hover,
+group chips with their underlines, separators with the contrast law,
+the hover card, the popup overlay's menus (tab menu, app menu, group
+editor), the strip's scroll chrome, and the ⋮ update badge — each rule
+citing its upstream home. The raise is the port's honest cost, written
+down here per this file's rule after the backport's commits shipped
+past the 21 KB line unchecked; the entry stylesheet (the boot path's
+CSS) still holds its own ≤ 11 KB line. Boot progress is
 measurable in the running app through the `panel:boot-start` →
 `panel:interactive` performance marks (`performance.measure("panel:cold-start")`),
 recorded from browser smoke runs rather than guessed.
