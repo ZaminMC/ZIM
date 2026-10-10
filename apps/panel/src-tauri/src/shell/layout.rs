@@ -506,20 +506,20 @@ mod tests {
         // cannot compare exactly across the ÷scale — every device-row
         // claim rides a 1e-9 tolerance.
         let device = |logical: f64| logical * 1.25;
-        let (top, bottom) = snap_split(header_height(true), 800.0, 1.25);
+        let (top, bottom) = snap_split(header_height(true) as f64, 800.0, 1.25);
         assert!(
             (device(top) - device(top).round()).abs() < 1e-9,
             "band edge is a device row"
         );
         assert_eq!(device(top).round(), 139.0); // 111 → 138.75 snaps UP, shared
         assert!(
-            (device(top + bottom) - (800.0 * 1.25).round()).abs() < 1e-9,
+            (device(top + bottom) - (800.0f64 * 1.25).round()).abs() < 1e-9,
             "the two spans cover the window's snapped extent exactly"
         );
         assert!(top > 0.0 && bottom > 0.0);
         // 150% half-steps: 83 × 1.5 = 124.5 — one law, either side.
         let (top, bottom) = snap_split(83.0, 600.0, 1.5);
-        assert!((top * 1.5 - (83.0 * 1.5).round()).abs() < 1e-9);
+        assert!((top * 1.5 - (83.0f64 * 1.5).round()).abs() < 1e-9);
         assert!((top + bottom - 600.0).abs() < 1e-9); // 600 × 1.5 / 1.5
                                                       // Unity scale snaps to the constants themselves.
         let (top, bottom) = snap_split(111.0, 800.0, 1.0);

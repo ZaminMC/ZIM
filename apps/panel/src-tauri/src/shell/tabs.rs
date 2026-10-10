@@ -825,45 +825,6 @@ impl Strip {
         Some(new_id)
     }
 
-    /// DetachWebContentsAtForInsertion — the tab leaves the strip as a
-    /// self-contained DetachedTab; another strip or window re-inserts it.
-    pub fn detach(&mut self, id: TabId) -> Option<(Tab, usize)> {
-        let index = self.index_of(id)?;
-        let tab = self.tabs.remove(index);
-        if let Some(group) = tab.group {
-            self.ungroup_all(&[group]);
-        }
-        // The same removal maintenance close() runs — the selection loses
-        // the tab, the neighbor law speaks when the active left.
-        self.selection.remove(&id);
-        if self.active == Some(id) {
-            let next = self
-                .tabs
-                .get(index)
-                .or_else(|| self.tabs.get(index.saturating_sub(1)));
-            match next.map(|t| t.id) {
-                Some(_) if !self.selection.is_empty() => {
-                    let first = *self.selection.iter().next().expect("non-empty above");
-                    self.active = Some(first);
-                    self.anchor = Some(first);
-                }
-                Some(next_id) => {
-                    self.activate(next_id);
-                }
-                None => {
-                    self.active = self.selection.iter().next().copied();
-                    self.anchor = self.active;
-                }
-            }
-        } else if self.anchor == Some(id) {
-            self.anchor = self.active;
-        }
-        if self.tabs.is_empty() {
-            self.append(Destination::New, false);
-        }
-        Some((tab, index))
-    }
-
     /// The drag block — MaybeStartDrag's law at the model boundary: the
     /// tab under the hand carries its whole selection when it stands in
     /// a multi-selection, itself otherwise. The drop verdict
@@ -886,7 +847,7 @@ impl Strip {
     /// law and mint the empty-strip New tab between removals (a block
     /// pulled from a 3-tab strip would leave TWO fresh New tabs). Groups
     /// the moving tabs belonged to die on the source — the same law the
-    /// single [`Strip::detach`] speaks through `ungroup_all`. An emptied
+    /// removal speaks through `ungroup_all`. An emptied
     /// strip gets its fresh New tab, foreground off: the next
     /// activation belongs to the operator, not the model.
     pub fn detach_block(&mut self, ids: &[TabId]) -> Vec<Tab> {
@@ -1528,11 +1489,12 @@ mod tests {
     }
 
     #[test]
-    fn detach_returns_a_reinsertable_tab() {
+    fn detach_block_returns_a_reinsertable_tab() {
         let mut strip = Strip::new();
         let a = strip.append(Destination::Servers, true);
-        let (tab, _index) = strip.detach(a).unwrap();
-        assert_eq!(tab.destination(), &Destination::Servers);
+        let block = strip.detach_block(&[a]);
+        assert_eq!(block.len(), 1);
+        assert_eq!(block[0].destination(), &Destination::Servers);
         assert!(!strip.tabs.is_empty()); // the strip repaired itself
     }
 

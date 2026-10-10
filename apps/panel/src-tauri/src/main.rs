@@ -469,10 +469,8 @@ fn main() {
                     event: tauri::WindowEvent::Destroyed,
                     label,
                     ..
-                } => {
-                    if label != "main" {
-                        drop_wire_window(app, &label);
-                    }
+                } if label != "main" => {
+                    drop_wire_window(app, &label);
                 }
                 _ => {}
             }
