@@ -76,7 +76,9 @@ impl HostState {
 /// Drop one webview's wire — the webview is gone (tab closed, orphan
 /// swept), so its connection and pumps must not outlive it.
 pub fn drop_wire(app: &AppHandle, label: &str) {
-    if let Some(connected) = app.state::<HostState>().lock().remove(label) {
+    let host = app.state::<HostState>();
+    let mut guard = host.lock();
+    if let Some(connected) = guard.remove(label) {
         connected.shutdown();
     }
 }
@@ -87,7 +89,8 @@ pub fn drop_wire(app: &AppHandle, label: &str) {
 pub fn drop_wire_window(app: &AppHandle, window_label: &str) {
     let prefix = format!("tab-{window_label}-");
     let dead: Vec<String> = {
-        let guard = app.state::<HostState>().lock();
+        let host = app.state::<HostState>();
+        let guard = host.lock();
         guard
             .keys()
             .filter(|label| label.starts_with(&prefix))

@@ -827,7 +827,7 @@ impl Strip {
                 .get(index)
                 .or_else(|| self.tabs.get(index.saturating_sub(1)));
             match next.map(|t| t.id) {
-                Some(next_id) if !self.selection.is_empty() => {
+                Some(_) if !self.selection.is_empty() => {
                     let first = *self.selection.iter().next().expect("non-empty above");
                     self.active = Some(first);
                     self.anchor = Some(first);
@@ -1778,7 +1778,7 @@ mod tests {
 
     #[test]
     fn ungroup_frees_every_member_and_dies() {
-        let (mut strip, a, group) = strip_with_group();
+        let (mut strip, _a, group) = strip_with_group();
         let b = strip.append(Destination::Jobs, true);
         strip.group_add(group, b);
         assert!(strip.group_ungroup(group));
@@ -1792,7 +1792,7 @@ mod tests {
     #[test]
     fn group_add_lands_after_the_last_member_and_expands() {
         let (mut strip, a, group) = strip_with_group();
-        let b = strip.append(Destination::Jobs, true);
+        let _b = strip.append(Destination::Jobs, true);
         let c = strip.append(Destination::About, true);
         strip.groups.get_mut(&group).unwrap().collapsed = true;
         strip.group_add(group, c);
