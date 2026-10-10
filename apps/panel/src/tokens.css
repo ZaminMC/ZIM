@@ -134,6 +134,12 @@
      wash bled neighbors through the 18px overlap zone). The squarcle,
      the rail's row hover, and every strip-ground hover consume this. */
   --strip-hover: #ebedf0;
+  /* The multi-selection's fill: the pipeline's next answer — an
+     INACTIVE multi-selected tab paints 75% of the toolbar over the frame
+     (tab_strip_color_mixer.cc's selected law, kDefaultSelectedTabOpacity
+     = 0.75): 0.75 × #ffffff over #dee1e6 = #f7f7f7, OPAQUE (the same
+     overlap-zone law as the hover). */
+  --strip-selected: #f7f7f7;
   --frame-line: rgba(32, 33, 36, 0.16);
   --frame-accent: #1a73e8;
   --frame-accent-soft: rgba(26, 115, 232, 0.1);

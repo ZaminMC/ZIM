@@ -92,6 +92,57 @@ describe("<FrameApp /> against the demo fixture", () => {
     const imgs = container.querySelectorAll("img.favicon-mark.is-img");
     expect(imgs.length).toBeGreaterThan(0);
   });
+
+  it("ctrl+press toggles the selection on and off (Tab::OnMousePressed's ctrl branch)", async () => {
+    const { container } = render(<FrameApp />);
+    await waitFor(() => {
+      expect(container.querySelectorAll("[data-tab]").length).toBeGreaterThan(
+        0,
+      );
+    });
+    // The boot's emit storm settles first — a press inside it races the
+    // hello snapshot, and the law under test is the toggle, not the boot.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // A NON-active tab: the ctrl press adds it to the selection, the
+    // paint wears the selected fill.
+    const tabs = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-tab]"),
+    );
+    const target = tabs.find(
+      (t) =>
+        !t.className.includes("tab-active") &&
+        !t.className.includes("tab-pinned"),
+    );
+    expect(target).toBeTruthy();
+    // jsdom has no PointerEvent — fireEvent.pointerDown degrades to a
+    // bare Event with NO button and NO modifiers. The press the law
+    // needs is a MouseEvent carrying the modifier (the same stand-in
+    // the close button's press pins; React reads the nativeEvent).
+    const press = (el: HTMLElement, ctrl = true) =>
+      el.dispatchEvent(
+        new MouseEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          ctrlKey: ctrl,
+        }),
+      );
+    press(target!);
+    // The demo command lane emits on a macrotask.
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".tab-inactive.tab-selected").length,
+      ).toBe(1);
+    });
+    // The second ctrl press DESELECTS it (the selection had company —
+    // the active never leaves alone).
+    press(target!);
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".tab-inactive.tab-selected").length,
+      ).toBe(0);
+    });
+  });
 });
 
 // -- The hover card's machine -----------------------------------------------

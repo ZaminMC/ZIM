@@ -95,3 +95,57 @@ cited upstream file; `hoverCard.test.ts` does the same for the card (the
 delay law's exact shape, the group card's strings, the anchor clamp). When
 re-porting a newer Chromium, run them first: a red pin means upstream
 changed — read the cited file, then re-derive.
+
+## Task 16 — the tab multi-selection (the selected fill's consumer)
+
+Files ported (chromium/src main, fetched 2026-10-10):
+
+- `ui/base/models/list_selection_model.{h,cc}` — the selection state's
+  shape: selected set + active + anchor, and the mutation verbs
+  (AddIndexToSelection, SetSelectionFromAnchorTo, AddSelectionFromAnchorTo,
+  IncrementFrom/DecrementFrom for insert/remove). ZIM stores the set by
+  STABLE TAB ID, so the index shuffles are structurally unneeded.
+- `chrome/browser/ui/views/tabs/tab.cc` — `Tab::OnMousePressed`'s gesture
+  dispatch, verbatim in behavior: on the PRESS, shift+ctrl →
+  AddSelectionFromAnchorTo; shift → ExtendSelectionTo; ctrl →
+  ToggleSelected (a deselecting ctrl-press refuses to arm a drag —
+  "don't allow dragging non-selected tabs"); plain → SelectTab only when
+  the tab is not already selected.
+- `chrome/browser/ui/views/tabs/browser_tab_strip_controller.cc` —
+  ToggleSelected = selected ? DeselectTabAt : SelectTabAt.
+- `chrome/browser/ui/tabs/tab_strip_model.cc` — SelectTabAt (add +
+  anchor), DeselectTabAt ("one tab must be selected"; the promotion of
+  the FIRST SELECTED when the active or anchor leaves), ExtendSelectionTo
+  (the anchor range REPLACES the selection, active = clicked, anchor
+  stays), AddSelectionFromAnchorTo (the range ADDS, active = clicked),
+  GetIndicesForCommand (a SELECTED context tab commands the whole
+  selection — the scope law behind the menu's close), and the close-side
+  removal maintenance.
+- `chrome/browser/ui/tabs/tab_menu_model.cc` — the close item's plural
+  (IDS_TAB_CXMENU_CLOSETAB, "Close {N,plural, =1 {tab} other {# tabs}}").
+- `chrome/browser/ui/color/paints` — the selected fill:
+  `tab_strip_color_mixer.cc`'s selected law, kDefaultSelectedTabOpacity
+  = 0.75 of the toolbar over the frame → `--strip-selected: #f7f7f7`,
+  OPAQUE (the hover's overlap law applies).
+
+### Documented deltas
+
+- **ctrl-add does not activate.** Current main's `SelectTabAt` also calls
+  `SetActiveTab(clicked)` (tab_strip_model.cc:1567) — the split refactor's
+  detail. The model's own unittests treat Select and Activate as distinct
+  verbs and pin no activation in the selection tests; the classic
+  non-activating toggle stands. FLAGGED for the Windows eyeball pass:
+  compare ctrl+click against installed Chrome and flip the one branch if
+  upstream truly activates.
+- **Split tabs** do not exist in ZIM — every split branch
+  (AppendTabsToSelection of a split's members, split-aware ranges) is
+  structurally absent; `focused_group` (group-focus mode) is likewise
+  out of scope.
+- **Dragging a multi-selection** is not wired yet: upstream arms the
+  drag with the whole selection (`MaybeStartDrag(this, event,
+  original_selection)`) and moves it as a block (MoveSelectedTabsTo).
+  ZIM's modifier presses complete the gesture but never arm a drag; the
+  model's `move_to`/`reorder_drop` still move one tab. The next port.
+- **Selected-hover** renders the same 75% fill (upstream mixes
+  selected-hover at 85% — kHoveredSelectedTabOpacity — unused until the
+  two-opacity law has a consumer that needs the distinction).

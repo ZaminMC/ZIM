@@ -25,7 +25,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, State, WebviewUrl, Window,
@@ -75,6 +75,10 @@ pub struct TabView {
     muted: bool,
     group: Option<GroupId>,
     active: bool,
+    /// Chromium's multi-selection paint: the tab wears the selected fill
+    /// (kDefaultSelectedTabOpacity's consumer — the constant was ported
+    /// with the strip and now has its rule).
+    selected: bool,
     can_back: bool,
     can_forward: bool,
     /// The tab's contents zoom (Chromium's per-contents zoom factor).
@@ -338,6 +342,7 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
             muted: t.muted,
             group: t.group,
             active: strip.active == Some(t.id),
+            selected: strip.selection.contains(&t.id),
             can_back: t.history_index > 0,
             can_forward: t.history_index + 1 < t.history.len(),
             zoom: t.zoom,
@@ -910,7 +915,25 @@ pub async fn shell_command(
                     cmd::CLOSE_TAB => {
                         let target = arg_id.or(strip.active);
                         if let Some(target) = target {
+                            // The close BOX's law: ONE tab — the one under
+                            // the press (TabStrip::CloseTab → delegate
+                            // CloseTab(tab); upstream's box never touches
+                            // the selection). The MENU's close commands
+                            // the whole selection via CLOSE_SELECTED_TABS.
                             strip.close(target);
+                        }
+                    }
+                    cmd::CLOSE_SELECTED_TABS => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            // GetIndicesForCommand's scope law: a SELECTED
+                            // context tab commands the whole selection —
+                            // the menu's "Close N tabs" closes every
+                            // selected tab (tab_strip_model.cc
+                            // CommandCloseTab → ExecuteCloseTabsCommand).
+                            for victim in strip.indices_for_command(target) {
+                                strip.close(victim);
+                            }
                         }
                     }
                     cmd::SELECT_NEXT_TAB => strip.select_next(),
@@ -1010,6 +1033,26 @@ pub async fn shell_command(
                         let target = arg_id.or(strip.active);
                         if let (Some(target), Some(group)) = (target, arg_group) {
                             strip.group_add(group, target);
+                        }
+                    }
+                    // The multi-selection gestures (tab.cc:726-764's
+                    // modifier branches; the model laws live in tabs.rs).
+                    cmd::TOGGLE_TAB_SELECTION => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            strip.toggle_selection(target);
+                        }
+                    }
+                    cmd::EXTEND_TAB_SELECTION => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            strip.extend_selection(target);
+                        }
+                    }
+                    cmd::ADD_SELECTION_FROM_ANCHOR_TO => {
+                        let target = arg_id.or(strip.active);
+                        if let Some(target) = target {
+                            strip.add_selection_from_anchor_to(target);
                         }
                     }
                     cmd::TOGGLE_VERTICAL_STRIP => {
@@ -1423,6 +1466,13 @@ pub fn shell_popup_boot(
                 context["muted"] = serde_json::json!(tab.muted);
                 context["zoom"] = serde_json::json!(tab.zoom);
                 context["grouped"] = serde_json::json!(tab.group);
+                // The close item's plural law: the CONTEXT tab's posture
+                // in the selection decides whether the menu says "Close
+                // tab" or "Close N tabs" (tab_menu_model.cc's
+                // IDS_TAB_CXMENU_CLOSETAB plural — GetIndicesForCommand's
+                // scope is what the command will act through).
+                context["tab_selected"] = serde_json::json!(strip.selection.contains(&tab_id));
+                context["selection_size"] = serde_json::json!(strip.selection.len());
             }
             // "Add to existing group" (tab_menu_model.cc's submenu): the
             // menu carries the strip's groups — id, name, and the color

@@ -143,6 +143,28 @@ describe("<PopupApp /> the tab menu", () => {
     expect(screen.queryByRole("menuitem", { name: /^Pin tab$/ })).toBeNull();
   });
 
+  it("the close item speaks the selection's plural and commands its scope", async () => {
+    // A selected context tab: the menu says "Close N tabs" (tab_menu_model.cc's
+    // IDS_TAB_CXMENU_CLOSETAB plural) and the command rides
+    // CLOSE_SELECTED_TABS — GetIndicesForCommand's whole-selection scope.
+    await renderBooted({ ...TAURI_CONTEXT, tab_selected: true, selection_size: 3 });
+    expect(screen.getByRole("menuitem", { name: /^Close 3 tabs$/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /^Close tab$/ })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Close 3 tabs$/ }));
+    await waitFor(() => {
+      const close = invoked.find(
+        (call) => call.args?.id === CMD.CLOSE_SELECTED_TABS,
+      );
+      expect(close).toBeTruthy();
+      expect(close?.args).toEqual({ id: CMD.CLOSE_SELECTED_TABS, arg: { tab_id: 7 } });
+    });
+    // An unselected context tab keeps the singular and the one-tab verb.
+    cleanup();
+    await renderBooted({ ...TAURI_CONTEXT, tab_selected: false, selection_size: 3 });
+    expect(screen.getByRole("menuitem", { name: /^Close tab$/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /^Close [0-9]/ })).toBeNull();
+  });
+
   it("flips the mute verb with the tab's posture", async () => {
     await renderBooted({ ...TAURI_CONTEXT, muted: true });
     expect(screen.getByRole("menuitem", { name: /Unmute tab/ })).toBeTruthy();

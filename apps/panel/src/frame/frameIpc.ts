@@ -32,6 +32,9 @@ export interface TabView {
   muted: boolean;
   group: number | null;
   active: boolean;
+  /** Chromium's multi-selection: the tab wears the selected fill (the
+   *  ported kDefaultSelectedTabOpacity's consumer). */
+  selected: boolean;
   can_back: boolean;
   can_forward: boolean;
   /** The tab's contents zoom (the host applies it to the webview). */
@@ -360,6 +363,11 @@ const demo = {
   next_id: 5,
   active: 2,
   bar_visible: false,
+  // The multi-selection's demo mirror (tabs.rs's selection + anchor —
+  // the fixture obeys the same command IDs, selection included). The
+  // invariant rides from boot: the ACTIVE tab is always selected.
+  selection: new Set<number>([2]),
+  anchor: 2 as number | null,
   // §54's demo axis: ?demo=vertical boots the rail; the menu verb flips it.
   vertical: new URLSearchParams(window.location.search).get("demo") === "vertical",
   tabs: [
@@ -537,6 +545,7 @@ function demoSnapshot(): Snapshot {
       muted: t.muted,
       group: t.group,
       active: t.id === demo.active,
+      selected: demo.selection.has(t.id),
       can_back: t.can_back,
       can_forward: t.can_forward,
       zoom: t.zoom,
@@ -566,37 +575,54 @@ function demoOnSnapshot(handler: (snap: Snapshot) => void): Promise<Unlisten> {
 function demoCommand(id: number, arg: Record<string, unknown> | null): void {
   const byId = (tid: number) => demo.tabs.find((t) => t.id === tid);
   const indexOfActive = () => demo.tabs.findIndex((t) => t.id === demo.active);
+  // SetSelectedTab — the ONE activation law, mirrored from tabs.rs: the
+  // selection collapses to the tab, the anchor rides with it.
+  const activate = (tid: number) => {
+    demo.active = tid;
+    demo.selection = new Set([tid]);
+    demo.anchor = tid;
+  };
   switch (id) {
     case 34014: { // NEW_TAB
       const tab: DemoTab = { id: demo.next_id++, title: "New tab", address: "zim://new", pinned: false, muted: false, group: null, can_back: false, can_forward: false, zoom: 1 };
       demo.tabs.splice(indexOfActive() + 1, 0, tab);
-      demo.active = tab.id;
+      activate(tab.id);
       break;
     }
-    case 34015: { // CLOSE_TAB
+    case 34015: { // CLOSE_TAB — ONE tab (the close box's law), the
+      // selection loses it, the neighbor law repairs the active.
       const tid = Number(arg?.tab_id ?? demo.active);
       const index = demo.tabs.findIndex((t) => t.id === tid);
       const [gone] = demo.tabs.splice(index, 1);
       if (gone) {
         demo.closed.push(gone);
-        if (demo.active === tid) demo.active = demo.tabs[Math.min(index, demo.tabs.length - 1)]?.id ?? 0;
+        demo.selection.delete(tid);
+        if (demo.active === tid) {
+          demo.active = demo.tabs[Math.min(index, demo.tabs.length - 1)]?.id ?? 0;
+          if (!demo.selection.has(demo.active)) {
+            demo.selection.clear();
+            demo.selection.add(demo.active);
+            demo.anchor = demo.active;
+          }
+        }
+        if (demo.anchor === tid) demo.anchor = demo.active;
       }
       break;
     }
     case 34016: { // SELECT_NEXT
       const next = demo.tabs[(indexOfActive() + 1) % Math.max(demo.tabs.length, 1)];
-      if (next) demo.active = next.id;
+      if (next) activate(next.id);
       break;
     }
     case 34017: { // SELECT_PREVIOUS
       const prev = demo.tabs[(indexOfActive() - 1 + demo.tabs.length) % Math.max(demo.tabs.length, 1)];
-      if (prev) demo.active = prev.id;
+      if (prev) activate(prev.id);
       break;
     }
     case 34018: case 34019: case 34020: case 34021: // SELECT_TAB_0..7
     case 34022: case 34023: case 34024: case 34025: {
       const target = demo.tabs[id - 34018];
-      if (target) demo.active = target.id;
+      if (target) activate(target.id);
       break;
     }
     case 34027: { // DUPLICATE_TAB
@@ -604,7 +630,7 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
       if (source) {
         const copy = { ...source, id: demo.next_id++ };
         demo.tabs.splice(indexOfActive() + 1, 0, copy);
-        demo.active = copy.id;
+        activate(copy.id);
       }
       break;
     }
@@ -612,13 +638,88 @@ function demoCommand(id: number, arg: Record<string, unknown> | null): void {
       const back = demo.closed.pop();
       if (back) {
         demo.tabs.splice(Math.max(indexOfActive(), 0) + 1, 0, back);
-        demo.active = back.id;
+        activate(back.id);
       }
       break;
     }
     case 50001: { // TOGGLE_PINNED
       const tab = byId(Number(arg?.tab_id ?? demo.active));
       if (tab) tab.pinned = !tab.pinned;
+      break;
+    }
+    // -- the multi-selection gestures (the TS mirror of tabs.rs's laws —
+    // Tab::OnMousePressed's ctrl/shift branches) --------------------------
+    case 50034: { // TOGGLE_TAB_SELECTION
+      const tid = Number(arg?.tab_id ?? demo.active);
+      if (demo.selection.has(tid)) {
+        if (demo.selection.size > 1) {
+          demo.selection.delete(tid);
+          if (demo.active === tid) {
+            // The FIRST SELECTED is promoted (DeselectTabAt's law).
+            demo.active = Math.min(...demo.selection);
+          }
+          if (demo.anchor === tid || demo.anchor == null) demo.anchor = demo.active;
+        }
+      } else {
+        demo.selection.add(tid);
+        demo.anchor = tid;
+      }
+      break;
+    }
+    case 50035: { // EXTEND_TAB_SELECTION — the range from the anchor
+      // REPLACES the selection; the active moves, the anchor stays.
+      const tid = Number(arg?.tab_id ?? demo.active);
+      const anchor = demo.anchor ?? tid;
+      const a = demo.tabs.findIndex((t) => t.id === anchor);
+      const b = demo.tabs.findIndex((t) => t.id === tid);
+      if (a >= 0 && b >= 0) {
+        const [s, e] = a <= b ? [a, b] : [b, a];
+        demo.selection = new Set(demo.tabs.slice(s, e + 1).map((t) => t.id));
+        demo.active = tid;
+      }
+      break;
+    }
+    case 50036: { // ADD_SELECTION_FROM_ANCHOR_TO — the range ADDS, the
+      // active moves, the anchor keeps its origin.
+      const tid = Number(arg?.tab_id ?? demo.active);
+      const anchor = demo.anchor ?? tid;
+      const a = demo.tabs.findIndex((t) => t.id === anchor);
+      const b = demo.tabs.findIndex((t) => t.id === tid);
+      if (a >= 0 && b >= 0) {
+        const [s, e] = a <= b ? [a, b] : [b, a];
+        for (const t of demo.tabs.slice(s, e + 1)) demo.selection.add(t.id);
+        demo.active = tid;
+      }
+      break;
+    }
+    case 50037: { // CLOSE_SELECTED_TABS — GetIndicesForCommand's scope:
+      // a selected context tab commands the whole selection.
+      const tid = Number(arg?.tab_id ?? demo.active);
+      const victims = demo.selection.has(tid) ? [...demo.selection] : [tid];
+      for (const victim of victims) {
+        const index = demo.tabs.findIndex((t) => t.id === victim);
+        if (index < 0) continue;
+        const [gone] = demo.tabs.splice(index, 1);
+        if (gone) {
+          demo.closed.push(gone);
+          demo.selection.delete(victim);
+          if (demo.active === victim) {
+            demo.active = demo.tabs[Math.min(index, demo.tabs.length - 1)]?.id ?? 0;
+          }
+        }
+      }
+      if (!demo.selection.has(demo.active) && demo.tabs.length > 0) {
+        // The invariant: the first selected survivor is promoted.
+        if (demo.selection.size > 0) {
+          demo.active = Math.min(...demo.selection);
+        } else {
+          demo.selection.add(demo.active);
+          demo.anchor = demo.active;
+        }
+      }
+      if (demo.anchor != null && !demo.tabs.some((t) => t.id === demo.anchor)) {
+        demo.anchor = demo.active;
+      }
       break;
     }
     case 50005: { // TOGGLE_GROUP_COLLAPSE

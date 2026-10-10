@@ -132,6 +132,15 @@ body {
 .tab-inactive:hover::before {
   opacity: 1;
 }
+/* The multi-selection's paint: an INACTIVE selected tab wears the 75%
+   fill (--strip-selected, the pipeline's selected law) in the same
+   squarcle shape. Hovering it keeps the selected fill — the selected
+   signal outranks the hover's 40% (upstream mixes selected-hover at 85%;
+   the honest delta is documented in PROVENANCE.md). */
+.tab-inactive.tab-selected::before {
+  background: var(--strip-selected);
+  opacity: 1;
+}
 .tab-active {
   color: var(--frame-fg);
   font-weight: 500;

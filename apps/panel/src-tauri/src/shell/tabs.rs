@@ -23,7 +23,7 @@
 // would be hostile).
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub type TabId = u32;
 pub type GroupId = u32;
@@ -257,6 +257,19 @@ pub struct ClosedTab {
 pub struct Strip {
     pub tabs: Vec<Tab>,
     pub active: Option<TabId>,
+    /// Chromium's tab multi-selection — tabs::TabStripModelSelectionState's
+    /// surviving shape (selected set + anchor), stored by STABLE TAB ID so
+    /// moves and inserts never need the IncrementFrom/DecrementFrom index
+    /// shuffles upstream needs. THE INVARIANT (upstream CHECKs it —
+    /// TabStripModelSelectionState::Valid): the ACTIVE tab is always
+    /// selected; an empty selection means no active either.
+    #[serde(default)]
+    pub selection: BTreeSet<TabId>,
+    /// The anchor: the index the extension gestures reach from
+    /// (ui::ListSelectionModel's anchor — "the last item the user clicked
+    /// on"). Empty when nothing is selected.
+    #[serde(default)]
+    pub anchor: Option<TabId>,
     pub groups: HashMap<GroupId, Group>,
     pub next_tab: TabId,
     pub next_group: GroupId,
@@ -287,6 +300,8 @@ impl Strip {
         let mut strip = Strip {
             tabs: Vec::new(),
             active: None,
+            selection: BTreeSet::new(),
+            anchor: None,
             groups: HashMap::new(),
             next_tab: 1,
             next_group: 1,
@@ -295,6 +310,19 @@ impl Strip {
         };
         strip.append(Destination::New, true);
         strip
+    }
+
+    /// TabStripModel::SetSelectedTab — the ONE activation law: the
+    /// selection collapses to the tab and the anchor rides with it
+    /// ("typically there is only one selected item, in which case the
+    /// anchor and active correspond" — list_selection_model.h). Every
+    /// activation path routes through here; the multi-selection gestures
+    /// below are the only writers that bypass it.
+    fn activate(&mut self, id: TabId) {
+        self.active = Some(id);
+        self.selection.clear();
+        self.selection.insert(id);
+        self.anchor = Some(id);
     }
 
     fn index_of(&self, id: TabId) -> Option<usize> {
@@ -330,7 +358,7 @@ impl Strip {
         index = index.max(self.block_edge(false));
         self.tabs.insert(index, Tab::fresh(id, destination, opener));
         if foreground || self.active.is_none() {
-            self.active = Some(id);
+            self.activate(id);
         }
         id
     }
@@ -426,13 +454,113 @@ impl Strip {
         self.move_to(id, index_among_others)
     }
 
-    /// SelectTabAt.
+    /// SelectTabAt — the PLAIN click's law (Tab::OnMousePressed fires it
+    /// only when the tab is not already selected): the selection
+    /// collapses to the one tab, the anchor rides with it.
     pub fn select(&mut self, id: TabId) -> bool {
         if self.index_of(id).is_none() {
             return false;
         }
+        self.activate(id);
+        true
+    }
+
+    /// Tab::OnMousePressed's ctrl branch → BrowserTabStripController::
+    /// ToggleSelected → TabStripModel::{SelectTabAt, DeselectTabAt}.
+    /// ADDING joins the selection and moves the anchor; the ACTIVE stays
+    /// (documented delta: current main's SelectTabAt also SetActiveTabs
+    /// the clicked tab — tab_strip_model.cc:1567, the split refactor's
+    /// detail; the model's own unittests treat Select and Activate as
+    /// distinct verbs and never pin an activation in the selection
+    /// tests, so the classic non-activating toggle stands here, flagged
+    /// for the Windows eyeball pass). REMOVING refuses the last
+    /// selection ("one tab must be selected" — DeselectTabAt) and
+    /// promotes the FIRST SELECTED when the active or anchor leaves.
+    pub fn toggle_selection(&mut self, id: TabId) -> bool {
+        let Some(_index) = self.index_of(id) else {
+            return false;
+        };
+        if self.selection.contains(&id) {
+            if self.selection.len() == 1 {
+                return false;
+            }
+            self.selection.remove(&id);
+            if self.active == Some(id) || self.active.is_none() {
+                let first = *self.selection.iter().next().expect("non-empty above");
+                self.active = Some(first);
+            }
+            if self.anchor.is_none() || self.anchor == Some(id) {
+                self.anchor = self.active;
+            }
+        } else {
+            self.selection.insert(id);
+            self.anchor = Some(id);
+        }
+        true
+    }
+
+    /// TabStripModel::ExtendSelectionTo — the shift branch: the range
+    /// from the anchor REPLACES the selection; the clicked tab becomes
+    /// the active; the anchor stays (the range keeps reaching from the
+    /// same origin while shift-walking).
+    pub fn extend_selection(&mut self, id: TabId) -> bool {
+        if self.index_of(id).is_none() {
+            return false;
+        }
+        let Some(anchor) = self.anchor else {
+            // "If the anchor is empty, this sets the anchor, selection
+            // and active to |index|" (SetSelectionFromAnchorTo's law —
+            // the same answer SetSelectedTab gives).
+            self.activate(id);
+            return true;
+        };
+        let (start, end) = match (self.index_of(anchor), self.index_of(id)) {
+            (Some(a), Some(b)) if a <= b => (a, b),
+            (Some(a), Some(b)) => (b, a),
+            _ => return false,
+        };
+        self.selection.clear();
+        for tab in &self.tabs[start..=end] {
+            self.selection.insert(tab.id);
+        }
         self.active = Some(id);
         true
+    }
+
+    /// TabStripModel::AddSelectionFromAnchorTo — the shift+ctrl branch:
+    /// the range ADDS to the standing selection (the anchor keeps its
+    /// origin — list_selection_model.cc: "this does not change the
+    /// anchor"), the clicked tab becomes the active.
+    pub fn add_selection_from_anchor_to(&mut self, id: TabId) -> bool {
+        if self.index_of(id).is_none() {
+            return false;
+        }
+        let Some(anchor) = self.anchor else {
+            self.activate(id);
+            return true;
+        };
+        let (start, end) = match (self.index_of(anchor), self.index_of(id)) {
+            (Some(a), Some(b)) if a <= b => (a, b),
+            (Some(a), Some(b)) => (b, a),
+            _ => return false,
+        };
+        for tab in &self.tabs[start..=end] {
+            self.selection.insert(tab.id);
+        }
+        self.active = Some(id);
+        true
+    }
+
+    /// TabStripModel::GetIndicesForCommand — the context menu's scope
+    /// law: a SELECTED context tab commands the whole selection, an
+    /// unselected one, itself alone. (Upstream also expands a split;
+    /// ZIM has no splits.)
+    pub fn indices_for_command(&self, id: TabId) -> Vec<TabId> {
+        if self.selection.contains(&id) {
+            self.selection.iter().copied().collect()
+        } else {
+            vec![id]
+        }
     }
 
     /// SelectNextTab (cyclic).
@@ -455,12 +583,12 @@ impl Strip {
             return;
         }
         let next = (index as isize + step).rem_euclid(len) as usize;
-        self.active = Some(self.tabs[next].id);
+        self.activate(self.tabs[next].id);
     }
 
     pub fn select_index(&mut self, index: usize) {
         if let Some(tab) = self.tabs.get(index) {
-            self.active = Some(tab.id);
+            self.activate(tab.id);
         }
     }
 
@@ -486,12 +614,35 @@ impl Strip {
             self.append(Destination::New, true);
             return true;
         }
+        // The removal path's selection maintenance (the close-side law of
+        // TabStripModelSelectionState — RemoveTabFromSelection, then the
+        // FIRST SELECTED is promoted when the active left; the
+        // single-select case empties the set and the neighbor law speaks).
+        self.selection.remove(&id);
         if self.active == Some(id) {
-            let next = self
-                .tabs
-                .get(index)
-                .or_else(|| self.tabs.get(index.saturating_sub(1)));
-            self.active = next.map(|t| t.id);
+            if self.selection.is_empty() {
+                // Single-select: the neighbor to the right, else the one
+                // to the left, and the selection collapses to it.
+                let next = self
+                    .tabs
+                    .get(index)
+                    .or_else(|| self.tabs.get(index.saturating_sub(1)));
+                if let Some(next_id) = next.map(|t| t.id) {
+                    self.activate(next_id);
+                }
+            } else {
+                // Multi-selection: the FIRST SELECTED survivor is
+                // promoted — active and anchor both ride to it, the rest
+                // of the selection survives (upstream's removal law).
+                let first = *self.selection.iter().next().expect("non-empty above");
+                self.active = Some(first);
+                self.anchor = Some(first);
+            }
+        }
+        // The anchor rode the closed tab without the active — the active
+        // replaces it.
+        if self.anchor == Some(id) {
+            self.anchor = self.active;
         }
         true
     }
@@ -525,7 +676,7 @@ impl Strip {
                 zoom: 1.0,
             },
         );
-        self.active = Some(id);
+        self.activate(id);
         true
     }
 
@@ -551,6 +702,9 @@ impl Strip {
             },
         );
         self.active = Some(new_id);
+        self.selection.clear();
+        self.selection.insert(new_id);
+        self.anchor = Some(new_id);
         Some(new_id)
     }
 
@@ -562,12 +716,30 @@ impl Strip {
         if let Some(group) = tab.group {
             self.ungroup_all(&[group]);
         }
+        // The same removal maintenance close() runs — the selection loses
+        // the tab, the neighbor law speaks when the active left.
+        self.selection.remove(&id);
         if self.active == Some(id) {
             let next = self
                 .tabs
                 .get(index)
                 .or_else(|| self.tabs.get(index.saturating_sub(1)));
-            self.active = next.map(|t| t.id);
+            match next.map(|t| t.id) {
+                Some(next_id) if !self.selection.is_empty() => {
+                    let first = *self.selection.iter().next().expect("non-empty above");
+                    self.active = Some(first);
+                    self.anchor = Some(first);
+                }
+                Some(next_id) => {
+                    self.activate(next_id);
+                }
+                None => {
+                    self.active = self.selection.iter().next().copied();
+                    self.anchor = self.active;
+                }
+            }
+        } else if self.anchor == Some(id) {
+            self.anchor = self.active;
         }
         if self.tabs.is_empty() {
             self.append(Destination::New, false);
@@ -721,7 +893,7 @@ impl Strip {
         if let Some(g) = self.groups.get_mut(&group) {
             g.collapsed = false;
         }
-        self.active = Some(id);
+        self.activate(id);
         Some(id)
     }
 
@@ -858,6 +1030,151 @@ mod tests {
         let strip = Strip::new();
         assert_eq!(strip.tabs.len(), 1);
         assert_eq!(strip.tabs[0].destination(), &Destination::New);
+    }
+
+    // -- the multi-selection laws (Tab::OnMousePressed's dispatch, the
+    //    model's SelectTabAt/DeselectTabAt/ExtendSelectionTo/
+    //    AddSelectionFromAnchorTo, and GetIndicesForCommand) ------------
+
+    /// A fresh strip with N foreground tabs; returns the ids in order.
+    fn strip_with(n: usize) -> (Strip, Vec<TabId>) {
+        let mut strip = Strip::new();
+        let mut ids = vec![strip.tabs[0].id];
+        for _ in 1..n {
+            ids.push(strip.append(Destination::New, true));
+        }
+        (strip, ids)
+    }
+
+    #[test]
+    fn the_plain_click_collapses_the_selection_to_the_clicked_tab() {
+        let (mut strip, ids) = strip_with(5);
+        // ctrl-walk: the active gains company.
+        assert!(strip.toggle_selection(ids[2]));
+        assert_eq!(strip.selection.len(), 2); // the active + the toggled
+        // A second ctrl-click on the ACTIVE deselects it — the first
+        // selected is promoted (DeselectTabAt's law, size > 1 branch).
+        assert!(strip.toggle_selection(ids[4]));
+        assert_eq!(strip.selection, BTreeSet::from([ids[2]]));
+        assert_eq!(strip.active, Some(ids[2]));
+        // Ctrl-walk two more in, then the plain click on an unselected
+        // tab collapses everything to it.
+        assert!(strip.toggle_selection(ids[4]));
+        assert!(strip.toggle_selection(ids[1]));
+        assert_eq!(strip.selection.len(), 3);
+        assert!(strip.select(ids[3]));
+        assert_eq!(strip.selection, BTreeSet::from([ids[3]]));
+        assert_eq!(strip.active, Some(ids[3]));
+        assert_eq!(strip.anchor, Some(ids[3]));
+    }
+
+    #[test]
+    fn the_ctrl_click_toggles_without_touching_the_active() {
+        let (mut strip, ids) = strip_with(5);
+        assert_eq!(strip.active, Some(ids[4])); // the last append won
+        assert!(strip.toggle_selection(ids[1]));
+        assert!(strip.toggle_selection(ids[2]));
+        assert_eq!(strip.active, Some(ids[4])); // the active NEVER moved
+        assert_eq!(strip.selection, BTreeSet::from([ids[4], ids[1], ids[2]]));
+        // The anchor rides the last toggled tab (the extension's origin).
+        assert_eq!(strip.anchor, Some(ids[2]));
+    }
+
+    #[test]
+    fn the_ctrl_click_refuses_to_deselect_the_last_tab_standing() {
+        let (mut strip, ids) = strip_with(3);
+        // The active is the only selected tab — DeselectTabAt's law.
+        assert!(!strip.toggle_selection(ids[2]));
+        assert_eq!(strip.selection, BTreeSet::from([ids[2]]));
+        // With company, the active CAN leave — the first selected is
+        // promoted (DeselectTabAt's promotion law).
+        assert!(strip.toggle_selection(ids[0]));
+        assert!(strip.toggle_selection(ids[2]));
+        assert_eq!(strip.active, Some(ids[0]));
+        assert_eq!(strip.selection, BTreeSet::from([ids[0]]));
+    }
+
+    #[test]
+    fn the_shift_click_replaces_the_selection_with_the_anchor_range() {
+        let (mut strip, ids) = strip_with(5);
+        assert_eq!(strip.active, Some(ids[4]));
+        // Shift from the active (the anchor) to an earlier tab.
+        assert!(strip.extend_selection(ids[1]));
+        assert_eq!(
+            strip.selection,
+            BTreeSet::from([ids[4], ids[3], ids[2], ids[1]])
+        );
+        assert_eq!(strip.active, Some(ids[1]));
+        // The anchor NEVER moved — a second shift-walk re-derives the
+        // range from the same origin (ExtendSelectionTo's law).
+        assert_eq!(strip.anchor, Some(ids[4]));
+        assert!(strip.extend_selection(ids[3]));
+        assert_eq!(strip.selection, BTreeSet::from([ids[4], ids[3]]));
+    }
+
+    #[test]
+    fn the_shift_ctrl_click_adds_the_range_to_the_standing_selection() {
+        let (mut strip, ids) = strip_with(6);
+        // The ctrl-click moves the ANCHOR to the clicked tab — the
+        // extension's origin is the last tab the user clicked.
+        assert!(strip.toggle_selection(ids[0]));
+        assert_eq!(strip.anchor, Some(ids[0]));
+        assert!(strip.add_selection_from_anchor_to(ids[3]));
+        // The range 0..3 joins the standing {ids[5]}.
+        assert_eq!(
+            strip.selection,
+            BTreeSet::from([ids[0], ids[1], ids[2], ids[3], ids[5]])
+        );
+        assert_eq!(strip.active, Some(ids[3]));
+        // The anchor kept its origin (AddSelectionFromAnchorTo "does not
+        // change the anchor").
+        assert_eq!(strip.anchor, Some(ids[0]));
+    }
+
+    #[test]
+    fn a_selected_context_tab_commands_the_whole_selection() {
+        let (mut strip, ids) = strip_with(4);
+        assert!(strip.toggle_selection(ids[1]));
+        assert_eq!(
+            strip.indices_for_command(ids[3]),
+            // selected → the whole selection, ascending (BTreeSet order)
+            vec![ids[1], ids[3]]
+        );
+        assert_eq!(strip.indices_for_command(ids[2]), vec![ids[2]]); // unselected → itself
+    }
+
+    #[test]
+    fn closing_the_active_of_a_selection_promotes_the_first_selected() {
+        let (mut strip, ids) = strip_with(5);
+        assert!(strip.toggle_selection(ids[1]));
+        assert!(strip.toggle_selection(ids[2])); // selection {4,1,2}, active 4
+        assert!(strip.close(ids[4])); // the active dies
+        assert_eq!(strip.active, Some(ids[1])); // the FIRST SELECTED survives
+        assert_eq!(strip.selection, BTreeSet::from([ids[1], ids[2]]));
+        assert_eq!(strip.anchor, Some(ids[1]));
+        // The single-select case keeps the neighbor law.
+        let (mut strip, ids) = strip_with(3);
+        assert!(strip.close(ids[2])); // the active, alone in its selection
+        assert_eq!(strip.active, Some(ids[1]));
+        assert_eq!(strip.selection, BTreeSet::from([ids[1]]));
+    }
+
+    #[test]
+    fn the_invariant_survives_every_entry_path() {
+        let (mut strip, _ids) = strip_with(4);
+        // Append/insert/reopen/duplicate each activate — the selection
+        // collapses to the new active every time.
+        let dup = strip.duplicate(strip.tabs[0].id).expect("duplicates");
+        assert_eq!(strip.selection, BTreeSet::from([dup]));
+        strip.select_next();
+        assert_eq!(strip.selection.len(), 1);
+        assert!(strip.selection.contains(&strip.active.expect("a tab")));
+        strip.reopen_closed();
+        assert_eq!(strip.selection.len(), 1);
+        assert!(strip.selection.contains(&strip.active.expect("a tab")));
+        strip.append(Destination::New, true);
+        assert_eq!(strip.selection.len(), 1);
+        assert!(strip.selection.contains(&strip.active.expect("a tab")));
     }
 
     #[test]
@@ -1128,13 +1445,15 @@ mod tests {
         strip.group_add(group, b);
         strip.group_remove(b);
         assert!(strip.groups.contains_key(&group));
-        assert!(strip
-            .tabs
-            .iter()
-            .find(|t| t.id == a)
-            .unwrap()
-            .group
-            .is_some());
+        assert!(
+            strip
+                .tabs
+                .iter()
+                .find(|t| t.id == a)
+                .unwrap()
+                .group
+                .is_some()
+        );
     }
 
     #[test]

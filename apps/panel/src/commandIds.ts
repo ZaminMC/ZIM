@@ -45,4 +45,11 @@ export const CMD = {
   UNGROUP_GROUP: 50027,
   NEW_TAB_IN_GROUP: 50028,
   ADD_TAB_TO_EXISTING_GROUP: 50029,
+  // The multi-selection gestures (Tab::OnMousePressed's modifier
+  // branches, tab.cc:726-764) and the tab menu's selection-scoped close
+  // (GetIndicesForCommand's law).
+  TOGGLE_TAB_SELECTION: 50034,
+  EXTEND_TAB_SELECTION: 50035,
+  ADD_SELECTION_FROM_ANCHOR_TO: 50036,
+  CLOSE_SELECTED_TABS: 50037,
 } as const;

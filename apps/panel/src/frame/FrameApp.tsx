@@ -239,6 +239,10 @@ export function FrameApp() {
   // When a drag session released: its pointerup also dispatches a click,
   // and the release must never select the tab it just dragged.
   const dragJustEnded = useRef(0);
+  // A modifier press's timestamp — the click that follows a selection
+  // gesture is the gesture's own release, never a select (the snapshot
+  // the click handler reads can still be stale when the click lands).
+  const gesturePressAt = useRef(0);
   // The demo menu's inline group naming (the popup overlay's form in the
   // real shell; the demo has no popup host).
   const [demoGroupFor, setDemoGroupFor] = useState<number | null>(null);
@@ -536,11 +540,35 @@ export function FrameApp() {
   // the host reorders — or tears off when the pointer left the window.
   const startDragSession = useCallback(
     (event: React.PointerEvent, tabId: number) => {
-      if (event.button !== 0) return;
+      // jsdom's synthesized press arrives without a button — the honest
+      // guard rides it as the primary branch (the same law the close
+      // button's press runs; a REAL press always carries one).
+      const pressed = event.button as number | undefined;
+      if (pressed != null && pressed !== 0) return;
       // A press on the close button never arms a drag — upstream's
       // MaybeStartDrag refuses non-tab presses; the click belongs to the
       // button and nothing may retarget it.
       if ((event.target as HTMLElement | null)?.closest(".tab-close")) return;
+      // Tab::OnMousePressed's modifier branches (tab.cc:726-764): the
+      // selection gestures fire on the PRESS, in the law's own order —
+      // shift+ctrl > shift > ctrl. A modifier press never arms the drag
+      // this wave: dragging a multi-selection is MoveSelectedTabsTo's
+      // law, the model's next port (documented in PROVENANCE.md).
+      if (event.shiftKey && (event.ctrlKey || event.metaKey)) {
+        gesturePressAt.current = performance.now();
+        void shellCommand(CMD.ADD_SELECTION_FROM_ANCHOR_TO, { tab_id: tabId });
+        return;
+      }
+      if (event.shiftKey) {
+        gesturePressAt.current = performance.now();
+        void shellCommand(CMD.EXTEND_TAB_SELECTION, { tab_id: tabId });
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) {
+        gesturePressAt.current = performance.now();
+        void shellCommand(CMD.TOGGLE_TAB_SELECTION, { tab_id: tabId });
+        return;
+      }
       const element = event.currentTarget as HTMLElement;
       const pointerId = event.pointerId;
       const startX = event.clientX;
@@ -1312,6 +1340,11 @@ export function FrameApp() {
                   className={[
                     "tab",
                     tab.active ? "tab-active" : "tab-inactive",
+                    // The multi-selection's paint: the selected fill (the
+                    // ported kDefaultSelectedTabOpacity) — the active tab
+                    // wears its own body, so the fill is the other tabs'
+                    // signal.
+                    tab.selected && !tab.active ? "tab-selected" : "",
                     slot.pinned ? "tab-pinned" : "",
                     tight ? "tab-tight" : "",
                     dragging ? "tab-dragging tab-dragging-live" : "",
@@ -1378,7 +1411,15 @@ export function FrameApp() {
                     // A drag session's release also dispatches a click —
                     // the just-ended drag never selects.
                     if (performance.now() - dragJustEnded.current < 200) return;
-                    selectTab(tab.id);
+                    // A modifier press's click is the gesture's own
+                    // release — never a select.
+                    if (performance.now() - gesturePressAt.current < 400)
+                      return;
+                    // Tab::OnMousePressed's plain branch fires SelectTab
+                    // ONLY when the tab is not already selected — the
+                    // plain click on a selected tab keeps the selection
+                    // (that's what makes the drag-together usable).
+                    if (!tab.selected) selectTab(tab.id);
                   }}
                   onAuxClick={(e) => {
                     if (e.button === 1) {
@@ -1709,6 +1750,27 @@ export function FrameApp() {
             >
               Duplicate
             </button>
+            {(() => {
+              // The close item's plural law (the demo stand-in for the
+              // popup's IDS_TAB_CXMENU_CLOSETAB plural): a selected
+              // context tab commands the whole selection.
+              const context = snap.tabs.find((t) => t.id === menu.tab);
+              const size = snap.tabs.filter((t) => t.selected).length;
+              const plural = context?.selected && size > 1;
+              return (
+                <button
+                  onClick={() => {
+                    void shellCommand(
+                      plural ? CMD.CLOSE_SELECTED_TABS : CMD.CLOSE_TAB,
+                      { tab_id: menu.tab },
+                    );
+                    setMenu(null);
+                  }}
+                >
+                  {plural ? `Close ${size} tabs` : "Close tab"}
+                </button>
+              );
+            })()}
             {demoGroupFor === menu.tab ? (
               <input
                 className="context-group-input"

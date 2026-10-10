@@ -78,6 +78,18 @@ pub const NEW_TAB_IN_GROUP: u32 = 50028;
 /// ⓩ Local: the tab menu's "Add to existing group" item, one per group.
 pub const ADD_TAB_TO_EXISTING_GROUP: u32 = 50029;
 
+/// ⓩ Local: the multi-selection gestures (Tab::OnMousePressed's
+/// modifier branches — tab.cc:726-764 — routed through the command lane
+/// because the frame webview holds no model). The dispatch order is the
+/// press law's own: shift+ctrl > shift > ctrl.
+pub const TOGGLE_TAB_SELECTION: u32 = 50034;
+pub const EXTEND_TAB_SELECTION: u32 = 50035;
+pub const ADD_SELECTION_FROM_ANCHOR_TO: u32 = 50036;
+/// ⓩ Local: the tab MENU's close — the selection's scope law
+/// (GetIndicesForCommand) decides whether one tab or every selected tab
+/// dies; the close BOX stays CLOSE_TAB (one tab, never the selection).
+pub const CLOSE_SELECTED_TABS: u32 = 50037;
+
 /// Window-control verbs for the frame's caption buttons — no upstream
 /// command IDs (Views owns them natively); ZIM-local numbering.
 pub const WINDOW_MINIMIZE: u32 = 50010;

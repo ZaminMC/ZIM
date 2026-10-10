@@ -86,6 +86,12 @@ interface PopupContext {
   grouped?: number | null;
   /** The strip's groups — the "Add to existing group" submenu's rows. */
   groups?: PopupGroupRef[];
+  /** The close item's plural law (IDS_TAB_CXMENU_CLOSETAB): whether the
+   *  context tab is in the selection and how wide it stands — the menu
+   *  says "Close N tabs" for a selected context tab, and the command
+   *  rides CLOSE_SELECTED_TABS (GetIndicesForCommand's scope). */
+  tab_selected?: boolean;
+  selection_size?: number;
   /** The group editor's subject. */
   label?: string;
   color?: number;
@@ -556,8 +562,20 @@ export function PopupApp() {
           <div className="menu-sep" />
           <MenuItem
             glyph={<IconClose />}
-            label="Close tab"
-            onClick={() => void run(CMD.CLOSE_TAB, { tab_id: ctx.tab_id })}
+            label={
+              // The plural law: a selected context tab commands the whole
+              // selection (tab_menu_model.cc's IDS_TAB_CXMENU_CLOSETAB —
+              // "Close {NUM_TABS,plural, =1 {tab} other {# tabs}}").
+              ctx.tab_selected && (ctx.selection_size ?? 1) > 1
+                ? `Close ${ctx.selection_size} tabs`
+                : "Close tab"
+            }
+            onClick={() =>
+              void run(
+                ctx.tab_selected ? CMD.CLOSE_SELECTED_TABS : CMD.CLOSE_TAB,
+                { tab_id: ctx.tab_id },
+              )
+            }
           />
           <MenuItem
             glyph={null}
