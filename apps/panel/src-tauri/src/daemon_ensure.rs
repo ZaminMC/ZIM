@@ -182,7 +182,10 @@ fn kill_stale_daemons() {
             let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else {
                 continue; // another user's, or already gone
             };
-            if exe.file_name().is_some_and(|n| n == name) {
+            if exe
+                .file_name()
+                .is_some_and(|n| n == std::ffi::OsStr::new(name.as_str()))
+            {
                 unsafe {
                     libc::kill(pid, libc::SIGKILL);
                 }
