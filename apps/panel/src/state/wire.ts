@@ -117,7 +117,29 @@ function notifyJob(jobId: string, outcome: JobOutcomeName): void {
   );
 }
 
+/** Wait until the ProtocolClient has a live transport before registering
+ * the long-lived events subscription. `startWire()` used to call
+ * `wireEvents()` immediately beside `connect()`. On a cold launch the
+ * subscription won the race, saw no transport, failed once, and was never
+ * registered again — the UI could show a daemon that eventually became
+ * ready while server discovery/events stayed dead. The status lane is the
+ * existing reconnect authority, so wait for READY instead of inventing a
+ * second retry loop. */
+async function waitForReady(): Promise<void> {
+  if (useConnection.getState().status === "ready") return;
+  await new Promise<void>((resolve) => {
+    let off: (() => void) | undefined;
+    off = client.onStatus((status) => {
+      if (status !== "ready") return;
+      off?.();
+      resolve();
+    });
+  });
+}
+
 async function wireEvents(): Promise<void> {
+  await waitForReady();
+  if (!started) return;
   await client.subscribe("events", undefined, {
     onPayload: (notification) => {
       if (notification.payload.kind !== "event") return;
