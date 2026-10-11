@@ -18,7 +18,7 @@
 // canonical properties form when written — the compose pipeline's own
 // convention since §33.
 
-import { type PropertyLine } from "./properties";
+import { renderPair, type PropertyLine } from "./properties";
 
 /** The layout a file's rows speak. `undetectable` means the rows do not
  *  name a scoreboard at all (no title pair, no row keys) — the registry
@@ -171,10 +171,21 @@ export function writeScoreboardRows(
     const insertAt = next.findIndex(
       (line) => line.kind === "pair" && line.key === lastKeptKey,
     );
+    // The file's own line ending: an addition joins the convention the
+    // kept lines already speak (a CRLF file stays uniformly CRLF — an
+    // LF-ended insertion would fork the file's endings), and the raw
+    // renders through renderPair so escapes and structural characters
+    // in the value survive the re-parse the round-trip law demands.
+    const cr = next.some((line) => line.raw.endsWith("\r")) ? "\r" : "";
     const additions = gained.map((row) => {
       highest += 1;
       const key = nextRowKey(highest, next);
-      const line: PropertyLine = { kind: "pair", raw: `${key}=${row.value}`, key, value: row.value };
+      const line: PropertyLine = {
+        kind: "pair",
+        raw: renderPair(key, row.value, cr),
+        key,
+        value: row.value,
+      };
       return line;
     });
     const at = insertAt === -1 ? next.length : insertAt + 1;

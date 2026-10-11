@@ -128,6 +128,35 @@ describe("writeScoreboardRows (indexed)", () => {
     ]);
     expect(serializeProperties(after)).toBe("title=T\nline.1=A\nline.5=E\nline.6=F\n");
   });
+
+  it("a gained row in a CRLF file keeps the file's ending — the additions never fork it", () => {
+    const before = parseProperties("title=T\r\nline.1=A\r\n");
+    const spec = readScoreboard(before)!;
+    const after = writeScoreboardRows(before, spec, [
+      ...spec.rows,
+      { key: null, value: "B" },
+    ]);
+    // Every line — the kept pairs byte-stable, the addition included —
+    // ends CRLF: the file stays uniformly what it was. (The old addition
+    // path built its raw without the CR, forking the endings.)
+    expect(serializeProperties(after)).toBe("title=T\r\nline.1=A\r\nline.2=B\r\n");
+  });
+
+  it("a gained row's value escapes its structural characters — the round-trip law holds on the raw it lands with", () => {
+    const before = parseProperties("title=T\nline.1=A\n");
+    const spec = readScoreboard(before)!;
+    const after = writeScoreboardRows(before, spec, [
+      ...spec.rows,
+      // Leading spaces are the separator's own whitespace to the parser
+      // unless escaped; a value that begins with one must survive the
+      // re-read with its leading space intact.
+      { key: null, value: "  spaced : value" },
+    ]);
+    expect(serializeProperties(after)).toBe("title=T\nline.1=A\nline.2=\\ \\ spaced \\: value\n");
+    // And the written file re-reads to the same rows the editor held.
+    const reread = readScoreboard(parseProperties(serializeProperties(after)))!;
+    expect(reread.rows.map((row) => row.value)).toEqual(["A", "  spaced : value"]);
+  });
 });
 
 describe("writeScoreboardRows (single)", () => {

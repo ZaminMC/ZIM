@@ -188,9 +188,19 @@ export function serializeProperties(lines: PropertyLine[]): string {
         if (asWritten.key === key && asWritten.value === value) return line.raw;
       }
       const cr = line.raw.endsWith("\r") ? "\r" : "";
-      return `${encodeKey(key)}=${encodeValue(value)}${cr}`;
+      return renderPair(key, value, cr);
     })
     .join("\n");
+}
+
+/** The canonical rendering of a pair — key and value escaped per the
+ *  wire format, with the caller's line ending. serialize's re-render
+ *  path and the ADD lanes (scoreboard rows, and any future compose
+ *  add-pair) build their raw here, so a new line is exactly what a
+ *  re-parse would decode back: escapes survive, and a CRLF file's
+ *  additions keep the file's own ending instead of forking it. */
+export function renderPair(key: string, value: string, cr: string): string {
+  return `${encodeKey(key)}=${encodeValue(value)}${cr}`;
 }
 
 /** An immutable edit: the pair named `key` gets `value`; everything
