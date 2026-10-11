@@ -72,6 +72,11 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0200;
 const CREATE_SUSPENDED: u32 = 0x0000_0040;
 const EXTENDED_STARTUPINFO: u32 = 0x0008_0000; // EXTENDED_STARTUPINFO_PRESENT (winbase.h)
+/// The environment block is UTF-16 (`environment_block` widens it); without
+/// this flag CreateProcessW reads those bytes as ANSI — every entry
+/// collapses to one character before its high byte, the loader's own env
+/// lookups fail, and the spawn dies with ERROR_ENVVAR_NOT_FOUND (203).
+const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
 
 /// Job-object message codes (winbase.h): the watcher translates ONLY
 /// refusals the OS actually posted — everything else is ignored, and no
@@ -710,7 +715,11 @@ pub fn spawn_appcontainer(
             std::ptr::null(),
             std::ptr::null(),
             1,
-            CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED | EXTENDED_STARTUPINFO,
+            CREATE_NO_WINDOW
+                | CREATE_NEW_PROCESS_GROUP
+                | CREATE_SUSPENDED
+                | CREATE_UNICODE_ENVIRONMENT
+                | EXTENDED_STARTUPINFO,
             env_block.as_ptr() as *const c_void,
             workdir_w.as_ptr(),
             &startup as *const STARTUPINFOEXW
