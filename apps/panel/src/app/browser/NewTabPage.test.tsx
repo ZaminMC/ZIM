@@ -302,3 +302,26 @@ describe("the machine section's open verb", () => {
     expect(activeDestination()).toEqual({ kind: "new" });
   });
 });
+
+describe("the registered row's opening action", () => {
+  beforeEach(() =>
+    resetStores([
+      entryOf({ serverId: "survival", displayName: "survival", state: "stopped", port: 25565 }),
+    ]),
+  );
+
+  it("clicking a registered row with a port opens that server", () => {
+    render(<NewTabPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Open survival" }));
+    const tab = useTabs.getState().tabs.find((t) => t.id === "t1");
+    expect(tab?.history[tab.historyIndex]).toEqual({ kind: "server", serverId: "survival" });
+  });
+
+  it("clicking a portless registered row opens the server page too", () => {
+    resetStores([entryOf({ serverId: "gamma", displayName: "Gamma", state: "stopped" })]);
+    render(<NewTabPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Gamma" }));
+    const tab = useTabs.getState().tabs.find((t) => t.id === "t1");
+    expect(tab?.history[tab.historyIndex]).toEqual({ kind: "server", serverId: "gamma" });
+  });
+});

@@ -242,6 +242,18 @@ export function joinAddress(entry: ServerEntry, host: string): string {
   return `${host}:${entry.port}`;
 }
 
+/** The omnibox's DISPLAY law (Chrome's elision): a join tab rests at
+ *  `zim://join/{host}:{port}`, but the operator thinks in `{host}:{port}`
+ *  — the bar shows the address they would type, not the scheme, the way
+ *  Chrome hides `https://www.`. Internal pages keep their zim:// spelling
+ *  (chrome://settings shows its scheme too). Display-only: the shown
+ *  string must re-commit to the same destination — parseAddressInput of a
+ *  bare `host:port` IS the join dialect, so the round-trip holds. */
+export function displayAddress(url: string): string {
+  const prefix = "zim://join/";
+  return url.startsWith(prefix) ? url.slice(prefix.length) : url;
+}
+
 /** Where this window reaches a managed server's host part, from the
  *  active connection: local → localhost; remote → the agent's host. */
 export function hostHint(connection: { local: boolean; remoteAddr?: string }): string {

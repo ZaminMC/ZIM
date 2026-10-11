@@ -26,18 +26,21 @@ const ACTIVE_STATES = new Set(["running", "starting", "adopting"]);
 
 /** The one address-commit path for the new tab's input (§22): the same
  *  dialects the frame omnibox speaks. The host's model stays the single
- *  authority for identity — this lands navigation through the tab lane. */
+ *  authority for identity — this lands navigation through the tab lane,
+ *  and its acceptance rides back so a refused navigation gets words,
+ *  never the silence that read as "clicking survival does nothing". */
 function commitAddress(text: string, entries: ServerEntry[], host: string) {
   const request = parseAddressInput(text);
   switch (request.kind) {
     case "internal":
       useTabs.getState().navigate(request.destination);
-      return { kind: "navigated" } as const;
+      return { kind: "navigated", lane: null } as const;
     case "join": {
       const hit = resolveJoin(request, entries, host);
-      if (!hit) return { kind: "join-miss", port: request.port } as const;
-      useTabs.getState().navigate({ kind: "server", serverId: hit.serverId });
-      return { kind: "navigated" } as const;
+      if (!hit)
+        return { kind: "join-miss", port: request.port, host: request.host } as const;
+      const lane = useTabs.getState().navigate({ kind: "server", serverId: hit.serverId });
+      return { kind: "navigated", lane } as const;
     }
     case "query":
       useTabs.getState().newTab(request.text);
@@ -76,6 +79,24 @@ export function NewTabPage() {
   // managed server (register with the folder's slug) and opens its tab;
   // a refusal is a typed note, never a fake navigation.
   const [openNote, setOpenNote] = useState<string | null>(null);
+  const openRegistered = async (server: ServerEntry): Promise<void> => {
+    const outcome = commitAddress(
+      server.port ? joinAddress(server, host) : `zim://server/${server.serverId}`,
+      entries,
+      host,
+    );
+    if (outcome.kind === "join-miss") {
+      setOpenNote(
+        `Nothing in this window answers ${outcome.host ?? host}:${outcome.port} — the server's port may have changed. Type its new address, or re-register it.`,
+      );
+      return;
+    }
+    if (outcome.lane && !(await outcome.lane)) {
+      setOpenNote(
+        "ZIM's shell refused the navigation on both lanes — the window may need a restart.",
+      );
+    }
+  };
   const openCandidate = async (candidate: DiscoveredServer) => {
     if (candidate.kind !== "directory") {
       setOpenNote(
@@ -156,15 +177,7 @@ export function NewTabPage() {
               <li key={server.serverId}>
                 <button
                   className={styles.row}
-                  onClick={() =>
-                    commitAddress(
-                      server.port
-                        ? joinAddress(server, host)
-                        : `zim://server/${server.serverId}`,
-                      entries,
-                      host,
-                    )
-                  }
+                  onClick={() => void openRegistered(server)}
                   aria-label={`Open ${server.displayName}`}
                 >
                   <StatusDot state={server.state} />

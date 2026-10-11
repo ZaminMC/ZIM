@@ -137,7 +137,7 @@ interface TabsState {
   recentlyClosed: ClosedTab[];
   groups: Record<GroupId, TabGroup>;
 
-  navigate: (destination: Destination) => void;
+  navigate: (destination: Destination) => Promise<boolean>;
   newTab: (query?: string) => void;
   openInNewTab: (destination: Destination) => void;
   back: () => void;
@@ -180,11 +180,12 @@ export const useTabs = create<TabsState>()((set) => ({
   // §61 singleton identity on the host; the local mirror follows so the
   // content selectors stay coherent.
   navigate: (destination) => {
-    if (onHost()) {
-      // The host is told "navigate the tab that's calling" through its
-      // own lane; the store mirror does the plain append.
-      void navigateHost(destination);
-    }
+    // The host lane answers whether the shell ACCEPTED the navigation;
+    // the caller owes the operator words when both lanes refuse — the
+    // store's mirror below is the dev bridge's honest local follow.
+    const lane: Promise<boolean> = onHost()
+      ? navigateHost(destination)
+      : Promise.resolve(true);
     set((s) => {
       // Singleton identity locally (dev bridge); the host repeats it
       // authoritatively — same rule, two layers.
@@ -206,6 +207,7 @@ export const useTabs = create<TabsState>()((set) => ({
         discoveryQuery: null,
       };
     });
+    return lane;
   },
 
   newTab: (query) => {

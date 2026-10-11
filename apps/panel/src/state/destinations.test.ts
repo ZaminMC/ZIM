@@ -15,6 +15,7 @@ import {
   joinAddress,
   parseAddressInput,
   parseJoinTail,
+  displayAddress,
   resolveJoin,
   restingAddress,
   searchServers,
@@ -437,6 +438,32 @@ describe("the evidence pages (§58/§72/§73, ADR-0026)", () => {
     expect(parseAddressInput("zim://marketplace/")).toEqual({
       kind: "internal",
       destination: { kind: "missing", url: "zim://marketplace/" },
+    });
+  });
+});
+
+describe("displayAddress", () => {
+  it("shows a join tab as the bare address the operator would type", () => {
+    expect(displayAddress("zim://join/localhost:25565")).toBe("localhost:25565");
+    expect(displayAddress("zim://join/box.example.com:25565")).toBe("box.example.com:25565");
+    expect(displayAddress("zim://join/10.0.0.7:25575")).toBe("10.0.0.7:25575");
+  });
+
+  it("keeps internal pages' scheme and leaves non-zim strings alone", () => {
+    expect(displayAddress("zim://server/survival")).toBe("zim://server/survival");
+    expect(displayAddress("zim://new")).toBe("zim://new");
+    expect(displayAddress("")).toBe("");
+    expect(displayAddress("localhost:25565")).toBe("localhost:25565");
+  });
+
+  it("the shown address re-commits to the same tab (display round-trips)", () => {
+    // The elision is display-only: what the bar shows must parse back to
+    // the same destination, or editing the address would land elsewhere.
+    const shown = displayAddress("zim://join/localhost:25565");
+    expect(parseAddressInput(shown)).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25565,
     });
   });
 });

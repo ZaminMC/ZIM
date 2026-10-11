@@ -79,6 +79,7 @@ import {
 import { HoverCard } from "../ui/chromium/hoverCardView";
 import { seedFaviconsForDemo, startFaviconLane, useFavicons, fleetBrief, fleetHost } from "./favicon";
 import { FAVICON_DOT_COLORS, SOFTWARE_GLYPHS, faviconDot } from "./faviconLaw";
+import { displayAddress } from "../state/destinations";
 import { softwareMark } from "./softwareMarks";
 import { useFaviconDots } from "../state/faviconPrefs";
 import {
@@ -1795,7 +1796,7 @@ export function FrameApp() {
             <input
               ref={omniboxRef}
               className="omnibox"
-              value={omniboxText ?? snap.address}
+              value={omniboxText ?? displayAddress(snap.address)}
               spellCheck={false}
               placeholder="Search servers, or type an address"
               onChange={(e) => {

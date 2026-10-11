@@ -5,10 +5,15 @@ import type { Destination } from "./destinations";
 
 const NAVIGATE_ACTIVE = 50004;
 
-export async function navigateHost(destination: Destination): Promise<void> {
-  if (!("__TAURI_INTERNALS__" in window)) return; // dev bridge: local only
+/** True when the host accepted the navigation; false when every lane
+ *  refused — the caller owes the operator words, never silence (a card
+ *  that does "absolutely nothing" on click is the bug this return exists
+ *  to kill). The dev bridge navigates locally and reports true. */
+export async function navigateHost(destination: Destination): Promise<boolean> {
+  if (!("__TAURI_INTERNALS__" in window)) return true; // dev bridge: local only
   try {
     await invokeHost("shell_tab_navigate", { destination });
+    return true;
   } catch (firstError) {
     // The normal path is tab-identity addressed (`shell_tab_navigate`).
     // Keep a host-side active-tab fallback for content webviews that race
@@ -21,10 +26,12 @@ export async function navigateHost(destination: Destination): Promise<void> {
         id: NAVIGATE_ACTIVE,
         arg: { destination },
       });
+      return true;
     } catch (fallbackError) {
       if (import.meta.env.DEV) {
         console.warn("ZIM navigation failed", { firstError, fallbackError });
       }
+      return false;
     }
   }
 }
