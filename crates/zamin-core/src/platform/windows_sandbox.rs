@@ -344,7 +344,11 @@ fn add_loopback_exemption(sid_string: &str) {
     // never got their loopback exemption.
     run_briefly(
         "checknetisolation",
-        &["loopbackexempt".to_owned(), "-a".to_owned(), format!("-p={sid_string}")],
+        &[
+            "loopbackexempt".to_owned(),
+            "-a".to_owned(),
+            format!("-p={sid_string}"),
+        ],
         3,
     );
 }
@@ -352,7 +356,11 @@ fn add_loopback_exemption(sid_string: &str) {
 pub fn remove_loopback_exemption(sid_string: &str) {
     run_briefly(
         "checknetisolation",
-        &["loopbackexempt".to_owned(), "-d".to_owned(), format!("-p={sid_string}")],
+        &[
+            "loopbackexempt".to_owned(),
+            "-d".to_owned(),
+            format!("-p={sid_string}"),
+        ],
         3,
     );
 }
@@ -366,7 +374,11 @@ pub fn remove_loopback_exemption(sid_string: &str) {
 fn enable_loopback_inbound(sid_string: &str) {
     run_briefly(
         "checknetisolation",
-        &["loopbackexempt".to_owned(), "-is".to_owned(), format!("-p={sid_string}")],
+        &[
+            "loopbackexempt".to_owned(),
+            "-is".to_owned(),
+            format!("-p={sid_string}"),
+        ],
         3,
     );
 }
