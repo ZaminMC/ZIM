@@ -115,3 +115,7 @@ Ok "uninstall removes exactly what install added"
 
 Remove-Item -Recurse -Force $Prefix -ErrorAction SilentlyContinue
 Write-Output "test-install-windows: ALL PASS"
+# The uninstall checks end on a schtasks query whose non-zero $LASTEXITCODE
+# is the PASSING answer (the task must be gone); the runner's pwsh shim
+# propagates that as the process exit code. Declare success explicitly.
+exit 0

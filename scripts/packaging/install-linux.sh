@@ -209,8 +209,9 @@ if [ "$action" = "uninstall" ]; then
             rm -f "${CONFIG}/systemd/user/$unit"
     done
     service_systemctl daemon-reload 2>/dev/null || true
-    command -v update-desktop-database >/dev/null 2>&1 &&
+    if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "${DATA}/applications" 2>/dev/null || true
+    fi
     info "uninstalled from ${prefix} and ${DATA} (daemon data was not touched)"
     exit 0
 fi
@@ -242,10 +243,12 @@ if [ -d "${payload}/share/icons/hicolor" ]; then
 fi
 
 # Best-effort cache refreshes (absent tools or headless boxes are fine).
-command -v update-desktop-database >/dev/null 2>&1 &&
+if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${DATA}/applications" 2>/dev/null || true
-command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -t -f "${DATA}/icons/hicolor" 2>/dev/null || true
+fi
 
 info "installed: ${prefix}/bin/{zim,zamind,zamin,zaminagent}"
 info "desktop:   ${DATA}/applications/${APP}.desktop"
