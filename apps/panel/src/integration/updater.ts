@@ -136,6 +136,18 @@ export function realUpdateBackend(): Promise<UpdateBackend | null> {
         return { ok: false, message: "No update is pending — check for updates first." };
       }
       try {
+        // THE DAEMON STEP: the installer replaces zamind.exe, and a running
+        // daemon holds that file — the installer died mid-apply with
+        // "Error opening file for writing" (the founder's own screenshot).
+        // The host's tray Quit ladder (graceful ask → bounded wait → force
+        // kill) runs first, so the installer meets a stopped daemon. A dead
+        // or unreachable daemon is the goal state anyway — never an error.
+        try {
+          const core = await import("@tauri-apps/api/core");
+          await core.invoke("daemon_shutdown");
+        } catch {
+          // The daemon is already gone (or never ran) — proceed.
+        }
         // Windows: the plugin spawns the signed installer (passive), which
         // uninstalls the current build, installs the new one, relaunches,
         // and then ends this process — the promise below never resolves.

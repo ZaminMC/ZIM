@@ -258,6 +258,18 @@ async fn daemon_ensure() -> Result<String, String> {
     daemon_ensure::ensure_daemon().await
 }
 
+/// The update apply's daemon half: stop zamind BEFORE the installer runs.
+/// The NSIS bundle writes zamind.exe into the install dir, and a running
+/// daemon holds that file — the installer dies with "Error opening file
+/// for writing" mid-apply (the founder's own screenshot). The tray Quit's
+/// ladder — graceful ask, bounded wait, force kill, settle — is the ONE
+/// shutdown law; the update path rides it instead of inventing a fourth.
+#[tauri::command]
+async fn daemon_shutdown() -> Result<(), String> {
+    tray::quit_shutdown_daemon().await;
+    Ok(())
+}
+
 /// `Some(enabled)` — autostart state; `None` — cannot be determined and
 /// the webview shows "unavailable".
 #[tauri::command]
@@ -459,6 +471,7 @@ fn main() {
             daemon_send,
             daemon_close,
             daemon_ensure,
+            daemon_shutdown,
             autostart_get,
             autostart_set,
             shell::host::shell_boot,
