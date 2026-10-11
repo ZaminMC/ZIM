@@ -377,7 +377,7 @@ describe("the row-key law — §30's cheap rows at the React layer", () => {
     ]);
   });
 
-  it("the cap's trim drops whole history pages — the cursor lands on a boundary the feed can name, and survivors keep their keys", async () => {
+  it("the cap's trim never drops the seam-adjacent page — the live head falls instead, and the cursor stays a boundary the buffer holds", async () => {
     rangeMock.mockResolvedValue({
       file: "logs/latest.log",
       lines: [line("h1"), line("h2")],
@@ -396,27 +396,100 @@ describe("the row-key law — §30's cheap rows at the React layer", () => {
     pushLogs(under);
     await waitFor(() => expect(result.current.state.lines?.length).toBe(MAX_FEED_LINES));
     const before = result.current.state;
-    const firstFloodKey = before.keys?.[2];
+    const secondFloodKey = before.keys?.[3];
 
-    // One more line crosses the cap: the whole seed page (2 rows) falls
-    // off — page-granular, never a half page the byte cursor cannot
-    // name. The removal may overshoot the cap by the page's remainder;
-    // bounded is bounded.
+    // One more line crosses the cap. The seed page is the ONLY page, and
+    // it is the seam's neighbor — it SURVIVES (dropping it used to strand
+    // the cursor on a boundary the buffer no longer held, so the next
+    // loadOlder spliced the page's older sibling straight onto the live
+    // seam, silently skipping the dropped rows). The live head falls by
+    // the excess instead: the cap lands exactly.
     pushLogs([line("edge")]);
     await waitFor(() =>
-      expect(result.current.state.lines?.length).toBeLessThan(MAX_FEED_LINES),
+      expect(result.current.state.lines?.length).toBe(MAX_FEED_LINES),
     );
     const after = result.current.state;
-    expect(after.lines?.[0]?.line).toBe("flood 0");
-    // The survivor kept its minted key across the trim — the index
-    // moved, the identity did not.
-    expect(after.keys?.[0]).toBe(firstFloodKey);
-    expect(after.liveStart).toBe(0);
-    expect(after.pages).toEqual([]);
-    // The cursor is the dropped page's own start: the next loadOlder
-    // fetches the page ending exactly there — abutting the buffer,
-    // never a gap over the rows the trim dropped.
+    // The history rows survive at the head; flood 0 fell off the live
+    // head; the appended edge is the tail.
+    expect(after.lines?.[0]?.line).toBe("h1");
+    expect(after.lines?.[1]?.line).toBe("h2");
+    expect(after.lines?.[2]?.line).toBe("flood 1");
+    expect(after.lines?.[after.lines.length - 1]?.line).toBe("edge");
+    // The survivor kept its minted key — the index moved (flood 0 fell),
+    // the identity did not.
+    expect(after.keys?.[2]).toBe(secondFloodKey);
+    expect(after.liveStart).toBe(2);
+    expect(after.pages).toEqual([{ start: 100, rows: 2 }]);
+    // The cursor is the RETAINED page's start: the next loadOlder
+    // fetches the page ending exactly there — abutting h1, never a gap
+    // over rows the buffer dropped.
     expect(after.cursor).toBe(100);
+    expect(new Set(after.keys).size).toBe(after.lines?.length);
+  });
+
+  it("a deep-history trim drops the OLDEST pages whole — the newest page and its rows survive with their keys", async () => {
+    rangeMock
+      .mockResolvedValueOnce({
+        file: "logs/latest.log",
+        lines: [line("t1"), line("t2")],
+        olderAvailable: true,
+        startOffset: 4096,
+        historyAvailable: true,
+      })
+      .mockResolvedValueOnce({
+        file: "logs/latest.log",
+        lines: [line("p1"), line("p2")],
+        olderAvailable: false,
+        startOffset: 1024,
+        historyAvailable: true,
+      })
+      .mockResolvedValue({
+        file: "logs/latest.log",
+        lines: [line("t1"), line("t2")],
+        olderAvailable: false,
+        startOffset: 4096,
+        historyAvailable: true,
+      });
+    const { result } = renderHook(() => useLogFeed("deep"));
+    await waitFor(() => expect(result.current.state.cursor).toBe(4096));
+    await act(async () => {
+      result.current.loadOlder();
+    });
+    await waitFor(() => expect(result.current.state.cursor).toBe(1024));
+    // Layout: [p-page @1024 (2 rows), tail-page @4096 (2 rows)] + live.
+    await waitFor(() => expect(result.current.state.pages.length).toBe(2));
+
+    // Fill to the cap with live rows: 4 history + MAX-4 live.
+    const under = Array.from({ length: MAX_FEED_LINES - 4 }, (_, i) =>
+      line(`flood ${i}`),
+    );
+    pushLogs(under);
+    await waitFor(() => expect(result.current.state.lines?.length).toBe(MAX_FEED_LINES));
+    const before = result.current.state;
+    const p1Key = before.keys?.[0];
+    const t1Key = before.keys?.[2];
+    const flood1Key = before.keys?.[5];
+
+    // Cross the cap by one: the OLDEST page (p1/p2) falls whole; the
+    // seam-adjacent tail page survives; the live head keeps every row
+    // (the page overshoot covers the excess).
+    pushLogs([line("edge")]);
+    await waitFor(() =>
+      expect(result.current.state.lines?.length).toBeLessThanOrEqual(MAX_FEED_LINES),
+    );
+    const after = result.current.state;
+    expect(after.lines?.[0]?.line).toBe("t1");
+    expect(after.lines?.[1]?.line).toBe("t2");
+    expect(after.lines?.[2]?.line).toBe("flood 0");
+    expect(after.liveStart).toBe(2);
+    expect(after.pages).toEqual([{ start: 4096, rows: 2 }]);
+    // t1 kept its key; flood 1 kept its key; p1's key is gone with its row.
+    expect(after.keys?.[0]).toBe(t1Key);
+    expect(after.keys?.[3]).toBe(flood1Key);
+    expect(after.keys).not.toContain(p1Key);
+    // The cursor moved to the RETAINED page's start — the boundary the
+    // buffer holds — not into the dropped page's rows.
+    expect(after.cursor).toBe(4096);
     expect(new Set(after.keys).size).toBe(after.lines?.length);
   });
 });

@@ -110,12 +110,16 @@ export interface LogFeedState {
   /** Index in `lines` where the live section begins (the seam marker). */
   liveStart: number;
   /** The byte offset the next older page continues from: the oldest
-   *  retained page's first row while any history is held; otherwise the
-   *  last dropped page's start. 0 = the beginning of the file is loaded
-   *  (or there is no file): no older pages exist. */
+   *  retained page's first row — always a boundary the buffer actually
+   *  holds, because the cap's trim never drops the newest page (the
+   *  seam's neighbor) and never empties the layout while history is
+   *  retained. 0 = the beginning of the file is loaded (or there is no
+   *  file): no older pages exist. */
   cursor: number;
-  /** The loaded history's page layout, oldest first. Invariant:
-   *  `pages.reduce(rows) === liveStart`; every page has rows > 0. */
+  /** The loaded history's page layout, oldest first. Invariants:
+   *  `pages.reduce(rows) === liveStart`; every page has rows > 0; after a
+   *  cap-trim, at least one page survives whenever any history was
+   *  held. */
   pages: PageSpan[];
   /** False when the server has written no log file yet: the console is
    *  live output alone, and the view says so once instead of failing. */
@@ -196,33 +200,42 @@ export function useLogFeed(serverId: string) {
         let cursor = s.cursor;
         let pages = s.pages;
         if (lines.length > MAX_FEED_LINES) {
-          // Trim oldest HISTORY first; only when history is gone do live
-          // lines fall off the head (a console pinned to the tail keeps its
-          // exact view either way — atBottom scroll position is anchored to
-          // the bottom, not an offset). History drops in WHOLE PAGES: the
-          // trim's job is to keep the byte cursor on a boundary it can
-          // name, so the next loadOlder fetches a page that abuts the
-          // buffer instead of re-opening a gap over the dropped rows. A
-          // page-granular trim may overshoot the cap by up to one page —
-          // bounded is bounded, and history is one click away.
+          // The cap's trim, in two laws:
+          //
+          // 1. History falls in WHOLE PAGES off the oldest end, and the
+          //    NEWEST page always survives. That survivor is the one page
+          //    whose start the next loadOlder can continue from — it abuts
+          //    the live seam, so `cursor` stays a boundary the buffer
+          //    actually holds. Emptying the pages (the old trim) stranded
+          //    the cursor at the newest DROPPED page's start: the next
+          //    loadOlder fetched that page's older sibling and spliced it
+          //    straight onto the live seam — silently skipping the dropped
+          //    page's rows, a gap in exactly the history the operator was
+          //    paging through.
+          //
+          // 2. Once the droppable history is exhausted, the LIVE head falls
+          //    by the remainder (a console pinned to the tail keeps its
+          //    exact view either way — atBottom scroll is anchored to the
+          //    bottom, not an offset). The cap is then enforced exactly.
+          //    A page-granular trim may otherwise overshoot the cap by up
+          //    to one page — bounded is bounded.
           const excess = lines.length - MAX_FEED_LINES;
+          const droppable = Math.max(0, pages.length - 1);
           let cut = 0;
           let dropped = 0;
-          let lastDroppedStart: number | null = null;
-          for (const page of pages) {
-            if (dropped >= excess) break;
-            dropped += page.rows;
-            lastDroppedStart = page.start;
+          while (cut < droppable && dropped < excess) {
+            dropped += pages[cut]?.rows ?? 0;
             cut += 1;
           }
           if (cut > 0) pages = pages.slice(cut);
-          // Live rows only fall when the pages are exhausted (dropped
-          // stalls below excess); the removal covers the cap either way.
-          const removal = Math.max(dropped, excess);
-          liveStart = Math.max(0, liveStart - removal);
-          cursor = pages[0]?.start ?? lastDroppedStart ?? s.cursor;
-          lines = lines.slice(removal);
-          keys = keys.slice(removal);
+          const liveExcess = Math.max(0, excess - dropped);
+          const historyEnd = liveStart;
+          lines = [...lines.slice(dropped, historyEnd), ...lines.slice(historyEnd + liveExcess)];
+          keys = [...keys.slice(dropped, historyEnd), ...keys.slice(historyEnd + liveExcess)];
+          liveStart = historyEnd - dropped;
+          // pages[0] now names the oldest RETAINED row — never the
+          // dropped rows the buffer no longer holds.
+          cursor = pages[0]?.start ?? s.cursor;
         }
         return { ...s, lines, keys, liveStart, cursor, pages, newCount };
       });
