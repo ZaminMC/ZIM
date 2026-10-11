@@ -57,6 +57,12 @@ export interface BookmarkView {
 export interface Snapshot {
   window: string;
   strip_width: number;
+  /** The WINDOW's logical height (0 until the first sync measured it).
+   *  The hover card's slide band clamps against this — the popup is a
+   *  child of the window and roams past the frame band's own viewport;
+   *  clamping by the frame's document height sheared the card at the
+   *  toolbar's edge. 0 = unknown: fall back to the document height. */
+  window_height: number;
   header_height: number;
   bookmarks_bar_visible: boolean;
   /** §54 (ADR-0026): the strip's presentation axis — the frame renders
@@ -608,6 +614,9 @@ function demoSnapshot(): Snapshot {
   return {
     window: "main",
     strip_width: demo.strip_width,
+    // The demo's own window: the browser fixture's document answers the
+    // band clamp (window_height 0 = the frame's fallback law).
+    window_height: 0,
     header_height: demo.bar_visible ? 111 : 83,
     bookmarks_bar_visible: demo.bar_visible,
     vertical: demo.vertical,

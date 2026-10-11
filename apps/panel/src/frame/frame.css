@@ -125,17 +125,20 @@ body {
   color: var(--frame-fg);
   z-index: 1;
 }
-/* The hover fill is the DETACHED SQUARCLE (kHighlight path): inset one
-   bottom radius from each slot edge, kTabHeight − padding − overlap tall,
-   rounded at the width-law top radius. Its color is the pipeline's law
+/* The hover fill is the DETACHED SQUARCLE (kHighlight path, upstream
+   horizontal_tab_style_views.cc GetPath): top rides kTabStripPadding (6)
+   down from the tab view's ceiling, the height is kTabHeight − padding −
+   toolbar overlap (28) — so the pill hugs the tab's BASE, one pixel above
+   the toolbar melt row, the way Chrome's hover reads. Inset one bottom
+   radius from each slot edge. Its color is the pipeline's law
    (tab_strip_color_mixer.cc): 40% of the toolbar over the frame —
    AlphaBlend, an OPAQUE answer (#ebedf0 in light) — never a translucent
    wash bleeding neighbors through the overlap zone. */
 .tab-inactive::before {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 7px; /* 35 − SQUARCLE_HEIGHT 28 */
+  top: 6px; /* kTabStripPadding */
+  bottom: 1px; /* kTabstripToolbarOverlap */
   left: 12px; /* SQUARCLE_INSET_X = BOTTOM_CORNER_RADIUS */
   right: 12px;
   border-radius: var(--tab-top-radius, 10px);

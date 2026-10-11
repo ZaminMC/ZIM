@@ -96,6 +96,11 @@ pub struct TabView {
 pub struct Snapshot {
     window: String,
     strip_width: f32,
+    /// The WINDOW's logical height (0 until the first sync measured it):
+    /// the hover card's band clamps against this, never the frame's own
+    /// document height — the card roams the whole window, the popup is a
+    /// child of the window, and the frame's viewport is only the band.
+    window_height: f32,
     header_height: f32,
     bookmarks_bar_visible: bool,
     /// §54 (ADR-0026): the strip's presentation axis — the frame renders
@@ -181,6 +186,7 @@ impl ShellState {
         let mut inner = self.lock();
         inner.strips.remove(window_label);
         inner.strip_widths.remove(window_label);
+        inner.window_heights.remove(window_label);
     }
 
     fn lock(&self) -> MutexGuard<'_, ShellInner> {
@@ -291,6 +297,12 @@ struct ShellInner {
     /// each window's layout law runs on its own width — a single scalar
     /// went stale the moment a second window synced).
     strip_widths: HashMap<String, f32>,
+    /// The host window's measured LOGICAL height, per window. The hover
+    /// card's slide band is clamped into the WINDOW (the popup is a child
+    /// of the window, free to roam past the frame band's own viewport) —
+    /// the frame's document height is only the header band, and a band
+    /// clamped by it shears the card at the toolbar's edge.
+    window_heights: HashMap<String, f32>,
     /// One popup overlay per window at most (menus, the group form).
     popups: HashMap<String, PopupState>,
     /// The OS file-open handoff (founder §4): a path the OS handed ZIM
@@ -316,6 +328,7 @@ impl ShellState {
             dirty: false,
             save_tx,
             strip_widths: HashMap::new(),
+            window_heights: HashMap::new(),
             popups: HashMap::new(),
             pending_open: None,
         }));
@@ -459,6 +472,7 @@ fn snapshot(inner: &ShellInner, window: &str) -> Snapshot {
     Snapshot {
         window: window.to_owned(),
         strip_width,
+        window_height: inner.window_heights.get(window).copied().unwrap_or(0.0),
         header_height: layout::header_height(inner.bookmarks.bar_visible),
         bookmarks_bar_visible: inner.bookmarks.bar_visible,
         vertical: strip.vertical,
@@ -608,6 +622,9 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
                 size.width as f32
             },
         );
+        inner
+            .window_heights
+            .insert(window_label.to_owned(), size.height as f32);
         let header = layout::header_height(inner.bookmarks.bar_visible);
         let create_tab = {
             let strip = inner.strip(window_label);
@@ -1732,10 +1749,19 @@ pub async fn shell_popup(
     // set_accept_events(false) upstream: the card never takes the
     // focus, it only paints (webview hosting has no click-through, so
     // the card also yields any press on its own band — PopupApp's law).
-    if let Some(popup) = app.get_webview(&label) {
-        if !is_card {
-            let _ = popup.set_focus();
-        }
+    // The focus call defers ONE main-thread beat: it lands after the
+    // creation dispatch has settled instead of racing the webview's
+    // first composition — the menu's keyboard contract is unchanged,
+    // and the fresh-controller focus window (a native crash class on
+    // some WebView2 runtimes) is never entered.
+    if !is_card {
+        let app_for_focus = app.clone();
+        let label_for_focus = label.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(popup) = app_for_focus.get_webview(&label_for_focus) {
+                let _ = popup.set_focus();
+            }
+        });
     }
     Ok(true)
 }

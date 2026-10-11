@@ -345,9 +345,17 @@ export function FrameApp() {
       document.documentElement.clientWidth,
     );
     const previous = cardPayload.current;
+    // The band's viewport is the WINDOW, not the frame's document: the
+    // frame's document is only the header band (~111px), and a card
+    // clamped by it was sheared at the toolbar's edge — the popup is a
+    // child of the WINDOW and roams the whole window (the host measures
+    // the true height; 0 = unmeasured, the demo's document answers).
     const viewport = {
       w: document.documentElement.clientWidth,
-      h: document.documentElement.clientHeight,
+      h:
+        current.window_height > 0
+          ? current.window_height
+          : document.documentElement.clientHeight,
     };
     if (target.kind === "tab") {
       const tab = current.tabs.find((t) => t.id === target.id);

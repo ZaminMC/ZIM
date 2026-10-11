@@ -29,30 +29,26 @@
 
 /* The page band — one destination at a time, keyed by destination and
    reload token (App.tsx). The band passes the flex:1 geometry through
-   to whichever view it holds, and the swap between two bands is
-   ADR-0030's one "page change" major entrance: --speed-slow, opacity
-   plus two pixels of Y, transform/opacity only so the change rides the
-   compositor. Animations run at element creation — data updates inside
-   a page never replay; only a real page change (or ⟳) does. The lazy
-   pages settle when their chunk lands, which is the honest moment. */
+   to whichever view it holds. The swap is Chromium's PAINT HOLDING
+   (navigation law): the old page's paint stands until the new page's
+   commit lands, then the swap is instant — one atomic React commit
+   paints the new page the same frame the old one leaves, so the band
+   NEVER shows a blank beat. The previous entrance (opacity 0 → 1 over
+   --speed-slow) defeated that: its first frames painted the empty band,
+   which on a dark WM read as the "blank flash" the founder filed. A
+   navigation that already paints instantly has nothing left to
+   animate — ADR-0030's tokens stay for the entrances that DO start
+   from content (modals, the crash card's neighbors). */
 .page {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  animation: pageIn var(--speed-slow) var(--ease);
 }
 
 .page > * {
   flex: 1;
   min-height: 0;
-}
-
-@keyframes pageIn {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
 }
 
 /* The beat before a lazy evidence page lands — quiet, not a spinner. */

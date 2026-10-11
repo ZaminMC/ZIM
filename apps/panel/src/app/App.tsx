@@ -154,6 +154,25 @@ export function App() {
   // look alive while its daemon is unreachable, and the operator must
   // never stare at a broken view without the words for it.
   const wireStatus = useConnection((s) => s.status);
+  // THE DWELL LAW (the founder's "the user should never know there is
+  // even a connection"): a sub-second wire blip — a heartbeat edge, one
+  // retry spin — is the wire's own business, never the operator's
+  // banner. The words appear only after the wire has been continuously
+  // not-ready for 1.5s; the moment it lands, they vanish (no
+  // “everything is fine again” beat). A real outage still speaks; a
+  // blip the client heals before the dwell lands is invisible. The
+  // effect tracks the READY EDGE only — the retry loop's own
+  // connecting↔offline flips never re-arm the dwell.
+  const wireReady = wireStatus === "ready";
+  const [wireDwelled, setWireDwelled] = useState(false);
+  useEffect(() => {
+    if (wireReady) {
+      setWireDwelled(false);
+      return;
+    }
+    const dwell = window.setTimeout(() => setWireDwelled(true), 1500);
+    return () => window.clearTimeout(dwell);
+  }, [wireReady, setWireDwelled]);
 
   useEffect(() => {
     // The palette lane attaches FIRST: the wire's absence (no daemon in
@@ -302,7 +321,7 @@ export function App() {
 
   return (
     <div className={styles.content}>
-      {wireStatus !== "ready" ? (
+      {wireStatus !== "ready" && wireDwelled ? (
         <div className={styles.wireBanner} role="status" data-state={wireStatus}>
           <span className={styles.wireDot} aria-hidden />
           <span className={styles.wireText}>
@@ -319,9 +338,9 @@ export function App() {
               reload verb rebuilds the view on EVERY page (the evidence
               and settings pages used to ignore the token, so ⟳ did
               nothing there), while a destination change remounts by
-              construction anyway. The swap rides ADR-0030's one page
-              entrance: --speed-slow, opacity + two pixels of Y,
-              compositor-only. */}
+              construction anyway. The swap is Chromium's paint holding
+              (App.module.css): one atomic commit, no blank beat — the
+              old page's paint stands until the new page's lands. */}
           <div
             className={styles.page}
             key={`${JSON.stringify(destination)}:${reloadToken}`}
