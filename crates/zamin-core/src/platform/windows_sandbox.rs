@@ -122,6 +122,16 @@ fn hresult_err(what: &str, hr: i32) -> PlatformError {
     }
 }
 
+/// HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS): the bare win32 code under
+/// facility 0x0007 with the severity bit set — the shape
+/// CreateAppContainerProfile actually returns when the profile exists.
+/// Comparing the returned HRESULT against the BARE code never matched,
+/// so the reuse branch below was dead code and every second creation
+/// of a profile failed as if creation itself broke (the parallel-daemon
+/// test fleet hit it on every run: four daemons, one server id, one
+/// machine-global profile name).
+const HRESULT_ALREADY_EXISTS: u32 = 0x8007_0000 | ERROR_ALREADY_EXISTS;
+
 /// Create (or look up) the server's AppContainer profile and return its
 /// SID. Idempotent by design: the profile persists across starts so a
 /// server keeps one identity for its whole life inside the daemon.
@@ -144,8 +154,10 @@ pub fn ensure_container(name: &str) -> Result<Container, PlatformError> {
     if hr == ERROR_SUCCESS as i32 {
         return unsafe { finish_container(sid) };
     }
-    // The profile already exists (a previous start created it): reuse it.
-    if hr as u32 == ERROR_ALREADY_EXISTS {
+    // The profile already exists (a previous start — or a sibling daemon
+    // on the same machine — created it): reuse it, deriving the SID the
+    // creator already minted.
+    if hr as u32 == HRESULT_ALREADY_EXISTS {
         let hr2 = unsafe { DeriveAppContainerSidFromAppContainerName(name_w.as_ptr(), &mut sid) };
         if hr2 == ERROR_SUCCESS as i32 {
             return unsafe { finish_container(sid) };
