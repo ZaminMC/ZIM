@@ -306,15 +306,19 @@ fn policy_capabilities(network: NetworkSandbox) -> Vec<SID_AND_ATTRIBUTES> {
 /// exemption is per-user machine state that outlives processes, so the
 /// matching remove runs at server removal (see `cleanup_container`).
 fn add_loopback_exemption(sid_string: &str) {
+    // The tool's documented grammar rides the equals form (`-p=<sid>`);
+    // `-p <sid>` reads as a stray argument and answers "Invalid
+    // Parameters" with the usage text, so LocalOnly servers silently
+    // never got their loopback exemption.
     let _ = std::process::Command::new("checknetisolation")
-        .args(["loopbackexempt", "-a", "-p", sid_string])
+        .args(["loopbackexempt", "-a", &format!("-p={sid_string}")])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
 }
 
 pub fn remove_loopback_exemption(sid_string: &str) {
     let _ = std::process::Command::new("checknetisolation")
-        .args(["loopbackexempt", "-d", "-p", sid_string])
+        .args(["loopbackexempt", "-d", &format!("-p={sid_string}")])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
 }

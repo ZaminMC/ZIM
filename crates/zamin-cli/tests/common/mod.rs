@@ -90,7 +90,13 @@ impl Harness {
         let root = scoped_dir(&format!("{tag}-root"));
         std::fs::write(root.join("eula.txt"), "eula=true\n").expect("eula");
         std::fs::write(root.join("server.jar"), b"fake jar bytes").expect("jar");
-        let config_dir = data_dir.join("servers").join("demo");
+        // The config rides the tag as the server id: every test registers
+        // its own id, so concurrent daemons never share an identity. On
+        // Windows the id IS the AppContainer profile name (zim.server.<id>)
+        // — two daemons starting a same-named server raced one profile:
+        // the loser's spawn died building the sandbox.
+        let server_id = tag;
+        let config_dir = data_dir.join("servers").join(server_id);
         std::fs::create_dir_all(&config_dir).expect("server runtime dir");
         let java_path = workspace_bin("fake-mc-server");
         std::fs::write(

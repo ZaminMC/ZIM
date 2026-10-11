@@ -21,34 +21,37 @@ use common::{
 fn cli_registers_and_manages_the_lifecycle() {
     let harness = Harness::spawn("lifecycle");
 
-    // Register over the wire; the typed result comes back as JSON.
+    // Register over the wire; the typed result comes back as JSON. The
+    // server id rides the harness tag — on Windows it becomes the
+    // AppContainer profile name (zim.server.<id>), so concurrent test
+    // daemons must never share one.
     let registered = harness.zamin_json(&[
         "register",
-        "demo",
+        "lifecycle",
         harness.root.to_str().unwrap(),
         "--name",
         "Demo Server",
     ]);
-    assert_eq!(registered["server"]["serverId"], "demo");
+    assert_eq!(registered["server"]["serverId"], "lifecycle");
     assert_eq!(registered["server"]["state"], "not-running");
 
     // Start, then poll status until the fake server reports running.
-    let started = harness.zamin_json(&["start", "demo"]);
+    let started = harness.zamin_json(&["start", "lifecycle"]);
     assert_eq!(started["state"], "starting");
     assert!(
         wait_until(Duration::from_secs(15), || {
-            let status = harness.zamin_json(&["status", "demo"]);
+            let status = harness.zamin_json(&["status", "lifecycle"]);
             status["state"] == "running"
         }),
         "server never reached running"
     );
 
     // Stop; the accepted state arrives immediately.
-    let stopped = harness.zamin_json(&["stop", "demo"]);
+    let stopped = harness.zamin_json(&["stop", "lifecycle"]);
     assert!(stopped["state"] == "stopping" || stopped["state"] == "stopped");
     assert!(
         wait_until(Duration::from_secs(15), || {
-            let status = harness.zamin_json(&["status", "demo"]);
+            let status = harness.zamin_json(&["status", "lifecycle"]);
             status["state"] == "stopped"
         }),
         "server never reached stopped"
@@ -61,7 +64,7 @@ fn cli_registers_and_manages_the_lifecycle() {
 
     // Remove, with the typed confirmation: a match must actually remove
     // (the prompt falls through to the command), a mismatch must not.
-    let refused = harness.zamin_confirm(&["remove", "demo"], "wrong\n");
+    let refused = harness.zamin_confirm(&["remove", "lifecycle"], "wrong\n");
     assert!(!refused.status.success(), "a mismatched confirm refuses");
     assert_eq!(
         harness.zamin_json(&["list"])["servers"]
@@ -69,7 +72,7 @@ fn cli_registers_and_manages_the_lifecycle() {
             .map(Vec::len),
         Some(1)
     );
-    let confirmed = harness.zamin_confirm(&["remove", "demo"], "demo\n");
+    let confirmed = harness.zamin_confirm(&["remove", "lifecycle"], "lifecycle\n");
     assert!(confirmed.status.success(), "the matching confirm removes");
     assert_eq!(
         harness.zamin_json(&["list"])["servers"]
@@ -112,8 +115,10 @@ fn unique_missing_endpoint() -> String {
 #[test]
 fn cli_logs_follow_streams_live_output() {
     let harness = Harness::spawn("logs-follow");
-    harness.zamin_quiet(&["register", "demo", harness.root.to_str().unwrap()]);
-    harness.zamin(&["start", "demo"]);
+    harness.zamin_quiet(&["register", "logs-follow", harness.root.to_str().unwrap()]);
+    // The start is asserted: a silently failed start made the follow below
+    // starve for lines and read as a streaming bug instead of what it was.
+    harness.zamin_json(&["start", "logs-follow"]);
 
     // Follow mode: the opening replay carries the boot lines; read until
     // the startup-complete signature arrives, then detach. Every read is
@@ -122,7 +127,7 @@ fn cli_logs_follow_streams_live_output() {
     let mut child = Command::new(&harness.zamin)
         .arg("--endpoint")
         .arg(&harness.endpoint)
-        .args(["logs", "-f", "demo"])
+        .args(["logs", "-f", "logs-follow"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -135,20 +140,21 @@ fn cli_logs_follow_streams_live_output() {
     });
     let _ = child.kill();
     let _ = child.wait();
-    harness.zamin(&["stop", "demo"]);
+    harness.zamin_json(&["stop", "logs-follow"]);
     assert!(saw_done, "logs -f must stream the boot sequence live");
 }
 
 #[test]
 fn cli_attach_round_trips_console_input() {
     let harness = Harness::spawn("attach");
-    harness.zamin_quiet(&["register", "demo", harness.root.to_str().unwrap()]);
-    harness.zamin(&["start", "demo"]);
+    harness.zamin_quiet(&["register", "attach", harness.root.to_str().unwrap()]);
+    // The start is asserted — same reason as logs-follow above.
+    harness.zamin_json(&["start", "attach"]);
 
     let mut child = Command::new(&harness.zamin)
         .arg("--endpoint")
         .arg(&harness.endpoint)
-        .args(["attach", "demo"])
+        .args(["attach", "attach"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -164,7 +170,7 @@ fn cli_attach_round_trips_console_input() {
     assert!(
         banner
             .as_deref()
-            .is_some_and(|line| line.contains("Attached to 'demo'")),
+            .is_some_and(|line| line.contains("Attached to 'attach'")),
         "banner first, got: {banner:?}"
     );
 
@@ -184,7 +190,7 @@ fn cli_attach_round_trips_console_input() {
     let exit_ok = child.try_wait().ok().flatten().map(|s| s.success());
     let _ = child.kill();
     let _ = child.wait();
-    harness.zamin(&["stop", "demo"]);
+    harness.zamin_json(&["stop", "attach"]);
 
     assert!(
         saw_reply,
@@ -202,7 +208,7 @@ async fn client_library_demuxes_requests_and_notifications() {
     let root = scoped_dir("libdemux-root");
     std::fs::write(root.join("eula.txt"), "eula=true\n").expect("eula");
     std::fs::write(root.join("server.jar"), b"fake jar bytes").expect("jar");
-    let config_dir = data_dir.join("servers").join("demo");
+    let config_dir = data_dir.join("servers").join("libdemux");
     std::fs::create_dir_all(&config_dir).expect("dir");
     std::fs::write(
         config_dir.join("config.toml"),
@@ -223,7 +229,7 @@ async fn client_library_demuxes_requests_and_notifications() {
     let mut logs = client
         .subscribe(
             zamin_protocol::streams::StreamKind::Events,
-            Some("demo".to_owned()),
+            Some("libdemux".to_owned()),
         )
         .await
         .expect("subscribe");
@@ -233,7 +239,7 @@ async fn client_library_demuxes_requests_and_notifications() {
             zamin_protocol::methods::SERVER_REGISTER,
             serde_json::json!({
                 "requestId": uuid::Uuid::now_v7().to_string(),
-                "serverId": "demo",
+                "serverId": "libdemux",
                 "displayName": "Demo",
                 "rootPath": root.to_string_lossy(),
             }),
@@ -247,7 +253,7 @@ async fn client_library_demuxes_requests_and_notifications() {
             zamin_protocol::methods::SERVER_START,
             serde_json::json!({
                 "requestId": uuid::Uuid::now_v7().to_string(),
-                "serverId": "demo",
+                "serverId": "libdemux",
             }),
         )
         .await
@@ -292,7 +298,7 @@ async fn client_library_demuxes_requests_and_notifications() {
             zamin_protocol::methods::SERVER_STOP,
             serde_json::json!({
                 "requestId": uuid::Uuid::now_v7().to_string(),
-                "serverId": "demo",
+                "serverId": "libdemux",
             }),
         )
         .await
@@ -399,11 +405,11 @@ fn cli_operates_a_remote_box_through_the_agent() {
     assert_eq!(status["daemon"]["name"], "zamind");
 
     // Register and list through the remote leg.
-    remote_json(&["register", "demo", harness.root.to_str().unwrap()]);
+    remote_json(&["register", "remote", harness.root.to_str().unwrap()]);
     let list = remote_json(&["list"]);
     let servers = list["servers"].as_array().expect("servers array");
     assert_eq!(servers.len(), 1);
-    assert_eq!(servers[0]["serverId"], "demo");
+    assert_eq!(servers[0]["serverId"], "remote");
 
     // A wrong token is a typed rejection, not a hang.
     let bad_token_dir = scoped_dir("remote-bad-token");
