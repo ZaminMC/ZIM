@@ -25,6 +25,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 
 use tauri::{
@@ -517,7 +518,13 @@ fn window_label_of(webview: &tauri::Webview) -> String {
         return window.to_owned();
     }
     // The popup overlay (menus, the group form) belongs to its window:
-    // its verbs land on that window's strip.
+    // its verbs land on that window's strip. Generation labels split at
+    // the last dash (popup-{window}-{gen}); the bare suffix law stays
+    // below only as a tolerant fallback for a label the counter never
+    // minted.
+    if let Some(window) = parse_popup_label(label) {
+        return window;
+    }
     if let Some(window) = label.strip_prefix("popup-") {
         return window.to_owned();
     }
@@ -529,8 +536,35 @@ fn is_popup(webview: &tauri::Webview) -> bool {
     webview.label().starts_with("popup-")
 }
 
-fn popup_label(window: &str) -> String {
-    format!("popup-{window}")
+// THE GENERATION LAW (the right-click crash's fourth defense): a popup's
+// label is `popup-{window}-{gen}`, gen from a process-wide counter, so
+// EVERY popup webview is born with a label no popup ever held. The old
+// fixed label (`popup-{window}`) made the create race the previous
+// popup's teardown: WebView2's controller Close is asynchronous and can
+// take longer than any fixed beat, and a create that lands while the
+// manager still holds the old registration is refused
+// (WebviewLabelAlreadyExists) — the founder's right-click opens NOTHING.
+// With unique labels the create cannot collide; dismissal closes by the
+// STORED label and the create path sweeps any prefix strays (an orphan
+// whose PopupState died mid-flight), so one window still holds at most
+// one live popup.
+static POPUP_GEN: AtomicU64 = AtomicU64::new(1);
+
+fn next_popup_label(window: &str) -> String {
+    format!(
+        "popup-{window}-{}",
+        POPUP_GEN.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Which window does this popup label belong to? The generation holds no
+/// dash, the window may: split at the LAST dash and require the suffix
+/// to be numeric. `popup-main-7` → `main`; `popup-zim-2-13` → `zim-2`.
+fn parse_popup_label(label: &str) -> Option<String> {
+    let rest = label.strip_prefix("popup-")?;
+    let (window, gen) = rest.rsplit_once('-')?;
+    gen.parse::<u64>().ok()?;
+    Some(window.to_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +591,10 @@ struct PopupState {
     /// truth of the moment it opened (Chrome's menu button badge +
     /// "Update Chromium" item ride the same shape).
     meta: Option<serde_json::Value>,
+    /// The live widget's own label (the generation law): dismissal and
+    /// every slide/update/fade emit address THIS generation's webview,
+    /// never a by-window guess that a racing teardown could redirect.
+    label: String,
 }
 
 /// The overlay's rect for a kind anchored at (x, y): the menu's drop
@@ -806,13 +844,35 @@ pub fn relayout_window(app: &AppHandle, state: &ShellState, window_label: &str) 
 /// (the dismiss-then-act order also makes the anchor button's own
 /// pointerdown toggle the menu, as upstream's does).
 pub fn dismiss_popup(app: &AppHandle, state: &ShellState, window_label: &str) {
-    let Some(_popup) = state.lock().popups.remove(window_label) else {
+    // Close by the STORED label (the generation law): the popup that was
+    // created is the popup that closes, regardless of what any other
+    // generation is doing.
+    let label = state
+        .lock()
+        .popups
+        .remove(window_label)
+        .map(|popup| popup.label);
+    let Some(label) = label else {
         return;
     };
     // The webview closes itself — tauri 2.12's child-webview removal is
     // Webview::close (the manager unregisters it with the window).
-    if let Some(webview) = app.get_webview(&popup_label(window_label)) {
+    if let Some(webview) = app.get_webview(&label) {
         let _ = webview.close();
+    }
+}
+
+/// Sweep any popup webviews of this window that the registry no longer
+/// knows (an orphan whose PopupState died mid-flight, or a dismissal
+/// whose close is still in flight). Called on the create path — the one
+/// moment a stray would corrupt the one-popup-per-window law. The match
+/// is EXACT (parse the generation label, compare the window): a prefix
+/// match would let window `main` sweep `main-2`'s popups too.
+fn sweep_popup_strays(app: &AppHandle, window_label: &str) {
+    for (label, webview) in app.webview_windows() {
+        if parse_popup_label(&label).as_deref() == Some(window_label) {
+            let _ = webview.close();
+        }
     }
 }
 
@@ -1709,10 +1769,21 @@ pub async fn shell_popup(
         popup_rect((size.width, size.height), &kind, x, y)
     };
     // Whether this open REPLACES a live popup — the destroy/create beat
-    // law below waits out the replaced widget's teardown.
-    let had_popup = state.lock().popups.contains_key(&window_name);
+    // law below waits out the replaced widget's teardown. The OLD
+    // generation's label is captured first: the poll addresses the
+    // webview that is dying, not the one about to be born.
+    let old_label: Option<String> = state
+        .lock()
+        .popups
+        .get(&window_name)
+        .map(|popup| popup.label.clone());
     dismiss_popup(&app, &state, &window_name);
-    let label = popup_label(&window_name);
+    // THE GENERATION LAW's sweep: any popup webview of this window the
+    // registry lost (an orphaned card, a dismissal whose close is still
+    // landing) dies HERE — before the new generation is minted, so the
+    // one-popup-per-window law survives even a crashed teardown.
+    sweep_popup_strays(&app, &window_name);
+    let label = next_popup_label(&window_name);
     // THE BOOT ORDER LAW (the audit's P0): the state lands FIRST, the
     // webview second. `shell_popup_boot` reads `popups[window]` from the
     // popup's own load path — a webview created before its PopupState
@@ -1730,6 +1801,7 @@ pub async fn shell_popup(
             group: group_id.map(|g| g as GroupId),
             card: if is_card { card.clone() } else { None },
             meta: meta.clone(),
+            label: label.clone(),
         },
     );
     // THE DESTROY/CREATE BEAT LAW: a popup that was just dismissed in this
@@ -1738,11 +1810,22 @@ pub async fn shell_popup(
     // next controller's creation are both async operations on the same
     // parent HWND, and overlapping them is a native crash class (the
     // right-click-on-a-hovered-tab path: the hover card closes, the menu
-    // opens, 100% of the time). One async-runtime yield stays OFF the
-    // event loop (the re-entrancy law) and lets the close's cleanup land
-    // before the create begins.
-    if had_popup {
+    // opens, 100% of the time). The yield stays OFF the event loop (the
+    // re-entrancy law) and the teardown is given a bounded moment to
+    // actually finish — the manager is polled until the old generation's
+    // webview is gone (WebView2's Close is asynchronous; a blind one-beat
+    // sleep can still race the controller's final cleanup), capped at
+    // 24ms so a wedged teardown delays the new popup by nothing that
+    // matters. With unique labels even a polled-through cap cannot
+    // collide — the beat only narrows the HWND overlap window.
+    if let Some(old) = old_label {
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        for _ in 0..6 {
+            if app.get_webview(&old).is_none() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(4)).await;
+        }
     }
     if let Err(e) = host_window.add_child(
         tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
@@ -1909,13 +1992,21 @@ pub fn shell_popup_update(
     app: AppHandle,
 ) -> Result<bool, String> {
     let window_name = window_label_of(&window);
-    {
+    // The live card's OWN label (the generation law): the update targets
+    // the widget that was created, by the label stored at its birth.
+    let live_label = {
         let mut inner = state.lock();
         match inner.popups.get_mut(&window_name) {
-            Some(popup) if popup.kind == "hover-card" => popup.card = Some(card.clone()),
+            Some(popup) if popup.kind == "hover-card" => {
+                popup.card = Some(card.clone());
+                Some(popup.label.clone())
+            }
             _ => return Ok(false),
         }
-    }
+    };
+    let Some(live_label) = live_label else {
+        return Ok(false);
+    };
     // The band moved → the carrier follows it (the popup re-bases its
     // render against the band's origin, PopupApp's coordinate law).
     let band = card.get("band").cloned().unwrap_or(serde_json::Value::Null);
@@ -1925,7 +2016,7 @@ pub fn shell_popup_update(
             .unwrap_or(0.0)
             .max(0.0)
     };
-    if let Some(popup) = app.get_webview(&popup_label(&window_name)) {
+    if let Some(popup) = app.get_webview(&live_label) {
         let window = window_for(&app, &window_name)?;
         let size: LogicalSize<f64> = window
             .inner_size()
@@ -1941,7 +2032,7 @@ pub fn shell_popup_update(
             .into(),
         });
     }
-    let _ = app.emit_to(popup_label(&window_name), "shell://popup-update", card);
+    let _ = app.emit_to(&live_label, "shell://popup-update", card);
     Ok(true)
 }
 
@@ -1955,22 +2046,20 @@ pub fn shell_popup_fade(
     app: AppHandle,
 ) -> Result<bool, String> {
     let window_name = window_label_of(&window);
-    let is_card = {
+    let (is_card, live_label) = {
         let inner = state.lock();
-        inner
-            .popups
-            .get(&window_name)
-            .map(|p| p.kind == "hover-card")
-            .unwrap_or(false)
+        let popup = inner.popups.get(&window_name);
+        (
+            popup.map(|p| p.kind == "hover-card").unwrap_or(false),
+            popup.map(|p| p.label.clone()),
+        )
     };
     if !is_card {
         return Ok(false);
     }
-    let _ = app.emit_to(
-        popup_label(&window_name),
-        "shell://popup-fade",
-        serde_json::json!({}),
-    );
+    if let Some(live_label) = live_label {
+        let _ = app.emit_to(&live_label, "shell://popup-fade", serde_json::json!({}));
+    }
     Ok(true)
 }
 
@@ -2480,4 +2569,64 @@ pub async fn shell_window_resized(
         let _ = height;
     }
     sync(&app, &state, &label)
+}
+
+#[cfg(test)]
+mod popup_label_tests {
+    use super::*;
+
+    // The generation law: every minted label is unique and parses back
+    // to its window — the right-click crash's fourth defense.
+
+    #[test]
+    fn minted_labels_parse_back_to_their_window() {
+        for window in ["main", "zim-2", "tear-off-window-3"] {
+            let label = next_popup_label(window);
+            assert_eq!(parse_popup_label(&label).as_deref(), Some(window));
+        }
+    }
+
+    #[test]
+    fn two_mints_never_share_a_label() {
+        let a = next_popup_label("main");
+        let b = next_popup_label("main");
+        assert_ne!(a, b, "a reused label races the old popup's teardown");
+    }
+
+    #[test]
+    fn window_names_with_dashes_survive_the_roundtrip() {
+        // rsplit_once at the LAST dash: the generation is the numeric tail,
+        // everything before it is the window — dashes included.
+        assert_eq!(
+            parse_popup_label("popup-zim-2-13").as_deref(),
+            Some("zim-2")
+        );
+        assert_eq!(parse_popup_label("popup-main-1").as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn non_popup_and_malformed_labels_refuse_to_parse() {
+        assert_eq!(parse_popup_label("main-frame"), None);
+        assert_eq!(parse_popup_label("tab-main-3"), None);
+        assert_eq!(parse_popup_label("popup-main"), None, "no generation");
+        assert_eq!(
+            parse_popup_label("popup-main-not-a-number"),
+            None,
+            "the tail must be numeric"
+        );
+    }
+
+    #[test]
+    fn the_sweep_match_is_exact_per_window() {
+        // window `main` must NOT sweep `main-2`'s popups: the match goes
+        // through parse_popup_label (exact), never a prefix.
+        let foreign = next_popup_label("main-2");
+        let own = next_popup_label("main");
+        assert_eq!(parse_popup_label(&own).as_deref(), Some("main"));
+        assert_ne!(
+            parse_popup_label(&foreign).as_deref(),
+            Some("main"),
+            "prefix matching would kill the neighbor window's popup"
+        );
+    }
 }
