@@ -311,6 +311,19 @@ fn offer_open_path(app: &tauri::AppHandle, args: &[String]) {
     }
 }
 
+/// The cold-start argv, decoded the way the OS wrote it: `args_os`, never
+/// `args` — `std::env::args()` PANICS on an argument that is not valid
+/// Unicode (invalid surrogates on Windows, non-UTF-8 bytes on Unix), and
+/// a launcher that dies before the window exists has no honest failure
+/// mode at all. A path that decodes lossily lands as replacement
+/// characters: the discovery verdict then says "nothing at this folder",
+/// which is the truth the operator can act on.
+fn launch_args() -> Vec<String> {
+    std::env::args_os()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
+}
+
 fn main() {
     tauri::Builder::default()
         // ONE ZIM at a time — registered FIRST (the plugin's own law):
@@ -347,9 +360,12 @@ fn main() {
             // (double-click / "open with"). After restore — the offer is
             // addressed to the session's active tab, so the strip must
             // exist first. The claiming webview boots later and takes the
-            // path from its hello.
+            // path from its hello. `launch_args` decodes the OS's own
+            // bytes: a non-UTF-8 argv must not kill the window before it
+            // exists (the lossy path forwards to the discovery verdict's
+            // honest "nothing at this folder").
             {
-                let args: Vec<String> = std::env::args().collect();
+                let args = launch_args();
                 offer_open_path(&handle, &args);
             }
 

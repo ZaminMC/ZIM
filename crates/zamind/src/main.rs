@@ -53,6 +53,30 @@ const DEFAULT_MODRINTH_URL: &str = "https://api.modrinth.com";
 /// The live FabricMC meta API (the software catalog's Fabric family).
 const DEFAULT_FABRIC_URL: &str = "https://meta.fabricmc.net";
 
+/// The one error path for a malformed invocation: a message and exit
+/// code 2, never a panic (the agent parser's own law — the daemon speaks
+/// it too: a launcher that dies with a backtrace has no honest failure).
+fn usage(message: String) -> ! {
+    eprintln!("{message}");
+    eprintln!(
+        "usage: zamind [--endpoint <endpoint>] [--data-dir <dir>] [--catalog-url <url>] \
+         [--adoptium-url <url>] [--modrinth-url <url>] [--fabric-url <url>] [--version]"
+    );
+    std::process::exit(2);
+}
+
+/// One flag's value as text: present and valid UTF-8, or the usage exit.
+/// URLs and endpoints are text by contract; a value the OS delivered in
+/// non-UTF-8 bytes is a usage error the operator can read and fix.
+fn text_value(args: &mut std::env::ArgsOs, flag: &str) -> String {
+    let Some(value) = args.next() else {
+        usage(format!("{flag} needs a value"));
+    };
+    value
+        .into_string()
+        .unwrap_or_else(|_| usage(format!("{flag} value is not valid Unicode")))
+}
+
 fn parse_args() -> DaemonConfig {
     let mut config = DaemonConfig {
         endpoint: zamin_ipc::Endpoint::default_endpoint(),
@@ -62,43 +86,38 @@ fn parse_args() -> DaemonConfig {
         modrinth_url: DEFAULT_MODRINTH_URL.to_owned(),
         fabric_url: DEFAULT_FABRIC_URL.to_owned(),
     };
-    let mut args = std::env::args().skip(1);
+    // The OS's own bytes: `env::args()` PANICS on a non-UTF-8 argument
+    // before the daemon can say anything. Flags are matched lossily (a
+    // garbage argv entry reaches the "unknown argument" exit, not a
+    // panic); --data-dir keeps its OsString — a path is not text, and a
+    // lossy decode would invent a directory that does not exist.
+    let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
-        match arg.as_str() {
+        match arg.to_string_lossy().as_ref() {
             "--endpoint" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--endpoint needs a value"));
+                let value = text_value(&mut args, "--endpoint");
                 config.endpoint = zamin_ipc::Endpoint::from_daemon_arg(&value);
             }
             "--data-dir" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--data-dir needs a value"));
+                let Some(value) = args.next() else {
+                    usage("--data-dir needs a value".to_owned());
+                };
                 config.data_dir = PathBuf::from(value);
             }
             "--catalog-url" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--catalog-url needs a value"));
+                let value = text_value(&mut args, "--catalog-url");
                 config.catalog_url = value.trim_end_matches('/').to_owned();
             }
             "--adoptium-url" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--adoptium-url needs a value"));
+                let value = text_value(&mut args, "--adoptium-url");
                 config.adoptium_url = value.trim_end_matches('/').to_owned();
             }
             "--modrinth-url" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--modrinth-url needs a value"));
+                let value = text_value(&mut args, "--modrinth-url");
                 config.modrinth_url = value.trim_end_matches('/').to_owned();
             }
             "--fabric-url" => {
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| panic!("--fabric-url needs a value"));
+                let value = text_value(&mut args, "--fabric-url");
                 config.fabric_url = value.trim_end_matches('/').to_owned();
             }
             "--version" => {
@@ -106,8 +125,7 @@ fn parse_args() -> DaemonConfig {
                 std::process::exit(0);
             }
             other => {
-                eprintln!("unknown argument {other}");
-                std::process::exit(2);
+                usage(format!("unknown argument {other}"));
             }
         }
     }

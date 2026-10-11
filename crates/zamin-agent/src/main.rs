@@ -40,7 +40,12 @@ fn parse_args() -> AgentConfig {
         endpoint: Endpoint::default_endpoint(),
         data_dir: zamin_core::platform::paths::data_dir().join("agent"),
     };
-    let mut args = std::env::args().skip(1);
+    // The OS's own bytes: `env::args()` PANICS on a non-UTF-8 argument
+    // before the usage message can exist. Flags are matched lossily (a
+    // garbage argv entry reaches the "unknown argument" exit, not a
+    // panic); --data-dir keeps its OsString — a path is not text, and a
+    // lossy decode would invent a directory that does not exist.
+    let mut args = std::env::args_os().skip(1);
     // One error path for every malformed invocation: a message and exit
     // code 2, never a panic (exit 101 + backtrace was the old answer to
     // a missing --listen value).
@@ -52,20 +57,26 @@ fn parse_args() -> AgentConfig {
         std::process::exit(2);
     };
     while let Some(arg) = args.next() {
-        match arg.as_str() {
+        match arg.to_string_lossy().as_ref() {
             "--listen" => {
                 let Some(value) = args.next() else {
                     usage("--listen needs a value (e.g. 127.0.0.1:7443)".to_owned());
                 };
-                config.listen = value.parse().unwrap_or_else(|e| {
-                    usage(format!("--listen {value} is not a valid address: {e}"))
+                let Some(text) = value.to_str() else {
+                    usage("--listen value is not valid Unicode".to_owned());
+                };
+                config.listen = text.parse().unwrap_or_else(|e| {
+                    usage(format!("--listen {text} is not a valid address: {e}"))
                 });
             }
             "--endpoint" => {
                 let Some(value) = args.next() else {
                     usage("--endpoint needs a value".to_owned());
                 };
-                config.endpoint = Endpoint::from_daemon_arg(&value);
+                let Some(text) = value.to_str() else {
+                    usage("--endpoint value is not valid Unicode".to_owned());
+                };
+                config.endpoint = Endpoint::from_daemon_arg(text);
             }
             "--data-dir" => {
                 let Some(value) = args.next() else {
