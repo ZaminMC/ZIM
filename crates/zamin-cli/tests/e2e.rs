@@ -372,6 +372,19 @@ fn cli_operates_a_remote_box_through_the_agent() {
             && cert_path.exists()),
         "agent never wrote its token and cert"
     );
+    // THE LISTENER LAW: the artifacts land BEFORE the agent binds — a CLI
+    // spawned between "cert written" and "listen bound" connects into
+    // ECONNREFUSED, and the runner's load once made that the norm (the
+    // CI failure dressed as an empty stderr, because the JSON lane
+    // prints its error object on STDOUT). Wait for the port to ACCEPT
+    // before the first remote command; the bind is the truth, never the
+    // certificate.
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+        }),
+        "agent never bound its listener on {port}"
+    );
     let fingerprint = cert_fingerprint_hex(&cert_path);
     let token_display = token_path.to_str().unwrap().to_owned();
     let remote = format!("127.0.0.1:{port}");
@@ -393,8 +406,10 @@ fn cli_operates_a_remote_box_through_the_agent() {
             .expect("zamin runs");
         assert!(
             output.status.success(),
-            "zamin --remote {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "zamin --remote {args:?} failed (exit {:?}): stderr: {} | stdout: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
         );
         serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("json output")
     };
