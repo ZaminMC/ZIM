@@ -14,9 +14,10 @@
 //!   arithmetic): `unrestricted` grants the internet-client pair,
 //!   `local-only` grants none but exempts the container from the
 //!   loopback block, `blocked` grants none and exempts nothing.
-//!   Inbound Minecraft clients are NOT affected — the container model
-//!   gates the container's own outbound connects; the server's listening
-//!   socket accepts clients exactly as before.
+//!   Inbound Minecraft clients are NOT gated by the container's outbound
+//!   capability model — the server's listening socket accepts LAN clients
+//!   exactly as before; same-machine (loopback) clients additionally need
+//!   the inbound enablement, which the spawn grants.
 //! - Program Files / System32 keep their default ALL APPLICATION
 //!   PACKAGES read+execute ACEs, so the JVM itself loads and runs.
 //!   Nothing else is implied by that grant: read+execute of system
@@ -323,6 +324,19 @@ pub fn remove_loopback_exemption(sid_string: &str) {
         .status();
 }
 
+/// Enable the container's listener to RECEIVE loopback connections (the
+/// daemon's ping, a same-machine player). `-is` is the tool's documented
+/// inbound half of the loopback story; best-effort like the outbound
+/// exemption — a refusal leaves the server reachable from the LAN and
+/// unreachable from the box itself, which the players surface would
+/// surface as an honest empty room.
+fn enable_loopback_inbound(sid_string: &str) {
+    let _ = std::process::Command::new("checknetisolation")
+        .args(["loopbackexempt", "-is", &format!("-p={sid_string}")])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
 /// Delete the server's AppContainer profile (server removal). Self-
 /// contained: the container's SID is re-derived from the profile name so
 /// the loopback exemption added at spawn is removed here without the
@@ -595,14 +609,22 @@ pub fn spawn_appcontainer(
     // 1. The jail's grant: the tree gets its container ACE.
     grant_tree_access(&spec.working_dir, container.sid)?;
 
-    // 2. The network policy's one piece of machine state: local-only
-    //    needs the container exempted from the default loopback block
-    //    (inbound players are unaffected either way; this is about the
-    //    server's own outbound to LOCAL services). BlockedOutbound and
-    //    Unrestricted need nothing here.
+    // 2. The network policy's one piece of machine state. Two halves:
+    //    - OUTBOUND: local-only needs the container exempted from the
+    //      default loopback block (the server's own outbound to LOCAL
+    //      services). BlockedOutbound and Unrestricted need nothing.
+    //    - INBOUND: same-machine clients — the daemon's own status ping,
+    //      a player joining from the box via 127.0.0.1 — must reach the
+    //      server's listener. Network isolation gates a container's
+    //      loopback RECEIVING too, and Server SKUs drop it silently (the
+    //      connect just times out — no refusal to learn from). The
+    //      sandbox's threat model gates the container's own outbound;
+    //      accepting players was never its business, so the inbound
+    //      enablement rides every policy.
     if network == NetworkSandbox::LocalOnly {
         add_loopback_exemption(&container.sid_string);
     }
+    enable_loopback_inbound(&container.sid_string);
 
     // 2. Stdio pipes: the JVM's console lives in the log pipeline.
     let (stdin_ours, stdin_child) = make_pipe(true)?;
