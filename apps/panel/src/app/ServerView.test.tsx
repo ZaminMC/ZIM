@@ -1,7 +1,7 @@
 // ServerView: buttons follow the ADR-0005 ladder, errors render with
 // remediation, crash cards surface the daemon's classification.
 
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerView, availableVerbs } from "./ServerView";
 import { ProtocolRequestError } from "../protocol/client";
@@ -104,7 +104,13 @@ describe("ServerView", () => {
     const stop = screen.getByRole("button", { name: "Stop" });
     expect((stop as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Kill server" })).toBeNull();
+    // Kill rides behind the More disclosure — a running server offers it,
+    // but not as a loose toolbar button (jsdom does not hide closed
+    // <details> subtrees, so the placement is pinned structurally).
+    const more = screen.getByText("More");
+    const disclosure = more.closest("details") as HTMLDetailsElement | null;
+    expect(disclosure).toBeTruthy();
+    expect(disclosure?.hasAttribute("open")).toBe(false);
   });
 
   it("disables everything while a verb is in flight for that server", () => {
@@ -117,10 +123,13 @@ describe("ServerView", () => {
   it("requires confirmation before force-killing a server", () => {
     render(<ServerView serverId="alpha" />);
     fireEvent.click(screen.getByText("More"));
+    // Only the menu item exists before the dialog opens.
     fireEvent.click(screen.getByRole("button", { name: "Kill server" }));
-    expect(screen.getByRole("dialog", { name: "Force-kill Alpha?" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Force-kill Alpha?" });
     expect(mocks.killServer).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Kill server" }));
+    // The menu item is still in the DOM behind the disclosure — scope the
+    // confirm to the dialog, or the two names collide.
+    fireEvent.click(within(dialog as HTMLElement).getByRole("button", { name: "Kill server" }));
     expect(mocks.killServer).toHaveBeenCalledWith("alpha");
   });
 

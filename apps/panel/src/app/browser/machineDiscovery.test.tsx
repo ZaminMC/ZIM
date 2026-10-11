@@ -14,6 +14,7 @@ vi.mock("../../state/actions", () => ({
 }));
 
 import { discoverServers } from "../../state/actions";
+import { useConnection } from "../../state/connection";
 const discoverMock = discoverServers as ReturnType<typeof vi.fn>;
 
 function candidateOf(over: Partial<DiscoveredServer>): DiscoveredServer {
@@ -27,6 +28,10 @@ function candidateOf(over: Partial<DiscoveredServer>): DiscoveredServer {
 }
 
 beforeEach(() => {
+  // The scan is a daemon request and gates on the connection (the cold-launch
+  // race fix): without a ready wire the section sits in "Connecting to ZIM…"
+  // and the scan never runs. The tests answer as a ready daemon would.
+  useConnection.setState({ status: "ready", daemon: { name: "zamind", version: "0.4.34" } });
   discoverMock.mockReset().mockResolvedValue({
     servers: [],
     roots: [],
@@ -55,7 +60,11 @@ describe("MachineDiscovery", () => {
   it("renders nothing when the scan answers nothing", async () => {
     render(<MachineDiscovery query="" onOpen={() => {}} />);
     await waitFor(() => expect(discoverMock).toHaveBeenCalled());
-    expect(screen.queryByText("On this machine")).toBeNull();
+    // The scan's answer races the section's loading phase — wait the
+    // answer out: once it lands empty, the whole section unmounts.
+    await waitFor(() =>
+      expect(screen.queryByText("On this machine")).toBeNull(),
+    );
   });
 
   it("lists directories and jars with their evidence, registered rows never shown", async () => {

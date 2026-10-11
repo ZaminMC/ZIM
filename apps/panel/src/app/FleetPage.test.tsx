@@ -89,7 +89,6 @@ describe("the stats and the grid", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenLastCalledWith("delta");
   });
-  });
 });
 
 describe("the filter", () => {

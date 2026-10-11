@@ -6,12 +6,27 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The wire subscribes to the events stream only once the client's status
+// lane reports READY (the cold-launch race fix): a subscription attempted
+// before a transport exists fails once and is never registered again. The
+// mock captures the status listeners so a test can let READY arrive — and
+// the first test pins that nothing is subscribed before it does.
+const harness = vi.hoisted(() => ({
+  statusListeners: [] as ((status: string) => void)[],
+}));
+
 vi.mock("../protocol/client", () => ({
   ProtocolClient: class {
     connect = vi.fn().mockResolvedValue(undefined);
     reconnect = vi.fn().mockResolvedValue(undefined);
     setAuth = vi.fn();
-    onStatus = vi.fn().mockReturnValue(() => {});
+    onStatus = vi.fn().mockImplementation((listener: (status: string) => void) => {
+      harness.statusListeners.push(listener);
+      return () => {
+        const at = harness.statusListeners.indexOf(listener);
+        if (at >= 0) harness.statusListeners.splice(at, 1);
+      };
+    });
     subscribe = vi.fn().mockResolvedValue({ dispose: vi.fn(), result: null });
   },
 }));
@@ -46,6 +61,11 @@ const getServerMock = getServer as unknown as ReturnType<typeof vi.fn>;
 const deliverMock = deliver as unknown as ReturnType<typeof vi.fn>;
 const notifyGateMock = shouldNotify as unknown as ReturnType<typeof vi.fn>;
 
+/** The daemon's hello completed: every waiting wire continuation runs. */
+function readyArrives(): void {
+  for (const listener of [...harness.statusListeners]) listener("ready");
+}
+
 type Handler = {
   onPayload: (n: { payload: unknown }) => void;
   onRegistered?: (result: { snapshot?: { servers: unknown[] } }) => void;
@@ -74,6 +94,7 @@ beforeEach(() => {
   // The focus gate returns to "away" — a test that mutes notifications
   // must not leak its silence into the next one.
   notifyGateMock.mockReset().mockReturnValue(true);
+  harness.statusListeners.length = 0;
   useServers.setState({ servers: {}, crashes: {} });
   useJobs.setState({ jobs: {} });
 });
@@ -84,12 +105,16 @@ afterEach(() => {
 });
 
 describe("the wire", () => {
-  it("startWire binds, connects once, and opens the events stream — idempotently", () => {
+  it("startWire binds, connects once, and opens the events stream — idempotently", async () => {
     startWire();
     startWire();
     startWire();
     expect(connectMock).toHaveBeenCalledTimes(1);
-    expect(subscribeMock).toHaveBeenCalledTimes(1);
+    // The subscription waits for READY — attempting it beside connect()
+    // lost the cold-launch race and died unregistered.
+    expect(subscribeMock).not.toHaveBeenCalled();
+    readyArrives();
+    await vi.waitFor(() => expect(subscribeMock).toHaveBeenCalledTimes(1));
     expect(subscribeMock.mock.calls[0]?.[0]).toBe("events");
   });
 
