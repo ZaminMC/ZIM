@@ -563,7 +563,7 @@ fn prepared_environment(env: &[(String, String)], jail_tmp: &str) -> Vec<(String
     // TMP/TEMP ride inside the sorted list — never appended past it.
     entries.push(("TEMP".to_owned(), jail_tmp.to_owned()));
     entries.push(("TMP".to_owned(), jail_tmp.to_owned()));
-    entries.sort_by(|a, b| a.0.to_uppercase().cmp(&b.0.to_uppercase()));
+    entries.sort_by_key(|entry| entry.0.to_uppercase());
     entries
 }
 
