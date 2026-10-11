@@ -216,6 +216,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // "/d/ZIM" is absolute only from Unix's point of view —
+                 // on Windows it lacks a drive, so the Windows half of the law lives
+                 // in the test below.
     fn an_absolute_redirect_wins_over_the_default() {
         let verdict = resolve_data_dir_from(
             None,
@@ -225,6 +228,20 @@ mod tests {
         assert_eq!(verdict.root, PathBuf::from("/d/ZIM"));
         assert!(verdict.redirected);
         assert!(!verdict.redirect_ignored);
+    }
+
+    #[test]
+    #[cfg(windows)] // the same text, from Windows' point of view: no
+                    // drive, no absoluteness — the redirect is ignored and says so.
+    fn a_driveless_redirect_is_relative_on_windows_and_ignored() {
+        let verdict = resolve_data_dir_from(
+            None,
+            Some("  /d/ZIM  \n"),
+            Path::new(r"C:\Users\u\AppData\Local\ZIM"),
+        );
+        assert_eq!(verdict.root, PathBuf::from(r"C:\Users\u\AppData\Local\ZIM"));
+        assert!(!verdict.redirected);
+        assert!(verdict.redirect_ignored);
     }
 
     #[test]
