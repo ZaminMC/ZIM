@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { FrameApp } from "./FrameApp";
 import "../tokens.css";
 import "./frame.css";
+import "./frame-overrides.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root is missing from frame.html");
