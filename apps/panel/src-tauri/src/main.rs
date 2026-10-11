@@ -450,6 +450,10 @@ fn main() {
                     if window.label() == TRAY_WINDOW {
                         api.prevent_close();
                         let _ = window.hide();
+                        // The first park speaks: where ZIM went, where the
+                        // real Quit lives (tray::first_park_note's law —
+                        // once per installation, then silent).
+                        tray::first_park_note(window.app_handle());
                     }
                 }
                 // A runtime window's death drops its strip (shell
@@ -490,6 +494,7 @@ fn main() {
             shell::host::shell_drag,
             shell::host::shell_window_resized,
             shell::host::shell_popup,
+            shell::host::shell_popup_focus,
             shell::host::shell_popup_boot,
             shell::host::shell_popup_close,
             shell::host::shell_popup_update,

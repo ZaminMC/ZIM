@@ -1708,6 +1708,9 @@ pub async fn shell_popup(
     } else {
         popup_rect((size.width, size.height), &kind, x, y)
     };
+    // Whether this open REPLACES a live popup — the destroy/create beat
+    // law below waits out the replaced widget's teardown.
+    let had_popup = state.lock().popups.contains_key(&window_name);
     dismiss_popup(&app, &state, &window_name);
     let label = popup_label(&window_name);
     // THE BOOT ORDER LAW (the audit's P0): the state lands FIRST, the
@@ -1729,9 +1732,33 @@ pub async fn shell_popup(
             meta: meta.clone(),
         },
     );
+    // THE DESTROY/CREATE BEAT LAW: a popup that was just dismissed in this
+    // same command must not share its pump turn with the popup that
+    // replaces it — on Windows the WebView2 controller's teardown and the
+    // next controller's creation are both async operations on the same
+    // parent HWND, and overlapping them is a native crash class (the
+    // right-click-on-a-hovered-tab path: the hover card closes, the menu
+    // opens, 100% of the time). One async-runtime yield stays OFF the
+    // event loop (the re-entrancy law) and lets the close's cleanup land
+    // before the create begins.
+    if had_popup {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
     if let Err(e) = host_window.add_child(
         tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
-            .transparent(true),
+            .transparent(true)
+            // THE FOCUS LAW (the founder's 100% right-click crash): the
+            // builder's default is a native MoveFocus INSIDE the creation
+            // completion — and the menu's own focus demand must never race
+            // the controller's first composition on the WebView2s this
+            // crash has been observed on. Every popup is therefore born
+            // UNfocused (the hover card's SetCanActivate(false) law,
+            // applied to all four shapes), and the menu takes the focus
+            // FROM ITS OWN FIRST PAINT — PopupApp calls `shell_popup_focus`
+            // one rAF after its boot lands, the safest moment a focus
+            // request can exist at. Chromium's menu keeps the keyboard
+            // contract; the crash window is never entered.
+            .focused(false),
         position,
         popup_size,
     ) {
@@ -1743,27 +1770,20 @@ pub async fn shell_popup(
         "shell://popup-boot",
         serde_json::json!({ "kind": kind, "tab_id": tab_id, "group_id": group_id, "meta": meta }),
     );
-    // Focus follows the popup: Escape and the arrow keys work from the
-    // first keystroke, exactly like a freshly opened OS menu. The hover
-    // card breaks the rule on purpose — SetCanActivate(false) +
-    // set_accept_events(false) upstream: the card never takes the
-    // focus, it only paints (webview hosting has no click-through, so
-    // the card also yields any press on its own band — PopupApp's law).
-    // The focus call defers ONE main-thread beat: it lands after the
-    // creation dispatch has settled instead of racing the webview's
-    // first composition — the menu's keyboard contract is unchanged,
-    // and the fresh-controller focus window (a native crash class on
-    // some WebView2 runtimes) is never entered.
-    if !is_card {
-        let app_for_focus = app.clone();
-        let label_for_focus = label.clone();
-        let _ = app.run_on_main_thread(move || {
-            if let Some(popup) = app_for_focus.get_webview(&label_for_focus) {
-                let _ = popup.set_focus();
-            }
-        });
-    }
     Ok(true)
+}
+
+/// The popup's own focus request — one rAF after its boot lands (the
+/// first composition is complete; the controller is a real, painted
+/// surface now, not a creation race). The hover card NEVER calls this
+/// (upstream's SetCanActivate(false) + set_accept_events(false): the card
+/// only paints); the menus call it and gain the keyboard contract from
+/// their first painted frame. Focusing a webview that already died is a
+/// no-op, never an error.
+#[tauri::command]
+pub fn shell_popup_focus(window: tauri::Webview) -> Result<(), String> {
+    let _ = window.set_focus();
+    Ok(())
 }
 
 /// The overlay asks for its context: kind, the addressed tab, and the

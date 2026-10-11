@@ -754,3 +754,47 @@ describe("<PopupApp /> the hover card", () => {
     expect(invoked).toHaveLength(0);
   });
 });
+
+describe("<PopupApp /> the first-paint focus law", () => {
+  beforeEach(() => {
+    invoked = [];
+    eventListeners.length = 0;
+    bootContext(null);
+    history.replaceState(null, "", "/popup.html");
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+  afterEach(() => {
+    cleanup();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+
+  // The founder's 100% right-click crash lives in the host's focus race
+  // with a fresh WebView2 controller — the host births every popup
+  // UNfocused and the overlay asks for the focus from its own first
+  // painted frame (shell_popup_focus, one rAF after boot). These two pin
+  // the split: a menu asks, the hover card never does.
+  it("a menu asks for the focus one frame after its boot lands", async () => {
+    tauriLane();
+    bootContext(TAURI_CONTEXT);
+    render(<PopupApp />);
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).not.toBeNull();
+    });
+    await waitFor(() => {
+      expect(invoked.some((call) => call.cmd === "shell_popup_focus")).toBe(true);
+    });
+    expect(invoked.filter((call) => call.cmd === "shell_popup_focus")).toHaveLength(1);
+  });
+
+  it("the hover card never asks — it only paints (SetCanActivate(false))", async () => {
+    tauriLane();
+    bootContext({ kind: "hover-card", tab_id: null, card: HOVER_TAB_CARD });
+    const { container } = render(<PopupApp />);
+    await waitFor(() => {
+      expect(container.querySelector(".hover-card")).not.toBeNull();
+    });
+    // Let every pending frame and microtask drain before the verdict.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(invoked.some((call) => call.cmd === "shell_popup_focus")).toBe(false);
+  });
+});

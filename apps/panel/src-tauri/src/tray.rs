@@ -740,3 +740,41 @@ pub fn on_menu_event<R: Runtime>(app: &AppHandle<R>, state: &TrayState, id: &str
         _ => {}
     }
 }
+
+/// The first park's honest word (the founder's exit complaint, spoken at
+/// the moment it bites): closing the window PARKS ZIM in the tray — the
+/// resident daemon and its servers deliberately outlive the panel (the
+/// bundle's own promise) — and an operator who expected a full exit
+/// discovers the truth the hard way, mid-update, as "Error opening file
+/// for writing: zamind.exe". So the FIRST close-to-tray ever says where
+/// ZIM went and where the real Quit lives. Once per installation (a
+/// marker file in the app data dir); every later park is silent — a
+/// toast on every close would be its own noise crime.
+pub fn first_park_note(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+
+    const MARKER: &str = "tray-park-note-v1";
+    let dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(_) => return, // nowhere to remember; stay silent rather than nag
+    };
+    if dir.join(MARKER).exists() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let shown = app
+        .notification()
+        .builder()
+        .title("ZIM is still running")
+        .body(
+            "ZIM parked in the tray — your servers stay up. \
+             Right-click the tray icon and choose Quit ZIM to exit fully.",
+        )
+        .show()
+        .is_ok();
+    // The marker lands only on a shown toast: a failed notification is
+    // retried on the next park, never assumed seen.
+    if shown {
+        let _ = std::fs::write(dir.join(MARKER), b"shown");
+    }
+}

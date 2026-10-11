@@ -244,6 +244,22 @@ export function PopupApp() {
         // analysis can't see the cleanup's write, and the overlay's
         // unmount must not win a race with the boot's reply.
         if (!(disposed as boolean)) setCtx(context);
+        // THE FOCUS LAW (the founder's 100% right-click crash): the host
+        // births every popup UNfocused — a fresh WebView2 controller's
+        // focus race is the native crash class the crash lives in. The
+        // menu asks for the focus from its own first painted frame
+        // instead: one rAF after the boot lands, the composition is a
+        // real, painted surface and the request cannot race creation.
+        // The hover card never asks — upstream's SetCanActivate(false):
+        // the card only paints, it never holds the focus, so no key
+        // ever reaches it.
+        if (isTauri() && context.kind !== "hover-card") {
+          requestAnimationFrame(() => {
+            if (!(disposed as boolean)) {
+              void invoke("shell_popup_focus").catch(() => {});
+            }
+          });
+        }
       } catch {
         // The popup died before its boot answered; the host tears it
         // down, nothing to render.
