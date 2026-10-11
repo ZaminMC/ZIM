@@ -466,10 +466,14 @@ export function FilesView({ serverId }: { serverId: string }) {
     [openPath, draft, saved],
   );
 
-  // A different file restarts the mode choice: the specialized tab is a
-  // claim about THIS file, and it does not travel to the next one.
+  // A different file restarts the mode choice — BOTH halves of it: the
+  // specialized tab is a claim about THIS file, and so is Compose. A
+  // compose mode that leaked onto the next file parsed it as
+  // properties — an edit then re-rendered its lines in `key=value`
+  // syntax, corrupting a YAML on save. The choice does not travel.
   useEffect(() => {
     setSpecializedMode(false);
+    setComposeMode(false);
   }, [openPath]);
 
   // Save, then the confirmed restart: two promises, one honest order —

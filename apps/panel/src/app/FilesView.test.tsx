@@ -304,6 +304,48 @@ describe("FilesView", () => {
     expect(saved).toContain("motd=Hello World");
   });
 
+  it("the compose mode is a claim about ONE file — it never leaks onto the next", async () => {
+    // Compose's home is server.properties; the operator leaves for a
+    // config.yml through the breadcrumb. The stuck mode used to parse
+    // the YAML as properties — and an edit would re-render its lines in
+    // `key=value` syntax, corrupting the file on save. The mode choice
+    // must restart with the file (the comment's own law).
+    const props = "server-port=25565\nmotd=Hello\n";
+    const yaml = "server-port: 25565\nmotd: Hello\n";
+    listFilesMock
+      .mockResolvedValueOnce(listing([entryOf("server.properties", "file", { sizeBytes: props.length })]))
+      .mockResolvedValueOnce(
+        listing([
+          entryOf("server.properties", "file", { sizeBytes: props.length }),
+          entryOf("config.yml", "file", { sizeBytes: yaml.length }),
+        ]),
+      );
+    readWholeFileMock
+      .mockResolvedValueOnce(new TextEncoder().encode(props))
+      .mockResolvedValueOnce(new TextEncoder().encode(yaml));
+
+    render(<FilesView serverId="smp" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "server.properties" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "server.properties" }));
+    await waitFor(() => expect(screen.getByLabelText(/Editing server.properties/)).toBeTruthy());
+
+    // Compose on — the mode's home file.
+    fireEvent.click(screen.getByRole("tab", { name: "Compose" }));
+    await waitFor(() => expect(screen.getByText("Server Port")).toBeTruthy());
+
+    // Leave through the breadcrumb (no dirty draft stands in the way),
+    // then open the YAML.
+    fireEvent.click(screen.getByRole("button", { name: "root" }));
+    await waitFor(() => expect(screen.getByText("config.yml")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "config.yml" }));
+
+    // The YAML opens in Source — the textarea is the editor, and the
+    // compose surface (whose parse would wear the file's `:` syntax as
+    // pairs) never renders for it.
+    await waitFor(() => expect(screen.getByLabelText(/Editing config.yml/)).toBeTruthy());
+    expect(screen.queryByText("Server Port")).toBeNull();
+  });
+
   it("save and restart is offered for boot files, behind its confirm", async () => {
     const raw = "online-mode=true\n";
     listFilesMock.mockResolvedValue(listing([entryOf("server.properties", "file", { sizeBytes: raw.length })]));
