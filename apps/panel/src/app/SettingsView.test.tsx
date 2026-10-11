@@ -1,7 +1,7 @@
 // SettingsView regressions (§39, ADR-0019): identity edits reach the wire
-// and refresh the panel's server record through the ordinary read path,
-// reserved rooms are stated rather than faked (§82), and local validation
-// refuses a blank name or a nonsense retention without a request.
+// and refresh the panel's server record through the ordinary read path.
+// Unsupported options stay off the page; local validation refuses
+// a blank name or a nonsense retention without a request.
 
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -125,14 +125,15 @@ describe("SettingsView", () => {
     expect(setServerConfigMock.mock.calls.length).toBe(0);
   });
 
-  it("reserved rooms are stated, never faked (§82)", async () => {
+  it("shows only settings backed by the current configuration model", async () => {
     render(<SettingsView serverId="demo" />);
     await screen.findByLabelText("Server name");
-    expect(screen.getAllByText("reserved").length).toBe(4); // icon, restart, crash, logs
-    expect(screen.getByText(/icon picker/)).toBeTruthy();
-    expect(screen.getByText(/Restart policy/)).toBeTruthy();
-    expect(screen.getByText(/Crash policy/)).toBeTruthy();
-    expect(screen.getByText(/Log retention/)).toBeTruthy();
+    expect(screen.getByText("Backup retention")).toBeTruthy();
+    expect(screen.getByText("Join address")).toBeTruthy();
+    expect(screen.queryByText(/Server icon/)).toBeNull();
+    expect(screen.queryByText(/Restart policy/)).toBeNull();
+    expect(screen.queryByText(/Crash policy/)).toBeNull();
+    expect(screen.queryByText(/Log retention/)).toBeNull();
   });
 
   it("an unchanged form keeps the save disabled", async () => {
