@@ -213,7 +213,12 @@ fn main() {
             })
     });
     let listener = port.map(|port| {
-        TcpListener::bind(("127.0.0.1", port))
+        // Wildcard, like the real thing: Paper binds every interface
+        // unless server.properties pins server-ip. A loopback-only bind
+        // would hide the sandboxed listener from the machine's own
+        // non-loopback addresses — the address the daemon's ping falls
+        // back to when the container's loopback receiving is isolated.
+        TcpListener::bind(("0.0.0.0", port))
             .unwrap_or_else(|e| panic!("cannot bind port {port}: {e}"))
     });
     if let Some(listener) = listener {

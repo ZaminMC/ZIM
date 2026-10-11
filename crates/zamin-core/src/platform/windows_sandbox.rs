@@ -317,20 +317,33 @@ fn run_briefly(program: &str, args: &[String], seconds: u64) {
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
     else {
-        return; // the tool is absent or unspawnable: best-effort, done
+        // The tool is absent or unspawnable: best-effort, done — but the
+        // outcome is diagnostic gold when a grant silently never landed.
+        tracing::info!(target: "zamin_core::sandbox", program, ?args, outcome = "unspawnable", "best-effort tool finished");
+        return;
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    let outcome;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) | Err(_) => return,
+            Ok(Some(status)) => {
+                outcome = format!("exit={status}");
+                break;
+            }
             Ok(None) if std::time::Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return;
+                outcome = "deadline-killed".to_owned();
+                break;
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+            Err(error) => {
+                outcome = format!("err={error}");
+                break;
+            }
         }
     }
+    tracing::info!(target: "zamin_core::sandbox", program, ?args, outcome, "best-effort tool finished");
 }
 
 /// Exempt the container from the default loopback block (local-only).

@@ -1715,7 +1715,32 @@ impl Engine {
 
         let started = tokio::time::Instant::now();
         let addr = format!("127.0.0.1:{port}");
-        let ping = zamin_core::ping::server_list_ping(&addr, "127.0.0.1", port).await;
+        let mut ping = zamin_core::ping::server_list_ping(&addr, "127.0.0.1", port).await;
+        if ping.is_err() {
+            // Loopback to a sandboxed listener is doubly gated on Windows:
+            // the container's receiving side rides network isolation even
+            // with the inbound enablement, and the drop is silent (a full
+            // timeout, never a refusal). The same listener answers through
+            // the machine's own addresses, which ride no loopback
+            // isolation. One bounded alternate attempt — the room stays
+            // honestly empty when nothing answers.
+            let host = std::env::var("COMPUTERNAME")
+                .or_else(|_| std::env::var("HOSTNAME"))
+                .unwrap_or_default();
+            if !host.is_empty() {
+                if let Ok(addrs) = tokio::net::lookup_host((host.as_str(), port)).await {
+                    if let Some(target) = addrs.into_iter().find(|t| !t.ip().is_loopback()) {
+                        let alt = target.to_string();
+                        tracing::debug!(
+                            server = %server_id.as_str(),
+                            alt,
+                            "loopback ping unanswered; trying the machine's own address"
+                        );
+                        ping = zamin_core::ping::server_list_ping(&alt, "127.0.0.1", port).await;
+                    }
+                }
+            }
+        }
         let latency = started.elapsed().as_millis() as u32;
         match ping {
             Ok(status) => {
