@@ -11,11 +11,12 @@ import { discoverServers } from "../../state/actions";
 import type { DiscoveredServer, DiscoverResult } from "../../protocol/types";
 import { ErrorNote } from "../../ui/ErrorNote";
 import { describeError } from "../../state/errors";
+import { useConnection } from "../../state/connection";
 import styles from "./NewTabPage.module.css";
 
 /** The register-and-open verb's id rules mirror the daemon's ServerId:
- *  lowercase alphanumerics with dashes/underscores. A folder named
- *  "My Server 2!" becomes "my-server-2". */
+ * lowercase alphanumerics with dashes/underscores. A folder named
+ * "My Server 2!" becomes "my-server-2". */
 export function slugFromPath(path: string): string {
   const base = path.split(/[\\/]/).filter(Boolean).pop() ?? "server";
   const slug = base
@@ -29,6 +30,7 @@ export function slugFromPath(path: string): string {
 const DEBOUNCE_MS = 400;
 
 export function useMachineDiscovery(query: string) {
+  const connectionStatus = useConnection((s) => s.status);
   const [phase, setPhase] = useState<
     { kind: "idle" } | { kind: "loading" } | { kind: "error"; note: string }
   >({ kind: "idle" });
@@ -38,6 +40,16 @@ export function useMachineDiscovery(query: string) {
   const answered = useRef("");
 
   useEffect(() => {
+    // Discovery is a daemon request, not a local filesystem scan. Waiting
+    // for the connection avoids the cold-launch race where NewTabPage ran
+    // the zero-delay scan before ProtocolClient had completed its hello,
+    // producing the misleading "connection dropped" error once and never
+    // retrying it.
+    if (connectionStatus !== "ready") {
+      setPhase({ kind: "loading" });
+      return;
+    }
+
     const needle = query.trim();
     const timer = window.setTimeout(() => {
       answered.current = needle;
@@ -57,9 +69,9 @@ export function useMachineDiscovery(query: string) {
         });
     }, needle === "" ? 0 : DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [query, connectionStatus]);
 
-  return { phase, rows, skipped, truncated };
+  return { phase, rows, skipped, truncated, connectionStatus };
 }
 
 export function MachineRows({
@@ -110,7 +122,7 @@ export function MachineDiscovery({
   query: string;
   onOpen: (candidate: DiscoveredServer) => void;
 }) {
-  const { phase, rows, skipped, truncated } = useMachineDiscovery(query);
+  const { phase, rows, skipped, truncated, connectionStatus } = useMachineDiscovery(query);
   if (phase.kind === "error") {
     return (
       <div className={styles.machine} role="alert">
@@ -130,7 +142,7 @@ export function MachineDiscovery({
       <h2 className={styles.machineTitle}>On this machine</h2>
       {phase.kind === "loading" ? (
         <p className={styles.machineNote} role="status">
-          Scanning the configured roots…
+          {connectionStatus === "ready" ? "Scanning the configured roots…" : "Connecting to ZIM…"}
         </p>
       ) : null}
       <MachineRows rows={rows} onOpen={onOpen} />
