@@ -1039,12 +1039,16 @@ pub async fn shell_command(
             // DEV_TOOLS and OPEN_LOGS are OS-facing too (devtools pane,
             // the log folder in the platform file manager). The update
             // verbs ring the frame webview — the lane's owner.
+            // MOVE_TAB_TO_NEW_WINDOW also mutates the source strip, but
+            // its tear-off spawns a whole window (which locks the state
+            // itself) — deferred with the window verbs.
             cmd::WINDOW_MINIMIZE
             | cmd::WINDOW_TOGGLE_MAXIMIZE
             | cmd::WINDOW_CLOSE
             | cmd::FOCUS_LOCATION
             | cmd::TOGGLE_PALETTE
             | cmd::NEW_WINDOW
+            | cmd::MOVE_TAB_TO_NEW_WINDOW
             | cmd::DEV_TOOLS
             | cmd::OPEN_LOGS
             | cmd::UPDATE_INSTALL
@@ -1373,6 +1377,72 @@ pub async fn shell_command(
             let (sx, sy) = (140.0 + 26.0 * cascade, 90.0 + 26.0 * cascade);
             spawn_tearoff(&app, &state, Destination::New, sx, sy)?;
             return Ok(());
+        }
+        Some(cmd::MOVE_TAB_TO_NEW_WINDOW) => {
+            // §50's tab-menu tear-off — the drag's law without the drag:
+            // the context tab (or its whole drag block — a selected
+            // context tab carries the selection, MaybeStartDrag's own
+            // scope) leaves through detach_block's single-pass removal,
+            // the source strip repairs itself, and the block boots a
+            // fresh window through the same spawn_tearoff_block the
+            // detached drop speaks. The tabs are DESTINATIONS — views:
+            // no server restarts, no process duplicates, daemon
+            // ownership never moves (§50's never-list rides the
+            // architecture, not a check).
+            let moved = {
+                let mut inner = state.lock();
+                let strip = inner.strip(&window_name);
+                match arg_id.or(strip.active) {
+                    Some(target) => {
+                        let ids = strip.drag_block(target);
+                        let block = strip.detach_block(&ids);
+                        // The source strip lost real tabs — the mutation
+                        // saves (the tear-off's own strip is not
+                        // persisted; nothing saves for it).
+                        inner.save();
+                        Some((target, block))
+                    }
+                    None => None,
+                }
+            };
+            let Some((target, block)) = moved else {
+                return Err("no tab to move".into());
+            };
+            if block.is_empty() {
+                return Err("tab vanished".into());
+            }
+            // The menu verb has no pointer to land on — the new window's
+            // ORIGIN opens at the SOURCE's own origin plus the cascade
+            // offset (the tear-off's near-the-hand feel, anchored where
+            // the operator's attention already is); the fixed cascade is
+            // the fallback when the OS won't say where the source is.
+            // spawn_tearoff_block anchors its window at drop − (120, 20)
+            // (the carried tab lands under the hand), so the desired
+            // origin rides as origin + the anchor — the compensation is
+            // this arm's own, documented here.
+            let cascade = state.lock().next_window as f32;
+            let fallback = (140.0 + 26.0 * cascade, 90.0 + 26.0 * cascade);
+            let (origin_x, origin_y) = match window_for(&app, &window_name) {
+                Ok(window) => match (window.outer_position(), window.scale_factor()) {
+                    (Ok(pos), Ok(scale)) => (
+                        pos.x as f32 / scale as f32 + 26.0,
+                        pos.y as f32 / scale as f32 + 26.0,
+                    ),
+                    _ => fallback,
+                },
+                Err(_) => fallback,
+            };
+            spawn_tearoff_block(
+                &app,
+                &state,
+                block,
+                target,
+                origin_x + 120.0,
+                origin_y + 20.0,
+            )?;
+            // No early return: the SOURCE strip lost the block — the
+            // emit + sync below re-render it (the same source refresh
+            // the between-windows move performs).
         }
         Some(cmd::DEV_TOOLS) => {
             // The active tab's developer tools — the shell's own page,

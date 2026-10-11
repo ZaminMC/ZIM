@@ -12,6 +12,9 @@ export const CMD = {
   SELECT_TAB_0: 34018,
   DUPLICATE_TAB: 34027,
   RESTORE_TAB: 34028,
+  // §50's tab-menu tear-off — the drag's spawn_tearoff_block path
+  // without the drag (desktop-only; the demo carrier has no windows).
+  MOVE_TAB_TO_NEW_WINDOW: 34056,
   ADD_NEW_TAB_TO_GROUP: 34100,
   CLOSE_TAB_GROUP: 34104,
   BOOKMARK_THIS_TAB: 35000,

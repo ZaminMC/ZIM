@@ -127,6 +127,7 @@ describe("<PopupApp /> the tab menu", () => {
       "Pin tab",
       "Mute tab",
       "Duplicate",
+      "Move tab to new window",
     ];
     for (const label of labels) {
       expect(screen.getByRole("menuitem", { name: label })).toBeTruthy();
@@ -183,6 +184,20 @@ describe("<PopupApp /> the tab menu", () => {
     });
     const command = invoked.find((c) => c.cmd === "shell_command");
     expect(command?.args).toEqual({ id: CMD.DUPLICATE_TAB, arg: { tab_id: 7 } });
+    expect(invoked.some((c) => c.cmd === "shell_popup_close")).toBe(true);
+  });
+
+  it("moves the tab to a new window — §50's tear-off rides the context tab", async () => {
+    await renderBooted();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Move tab to new window/ }));
+    await waitFor(() => {
+      expect(invoked.some((c) => c.cmd === "shell_command")).toBe(true);
+    });
+    const command = invoked.find((c) => c.cmd === "shell_command");
+    expect(command?.args).toEqual({
+      id: CMD.MOVE_TAB_TO_NEW_WINDOW,
+      arg: { tab_id: 7 },
+    });
     expect(invoked.some((c) => c.cmd === "shell_popup_close")).toBe(true);
   });
 });

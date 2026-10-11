@@ -26,8 +26,10 @@ pub const RESTORE_TAB: u32 = 34028;
 pub const MOVE_TAB_NEXT: u32 = 34032;
 /// IDC_MOVE_TAB_PREVIOUS 34033.
 pub const MOVE_TAB_PREVIOUS: u32 = 34033;
-/// IDC_MOVE_TAB_TO_NEW_WINDOW 34056 (reserved — not wired this phase).
-#[allow(dead_code)]
+/// IDC_MOVE_TAB_TO_NEW_WINDOW 34056 — §50's tab-menu tear-off: the
+/// context tab rides to a fresh window through the drag's own
+/// spawn_tearoff_block path (the daemon keeps owning the process; the
+/// window is only a client).
 pub const MOVE_TAB_TO_NEW_WINDOW: u32 = 34056;
 /// IDC_ADD_NEW_TAB_TO_GROUP 34100.
 pub const ADD_NEW_TAB_TO_GROUP: u32 = 34100;

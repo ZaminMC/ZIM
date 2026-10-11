@@ -506,7 +506,8 @@ export function PopupApp() {
         >
           {/* Item-for-item tab_menu_model.cc's Build(): new tab to the
               right; the group adds (the "existing groups" submenu rows
-              flattened under their verb); remove-from-group; then the
+              flattened under their verb); remove-from-group; §50's
+              move-to-new-window tear-off; then the
               reload/duplicate/pin/mute block; the §54 axis verb; the
               close block closes the menu. */}
           <MenuItem
@@ -544,6 +545,11 @@ export function PopupApp() {
               onClick={() => void run(CMD.REMOVE_TAB_FROM_GROUP, { tab_id: ctx.tab_id })}
             />
           ) : null}
+          <MenuItem
+            glyph={<IconNewWindow />}
+            label="Move tab to new window"
+            onClick={() => void run(CMD.MOVE_TAB_TO_NEW_WINDOW, { tab_id: ctx.tab_id })}
+          />
           <div className="menu-sep" />
           <MenuItem
             glyph={<IconReload />}

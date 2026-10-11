@@ -27,7 +27,7 @@ A group is `{ label, color, collapsed }` in the store; membership is the tab's `
 
 ### The context menu carries §48 with honest rooms
 
-Live: New tab to the right (the new tab stays a singleton — a resting one moves over instead of cloning), Reload, Duplicate, Pin/Unpin, Add tab to new group…, Move to group ▸, Remove from group, Reopen closed tab, Close, Close others, Close tabs to the right. Reserved, named, disabled — each with a tooltip saying so: Mute (no audio machinery), Move tab to new window (real window management is its own slice, §50), Share tab with Dutchmen (the AI room, kept), Show tabs vertically.
+Live, in the vision's own order (the shell's ported tab_menu_model.cc): New tab to the right, Add tab to new group… (the existing-groups rows flattened under it), Remove from group, Move tab to new window (§50 — the drag's own `spawn_tearoff_block` path without the drag: the context tab or its whole drag block tears off, the source strip repairs itself, no server restarts because a tab is a view), then Reload, Duplicate, Pin/Unpin, Mute/Unmute, Show tabs vertically (§54), and the close block — Close (the selection's plural law), Close other tabs, Close tabs to the right. Reserved, named in this document only: the §48 Dutchmen block ("Share tab with Dutchmen / Start new chat with Dutchmen") — the AI room, kept; nothing renders disabled placeholders for it.
 
 ### Isolation (§51) is a boundary with a recovery verb
 
@@ -38,4 +38,4 @@ The mounted tab content sits inside an error boundary. A view that throws render
 - Storage moves to version 2: v1 payloads (no ids, an `activeKey` destination string) migrate by assigning fresh ids and mapping the stored key to the first tab resting there. Torn payloads rehydrate as the default session; ids regenerate on collision; memberships without groups and groups without members cannot survive rehydration.
 - The persistence boundary sharpens: `tabs`, `activeId`, `groups` persist; `recentlyClosed` and `discoveryQuery` stay session-scoped on purpose.
 - The §90 tab list is now covered green at the store level (ids, duplicate, pin, group, reopen) and at the chrome level (compact pins, the menu, group chips, reserved rooms); crash isolation is covered at the shell level with a deliberately throwing workspace view.
-- Still reserved rooms, named honestly: drag reorder, Move tab to new window (§50's real window machinery), Mute, the vertical strip, everything Dutchmen. None ship faked.
+- Still reserved rooms, named honestly: everything Dutchmen (the §48 share block, §8–§21's runtime). Drag reorder, Mute, the vertical strip (§54), and Move tab to new window (§50) have all since landed with their real machinery. None of the reserved rooms ship faked.

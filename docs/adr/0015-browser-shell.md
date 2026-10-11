@@ -41,7 +41,7 @@ Back/forward operate on **per-tab destination history** (§59): only actual dest
 
 ## Reserved rooms (documented, not faked)
 
-Dutchmen new-tab transition and chat tabs (§8–§21), tab groups (§48–§49), move-tab-to-window (§50), pin/mute presentation (§52–§53), vertical tabs (§54), the bookmarks bar (§55), extensions (§56), publishing. Each lands only with its real machinery behind it.
+Dutchmen new-tab transition and chat tabs (§8–§21) — the AI room, kept. Tab groups (§48–§49), move-tab-to-window (§50), pin/mute presentation (§52–§53), vertical tabs (§54), the bookmarks bar (§55), extensions (§56), and publishing have all since landed with their real machinery behind them. Each new room lands only that way.
 
 ## Consequences
 
