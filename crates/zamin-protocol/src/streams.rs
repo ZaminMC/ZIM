@@ -129,6 +129,15 @@ pub enum CoreEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         crash: Option<crate::server::CrashClassification>,
     },
+    /// The registry's rename: a server's display name moved, its state did
+    /// not. Every fleet surface that renders names — the tray's stack,
+    /// sibling panels, the omnibox's fleet projection — learns the new
+    /// name through the events stream (the reconcile channel, ADR-0006)
+    /// instead of waiting for the next `server.list`.
+    ServerRenamed {
+        server_id: String,
+        display_name: String,
+    },
     JobStarted {
         job: Job,
     },

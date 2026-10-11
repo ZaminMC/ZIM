@@ -119,6 +119,23 @@ describe("the wire", () => {
     expect(useServers.getState().servers["s1"]).toBeUndefined();
   });
 
+  it("a rename moves the display name; the state stays where it was", () => {
+    startWire();
+    useServers.setState({
+      servers: { s1: { serverId: "s1", displayName: "One", state: "running" } },
+    });
+    pushEvent({ type: "serverRenamed", serverId: "s1", displayName: "Prime" });
+    const entry = useServers.getState().servers["s1"];
+    expect(entry?.displayName).toBe("Prime");
+    expect(entry?.state).toBe("running");
+  });
+
+  it("a rename for a server this surface never heard of is not an error", () => {
+    startWire();
+    pushEvent({ type: "serverRenamed", serverId: "ghost", displayName: "Ghost" });
+    expect(useServers.getState().servers["ghost"]).toBeUndefined();
+  });
+
   it("a registered server fetches its details and upserts them", async () => {
     getServerMock.mockResolvedValue({ serverId: "s2", displayName: "Two", state: "stopped", port: 25565 });
     startWire();

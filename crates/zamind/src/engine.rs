@@ -775,6 +775,17 @@ impl Engine {
         self.registry_lock()
             .rename(server_id, display_name.clone())
             .map_err(|e| to_protocol(&e))?;
+        // The events stream is the reconcile channel (ADR-0006), and a
+        // rename is fleet-visible truth: the tray's stack renders names,
+        // sibling panels sort by them. The state did not move — the name
+        // did, and this is the transition that says so.
+        self.inner.hub.publish_event(
+            Some(server_id.to_string()),
+            zamin_protocol::streams::CoreEvent::ServerRenamed {
+                server_id: server_id.to_string(),
+                display_name,
+            },
+        );
         self.get_server(server_id).await
     }
 

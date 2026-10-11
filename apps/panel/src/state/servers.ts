@@ -1,7 +1,9 @@
 // Servers store: the reconciled truth about registered servers. Seeded
 // from `server.list` / the events snapshot, then kept live by
 // `serverStateChanged` events (ADR-0006). The crash card carries the last
-// crash classification per server until the next start.
+// crash classification per server until the next start. A rename rides
+// the same stream (`serverRenamed`): every open surface learns the new
+// name without re-listing.
 
 import { create } from "zustand";
 import type {
@@ -36,6 +38,10 @@ interface ServersState {
    *  carries no display name — fetch details, then upsert). */
   upsert: (server: ServerSummary) => void;
   applyState: (serverId: string, state: ServerState) => void;
+  /** A `serverRenamed` event landed: the display name moved, the state
+   *  did not. Sibling surfaces (the sidebar's sort, the tray's stack,
+   *  the omnibox's fleet projection) read the name from here. */
+  rename: (serverId: string, displayName: string) => void;
   crashes: Record<string, CrashInfo>;
   recordCrash: (crash: CrashInfo) => void;
   resolveCrash: (serverId: string) => void;
@@ -91,6 +97,21 @@ export const useServers = create<ServersState>((set) => ({
       return {
         servers: { ...state.servers, [serverId]: { ...current, state: next } },
         crashes,
+      };
+    }),
+
+  rename: (serverId, displayName) =>
+    set((state) => {
+      const current = state.servers[serverId];
+      // A rename for a server this surface never heard of (a fresh
+      // webview mid-boot, a subscription racing its snapshot) is not an
+      // error: the next snapshot carries the row with the new name.
+      if (!current || current.displayName === displayName) return state;
+      return {
+        servers: {
+          ...state.servers,
+          [serverId]: { ...current, displayName },
+        },
       };
     }),
 

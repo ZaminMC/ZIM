@@ -122,7 +122,13 @@ async function wireEvents(): Promise<void> {
     onPayload: (notification) => {
       if (notification.payload.kind !== "event") return;
       const event = notification.payload.event;
-      if (event.type !== "serverStateChanged" && !event.type.startsWith("job")) return;
+      if (
+        event.type !== "serverStateChanged" &&
+        event.type !== "serverRenamed" &&
+        !event.type.startsWith("job")
+      ) {
+        return;
+      }
 
       if (event.type === "jobStarted") {
         useJobs.getState().started(event.job);
@@ -135,6 +141,14 @@ async function wireEvents(): Promise<void> {
       if (event.type === "jobCompleted") {
         useJobs.getState().completed(event.jobId, event.outcome, event.error);
         notifyJob(event.jobId, event.outcome);
+        return;
+      }
+
+      // The registry's rename: the name moved, the state did not. Every
+      // surface that renders names (the sidebar's sort, crash
+      // notifications' serverName lookup) reads it from the store.
+      if (event.type === "serverRenamed") {
+        useServers.getState().rename(event.serverId, event.displayName);
         return;
       }
 

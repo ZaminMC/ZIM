@@ -21,7 +21,13 @@
 //! moves with the daemon's own state machine (ADR-0005), driven by
 //! `serverStateChanged` events — never by a poll alone (a 30 s
 //! `server.list` re-snapshot rides along as the missed-event safety net).
-//! The tooltip carries the summary ("ZIM — 2 of 5 servers running").
+//! The registry's own verbs speak the same stream: `registered`
+//! transitions re-snapshot immediately (the event carries no display
+//! name — the registry does, and a late row beats a guessed one),
+//! `removed` transitions drop the row on the spot (a "?" zombie would
+//! read as a server in trouble), and `serverRenamed` events move the
+//! row's name. The tooltip carries the summary ("ZIM — 2 of 5 servers
+//! running").
 //!
 //! Quit is the ONE full shutdown: the graceful `daemon.shutdown` ask (the
 //! daemon runs its stop ladder for every running server), a bounded wait
@@ -156,24 +162,69 @@ impl TrayState {
         true
     }
 
-    /// Apply one `serverStateChanged` transition. Returns whether the menu
-    /// should be rebuilt.
-    fn apply_transition(&self, server_id: &str, to: &str) -> bool {
+    /// Apply one `serverStateChanged` transition. The registry's own
+    /// verbs ride the same stream with a `reason` (the engine's law, the
+    /// panel's own handler follows it too): `removed` drops the row NOW
+    /// — a "?" zombie would read as a server in trouble — and anything
+    /// else that moves a known row updates it.
+    fn apply_transition(&self, server_id: &str, to: &str, reason: &str) -> Transition {
         let mut model = self.lock_model();
+        if reason == "removed" {
+            let before = model.servers.len();
+            model.servers.retain(|(sid, _, _)| sid != server_id);
+            return if model.servers.len() == before {
+                Transition::Noop
+            } else {
+                Transition::Gone
+            };
+        }
         for entry in model.servers.iter_mut() {
             if entry.0 == server_id {
                 if entry.2 == to {
-                    return false;
+                    return Transition::Noop;
                 }
                 entry.2 = to.to_owned();
-                return true;
+                return Transition::Applied;
             }
         }
         // A server the tray has never heard of (registered since the last
-        // snapshot): return "rebuild needed" so the caller re-snapshots —
-        // guessing its display name is worse than a late row.
-        true
+        // snapshot, or a dropped notification hid it): the display name
+        // lives in the registry, not the event — a re-snapshot is the
+        // honest path, and guessing a name is worse than a late row.
+        Transition::Unknown
     }
+
+    /// Apply one `serverRenamed` event: the row keeps its state, its name
+    /// moves. Returns whether the menu should be rebuilt.
+    fn apply_rename(&self, server_id: &str, display_name: &str) -> bool {
+        let mut model = self.lock_model();
+        for entry in model.servers.iter_mut() {
+            if entry.0 == server_id {
+                if entry.1 == display_name {
+                    return false;
+                }
+                entry.1 = display_name.to_owned();
+                return true;
+            }
+        }
+        // Never heard of it: the next re-snapshot carries both the row
+        // and the new name.
+        false
+    }
+}
+
+/// What one inbound transition means for the tray's model — the caller
+/// decides between a menu rebuild and a re-snapshot.
+enum Transition {
+    /// A known row moved: rebuild the menu.
+    Applied,
+    /// The registry dropped the server: the row is gone, rebuild.
+    Gone,
+    /// The tray has never heard of this server: a `server.list`
+    /// re-snapshot is mandatory.
+    Unknown,
+    /// Nothing moved.
+    Noop,
 }
 
 /// The wire task's command vocabulary.
@@ -356,15 +407,46 @@ impl TrayWire {
             }
             return false;
         }
-        // The events stream's notifications.
+        // The events stream's notifications. The payload is a tagged
+        // StreamPayload (`kind` — the same envelope the panel's wire
+        // unwraps): "event" carries a CoreEvent under `event`, "missed"
+        // says the bounded queue dropped notifications.
         if value.get("method").and_then(Value::as_str) == Some("streams.notification") {
             let payload = &value["params"]["payload"];
-            match payload["type"].as_str() {
-                Some("serverStateChanged") => {
-                    let server_id = payload["serverId"].as_str().unwrap_or_default();
-                    let to = payload["to"].as_str().unwrap_or("unknown");
-                    if !server_id.is_empty() && state.apply_transition(server_id, to) {
-                        refresh_menu(app, state);
+            match payload["kind"].as_str() {
+                Some("event") => {
+                    let event = &payload["event"];
+                    match event["type"].as_str() {
+                        Some("serverStateChanged") => {
+                            let server_id = event["serverId"].as_str().unwrap_or_default();
+                            let to = event["to"].as_str().unwrap_or("unknown");
+                            let reason = event["reason"].as_str().unwrap_or_default();
+                            if !server_id.is_empty() {
+                                match state.apply_transition(server_id, to, reason) {
+                                    Transition::Applied | Transition::Gone => {
+                                        refresh_menu(app, state);
+                                    }
+                                    // Registered since the last snapshot (or a
+                                    // dropped notification): the registry holds the
+                                    // name; the re-snapshot fetches the row now,
+                                    // not at the next 30 s tick.
+                                    Transition::Unknown => needs_snapshot = true,
+                                    Transition::Noop => {}
+                                }
+                            }
+                        }
+                        Some("serverRenamed") => {
+                            let server_id = event["serverId"].as_str().unwrap_or_default();
+                            let display_name =
+                                event["displayName"].as_str().unwrap_or_default();
+                            if !server_id.is_empty()
+                                && !display_name.is_empty()
+                                && state.apply_rename(server_id, display_name)
+                            {
+                                refresh_menu(app, state);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 // The bounded queue dropped notifications: the next

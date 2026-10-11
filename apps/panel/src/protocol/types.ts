@@ -291,6 +291,7 @@ export type CoreEvent =
       error?: ProtocolErrorObject;
       crash?: CrashClassification;
     }
+  | { type: "serverRenamed"; serverId: string; displayName: string }
   | { type: "jobStarted"; job: Job }
   | { type: "jobProgress"; jobId: string; progress: JobProgress }
   | {
