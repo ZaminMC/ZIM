@@ -20,6 +20,7 @@ import {
   formatCpu,
 } from "../state/metrics";
 import { Button } from "../ui/Button";
+import { ConfirmDialog } from "../ui/PromptDialog";
 import { StatusChip } from "../ui/StatusChip";
 import {
   IconActivity,
@@ -150,6 +151,7 @@ export function ServerView({ serverId }: { serverId: string }) {
   // belongs to the whole server page, so it is declared with the page's
   // other hooks — before the unknown-server early return.
   const [publishOpen, setPublishOpen] = useState(false);
+  const [killConfirmOpen, setKillConfirmOpen] = useState(false);
 
   // Details (software/version/port) arrive via server.get; refresh when the
   // server boots, since software identity is only knowable then.
@@ -264,10 +266,7 @@ export function ServerView({ serverId }: { serverId: string }) {
                   busy={pendingVerb === "kill"}
                   disabled={pendingVerb !== null && pendingVerb !== undefined}
                   onClick={(event) => {
-                    const confirmed = window.confirm(
-                      `Force-kill “${server.displayName}”? Unsaved server data may be lost.`,
-                    );
-                    if (confirmed) dispatch("kill");
+                    setKillConfirmOpen(true);
                     (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
                   }}
                 >
@@ -407,6 +406,17 @@ export function ServerView({ serverId }: { serverId: string }) {
           serverId={serverId}
           serverName={server.displayName}
           onClose={() => setPublishOpen(false)}
+        />
+      ) : null}
+
+      {killConfirmOpen ? (
+        <ConfirmDialog
+          title={`Force-kill ${server.displayName}?`}
+          body="This immediately terminates the server process. Unsaved server data may be lost."
+          confirmLabel="Kill server"
+          danger
+          onConfirm={() => dispatch("kill")}
+          onClose={() => setKillConfirmOpen(false)}
         />
       ) : null}
     </div>

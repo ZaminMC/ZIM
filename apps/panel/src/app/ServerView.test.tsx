@@ -115,13 +115,13 @@ describe("ServerView", () => {
   });
 
   it("requires confirmation before force-killing a server", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ServerView serverId="alpha" />);
     fireEvent.click(screen.getByText("More"));
     fireEvent.click(screen.getByRole("button", { name: "Kill server" }));
-    expect(confirm).toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Force-kill Alpha?" })).toBeTruthy();
+    expect(mocks.killServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Kill server" }));
     expect(mocks.killServer).toHaveBeenCalledWith("alpha");
-    confirm.mockRestore();
   });
 
   it("shows a structured action error with remediation", async () => {
