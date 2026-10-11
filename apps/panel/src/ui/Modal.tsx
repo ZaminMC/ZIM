@@ -8,9 +8,10 @@ export interface ModalProps {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  wide?: boolean;
 }
 
-export function Modal({ title, onClose, children }: ModalProps) {
+export function Modal({ title, onClose, children, wide = false }: ModalProps) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -26,7 +27,12 @@ export function Modal({ title, onClose, children }: ModalProps) {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        className={`${styles.dialog} ${wide ? styles.dialogWide : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <h2 className={styles.title}>{title}</h2>
         {children}
       </div>
