@@ -128,15 +128,11 @@ export function FleetPage({
           ) : (
             <div className={styles.grid}>
               {filtered.map((server) => (
-              <div
+              <button
                 key={server.serverId}
+                type="button"
                 className={styles.card}
                 onClick={() => onOpen(server.serverId)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") onOpen(server.serverId);
-                }}
-                tabIndex={0}
-                role="button"
                 aria-label={`Open ${server.displayName}`}
               >
                 <div className={styles.cardTop}>
@@ -144,15 +140,13 @@ export function FleetPage({
                   <StatusChip state={server.state} />
                 </div>
                 <div className={styles.cardMeta}>
+                  {server.software ? <span className={styles.cardSoftware}>{server.software}</span> : null}
+                  {server.version ? <span className={styles.cardVersion}>{server.version}</span> : null}
                   <span className={styles.cardId}>{server.serverId}</span>
-                  {server.software ? <span className={styles.cardChip}>{server.software}</span> : null}
-                  {server.version ? <span className={styles.cardChip}>v{server.version}</span> : null}
-                  {server.port ? <span className={styles.cardChip}>:{server.port}</span> : null}
                 </div>
-                <div className={styles.cardFoot}>
-                  <span className={styles.cardOpen}>Open →</span>
-                </div>
-              </div>
+                {server.port ? <span className={styles.cardAddress}>localhost:{server.port}</span> : null}
+                <span className={styles.cardArrow} aria-hidden="true">→</span>
+              </button>
             ))}
             </div>
           )}

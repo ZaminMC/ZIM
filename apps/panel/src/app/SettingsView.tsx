@@ -1,8 +1,6 @@
 // Settings (§39, ADR-0019): the server's own identity and behavior —
-// distinct from the global ZIM settings page. Edits patch the
-// layered model; the reserved rooms (icon, restart policy, crash policy,
-// log retention) are stated, not faked, because §82 forbids buttons that
-// only visually work.
+// distinct from the global ZIM settings page. Only controls backed by the
+// current configuration model are shown here.
 
 import { useCallback, useEffect, useState } from "react";
 import { getServer, getServerConfig, setServerConfig } from "../state/actions";
@@ -12,7 +10,7 @@ import { ErrorNote } from "../ui/ErrorNote";
 import { useServers } from "../state/servers";
 import type { ConfigGetResult } from "../protocol/types";
 import { Button } from "../ui/Button";
-import { FieldRow, ReservedRow, Rows, StaticRow } from "./configFields";
+import { FieldRow, Rows, StaticRow } from "./configFields";
 import styles from "./SettingsView.module.css";
 
 export function SettingsView({ serverId }: { serverId: string }) {
@@ -135,13 +133,9 @@ export function SettingsView({ serverId }: { serverId: string }) {
           value={e.port ? `0.0.0.0:${e.port}` : "(no port configured)"}
           hint="What players type; the port is managed on the Network page."
         />
-        <ReservedRow
-          label="Server icon"
-          note="A per-server icon picker is a named future room."
-        />
       </Rows>
 
-      <span className={styles.sectionLabel}>Behavior</span>
+      <span className={styles.sectionLabel}>Backups</span>
       <Rows>
         <FieldRow
           label="Backup retention"
@@ -156,18 +150,6 @@ export function SettingsView({ serverId }: { serverId: string }) {
             onChange={(event) => setKeepDraft(event.target.value)}
           />
         </FieldRow>
-        <ReservedRow
-          label="Restart policy"
-          note="Automatic restart-on-exit rules are a named future room."
-        />
-        <ReservedRow
-          label="Crash policy"
-          note="Automatic crash triage actions are a named future room; crashes are classified and shown today."
-        />
-        <ReservedRow
-          label="Log retention"
-          note="How long archived logs are kept is a named future room."
-        />
       </Rows>
 
       <div className={styles.footer}>

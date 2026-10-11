@@ -100,10 +100,11 @@ describe("ServerView", () => {
     await screen.findByText("Paper"); // details arrive via server.get
     expect(screen.getByText(":25565")).toBeTruthy();
 
-    const start = screen.getByRole("button", { name: "Start" });
+    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
     const stop = screen.getByRole("button", { name: "Stop" });
-    expect((start as HTMLButtonElement).disabled).toBe(true); // already running
     expect((stop as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Kill server" })).toBeNull();
   });
 
   it("disables everything while a verb is in flight for that server", () => {
@@ -111,6 +112,16 @@ describe("ServerView", () => {
     render(<ServerView serverId="alpha" />);
     const stop = screen.getByRole("button", { name: "Stop" });
     expect((stop as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("requires confirmation before force-killing a server", () => {
+    render(<ServerView serverId="alpha" />);
+    fireEvent.click(screen.getByText("More"));
+    fireEvent.click(screen.getByRole("button", { name: "Kill server" }));
+    expect(screen.getByRole("dialog", { name: "Force-kill Alpha?" })).toBeTruthy();
+    expect(mocks.killServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Kill server" }));
+    expect(mocks.killServer).toHaveBeenCalledWith("alpha");
   });
 
   it("shows a structured action error with remediation", async () => {

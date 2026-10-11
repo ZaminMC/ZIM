@@ -478,7 +478,7 @@ export function NewServerModal() {
       : undefined;
 
   return (
-    <Modal title="New server" onClose={() => close(false)}>
+    <Modal title="New server" onClose={() => close(false)} wide>
       <div
         className={styles.modeSwitch}
         role="tablist"
@@ -511,6 +511,7 @@ export function NewServerModal() {
           if (createJobId === null) submit();
         }}
       >
+        <div className={styles.formBody}>
         {mode === "download" ? (
           <>
             <div className={styles.field}>
@@ -685,72 +686,77 @@ export function NewServerModal() {
               />
             </div>
 
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="new-server-java">
-                Java runtime
-                {javaMajor !== null ? (
-                  <span className={styles.javaChip}>
-                    {" "}
-                    this version needs Java {javaMajor}
+            <details className={styles.advanced} open={needsJava || locked || undefined}>
+              <summary className={styles.advancedSummary}>Java runtime and options</summary>
+              <div className={styles.advancedBody}>
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor="new-server-java">
+                  Java runtime
+                  {javaMajor !== null ? (
+                    <span className={styles.javaChip}>
+                      {" "}
+                      this version needs Java {javaMajor}
+                    </span>
+                  ) : null}
+                </label>
+                <select
+                  id="new-server-java"
+                  className={styles.input}
+                  value={javaPath}
+                  disabled={locked}
+                  onChange={(event) => setJavaPath(event.target.value)}
+                >
+                  <option value="auto">Select automatically</option>
+                  {(runtimes ?? []).map((runtime) => (
+                    <option key={runtime.path} value={runtime.path}>
+                      Java {runtime.major} — {runtime.vendor || "unknown vendor"}
+                      {runtime.managed ? " (managed)" : ""}
+                      {` [${runtime.versionString}]`}
+                    </option>
+                  ))}
+                </select>
+                {javaPath === "auto" && !needsJava ? (
+                  <span className={styles.hint}>
+                    {resolvedJava
+                      ? `Java ${resolvedJava.major} — selected automatically (${
+                          resolvedJava.vendor || "unknown vendor"
+                        })`
+                      : javaMajor !== null
+                        ? `Java ${javaMajor} resolves at the first start${
+                            runtimes === null ? " — inspecting this machine's runtimes…" : ""
+                          }`
+                        : "The runtime resolves at the first start."}
                   </span>
                 ) : null}
-              </label>
-              <select
-                id="new-server-java"
-                className={styles.input}
-                value={javaPath}
-                disabled={locked}
-                onChange={(event) => setJavaPath(event.target.value)}
-              >
-                <option value="auto">Select automatically</option>
-                {(runtimes ?? []).map((runtime) => (
-                  <option key={runtime.path} value={runtime.path}>
-                    Java {runtime.major} — {runtime.vendor || "unknown vendor"}
-                    {runtime.managed ? " (managed)" : ""}
-                    {` [${runtime.versionString}]`}
-                  </option>
-                ))}
-              </select>
-              {javaPath === "auto" && !needsJava ? (
-                <span className={styles.hint}>
-                  {resolvedJava
-                    ? `Java ${resolvedJava.major} — selected automatically (${
-                        resolvedJava.vendor || "unknown vendor"
-                      })`
-                    : javaMajor !== null
-                      ? `Java ${javaMajor} resolves at the first start${
-                          runtimes === null ? " — inspecting this machine's runtimes…" : ""
-                        }`
-                      : "The runtime resolves at the first start."}
-                </span>
-              ) : null}
-              {needsJava ? (
-                <div className={styles.javaNotice}>
-                  <span className={styles.hint}>
-                    No discovered runtime satisfies Java {javaMajor}.
-                  </span>
-                  <Button
-                    variant="default"
-                    busy={installing}
-                    disabled={installing}
-                    onClick={() => {
-                      // needsJava guarantees the requirement is known.
-                      setSubmitError(null);
-                      void installJava(javaMajor)
-                        .then((result) => {
-                          useJobs.getState().started(result.job);
-                          setInstallJobId(result.job.jobId);
-                        })
-                        .catch((error: unknown) =>
-                          setSubmitError(describeError(error)),
-                        );
-                    }}
-                  >
-                    Fetch Java {javaMajor} (Eclipse Temurin)
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+                {needsJava ? (
+                  <div className={styles.javaNotice}>
+                    <span className={styles.hint}>
+                      No discovered runtime satisfies Java {javaMajor}.
+                    </span>
+                    <Button
+                      variant="default"
+                      busy={installing}
+                      disabled={installing}
+                      onClick={() => {
+                        // needsJava guarantees the requirement is known.
+                        setSubmitError(null);
+                        void installJava(javaMajor)
+                          .then((result) => {
+                            useJobs.getState().started(result.job);
+                            setInstallJobId(result.job.jobId);
+                          })
+                          .catch((error: unknown) =>
+                            setSubmitError(describeError(error)),
+                          );
+                      }}
+                    >
+                      Fetch Java {javaMajor} (Eclipse Temurin)
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+              </div>
+            </details>
 
             <div className={styles.field}>
               <label className={styles.checkRow} htmlFor="new-server-eula">
@@ -768,16 +774,14 @@ export function NewServerModal() {
               </label>
               <span className={styles.hint}>
                 {autoEula
-                  ? "eula.txt is written with eula=true before the first start — this checkbox is your explicit acceptance (aka.ms/minecrafteula), remembered for next time."
-                  : "The first start asks for EULA acceptance, as always. Tick the box to accept it now instead — your choice, never a default."}
+                  ? "Accepted explicitly. ZIM writes eula=true before the first start."
+                  : "By default, the first start asks you to accept Minecraft's EULA."}
               </span>
             </div>
 
             <span className={styles.hint}>
-              ZIM downloads and verifies the server jar, writes the starter
-              files, and registers the server. The first start asks for EULA
-              acceptance unless you tick the auto-accept box above — nothing
-              else is manual.
+              ZIM downloads and verifies the server software, writes starter
+              files, and registers the server for management.
             </span>
           </>
         ) : (
@@ -920,6 +924,8 @@ export function NewServerModal() {
             ) : null}
           </div>
         ) : null}
+
+        </div>
 
         <div className={styles.row}>
           {locked ? (

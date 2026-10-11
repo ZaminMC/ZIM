@@ -1,52 +1,49 @@
+
 .overlay {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  backdrop-filter: blur(3px);
+  box-sizing: border-box;
+  padding: 24px;
+  background: rgb(32 33 36 / 32%);
+  backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
   z-index: 40;
+  overflow-y: auto;
   animation: fade var(--speed-fast) var(--ease);
 }
 
 .dialog {
-  width: min(480px, calc(100vw - 48px));
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100%);
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-l);
   padding: var(--space-5);
-  /* §75: a modal is a major transition — the one place motion is
-     expressive, and still quick (280ms, compositor-only). */
   animation: rise var(--speed-slow) var(--ease);
 }
 
+.dialogWide {
+  width: min(600px, 100%);
+  max-height: calc(100dvh - 48px);
+  min-height: 0;
+  overflow: hidden;
+}
+
 .title {
+  flex: 0 0 auto;
   margin: 0 0 var(--space-4);
   font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .overlay,
-  .dialog {
-    animation: none;
-  }
+  .overlay, .dialog { animation: none; }
 }
-
-/* The tokens also go to zero under reduced motion (tokens.css); the
-   explicit none here keeps the intent stated where the motion lives. */
