@@ -62,7 +62,13 @@ const BUDGETS = {
   // menus, the ⋮ update badge). The overage the backport shipped with
   // is negotiated here in writing, per this file's own rule; the entry
   // stylesheet still holds its own line (the boot path did not grow).
-  totalCssGzip: 26 * 1024,
+  // 26 → 27 KB at the creation overhaul (ADR-0034's sibling slice): the
+  // New Server modal's staged progress panel (the block's keyframes,
+  // the stage checklist, the byte/speed/ETA line, the EULA checkbox
+  // row) plus the block's own stylesheet — all in the MODAL's lazy
+  // chunk, which loads when the operator opens New Server, never at
+  // boot. The entry stylesheet's line did not move.
+  totalCssGzip: 27 * 1024,
   // The entry stylesheet's own line (the cold start's CSS), kept
   // explicit so a chrome-only regression cannot hide inside the total.
   entryCssGzip: 11 * 1024,

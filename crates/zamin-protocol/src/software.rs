@@ -139,6 +139,14 @@ pub struct ServerCreateParams {
     /// start time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub java_path: Option<String>,
+    /// The operator's explicit, per-creation EULA acceptance (founder's
+    /// "nothing is a default" law holds: absent means the stamped
+    /// `eula.txt` keeps `eula=false`, and the first start surfaces the
+    /// typed `NEEDS_EULA` dialog). `true` stamps `eula.txt` with
+    /// `eula=true` BEFORE the first boot, in the operator's name — never
+    /// silently, and never as a global default the daemon invents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_eula: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -48,6 +48,9 @@ pub const AUDITED_METHODS: &[&str] = &[
     zamin_protocol::methods::PUBLISH_CONFIG_SET,
     zamin_protocol::methods::PUBLISH_EXECUTE,
     zamin_protocol::methods::PUBLISH_REVIEW_SET,
+    // Where ALL data lives is a mutation worth a trail: the redirect is
+    // one small file, but it decides the next daemon start's whole world.
+    zamin_protocol::methods::STORAGE_SET,
 ];
 
 #[derive(Clone)]

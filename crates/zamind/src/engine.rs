@@ -23,6 +23,7 @@ use zamin_protocol::error::{ErrorCode, ProtocolError};
 use zamin_protocol::extensions::{ExtensionProblem, ExtensionView, ExtensionsListResult};
 use zamin_protocol::publish::PublishConfig;
 use zamin_protocol::server::{LifecycleResult, ServerDetails, ServerState, ServerSummary};
+use zamin_protocol::storage::{StorageGetResult, StorageSetParams, StorageSetResult};
 use zamin_protocol::streams::{
     CoreEvent, EventsSnapshot, SecurityNoticeKind, StreamCursor, StreamKind, SubscribeResult,
 };
@@ -93,6 +94,10 @@ impl StorageGate {
 
 struct Inner {
     data_dir: PathBuf,
+    /// The storage redirect pointer file's address (ADR-0034): the
+    /// platform config location by default, overridable by flag so tests
+    /// isolate it — the same override story the catalog URLs carry.
+    storage_redirect: PathBuf,
     registry: Mutex<Registry>,
     hub: HubHandle,
     actors: tokio::sync::Mutex<HashMap<String, mpsc::Sender<ActorCommand>>>,
@@ -163,6 +168,7 @@ fn field_prov(p: zamin_core::config::Provenance) -> zamin_protocol::config::Fiel
 impl Engine {
     pub async fn with_urls(
         data_dir: PathBuf,
+        storage_redirect: PathBuf,
         catalog_url: String,
         adoptium_url: String,
         modrinth_url: String,
@@ -179,6 +185,7 @@ impl Engine {
         Engine {
             inner: Arc::new(Inner {
                 data_dir,
+                storage_redirect,
                 registry: Mutex::new(registry),
                 hub,
                 actors: tokio::sync::Mutex::new(HashMap::new()),
@@ -679,6 +686,124 @@ impl Engine {
                 .map_err(|e| internal(&format!("the discovery roots could not be saved: {e}")))?;
         }
         Ok(RootsGetResult { roots })
+    }
+
+    /// `storage.get` (ADR-0034): where everything lives RIGHT NOW — the
+    /// running root, the platform default, the redirect pointer's own
+    /// fixed address, and a pending root when a stored redirect has not
+    /// taken effect yet (this daemon started before it was written).
+    pub async fn storage_get(&self) -> Result<StorageGetResult, EngineError> {
+        let root = self.inner.data_dir.clone();
+        let redirect_path = self.inner.storage_redirect.clone();
+        let stored = std::fs::read_to_string(&redirect_path)
+            .ok()
+            .map(|text| text.trim().to_owned())
+            .filter(|text| !text.is_empty());
+        // Active = the stored redirect names the root this daemon runs
+        // on (a daemon started by an explicit flag that equals the stored
+        // redirect is the same place — the statement stays true). A
+        // stored-but-different root is PENDING: the next start uses it.
+        let (redirect_active, pending_root) = match &stored {
+            Some(text) if Path::new(text).is_absolute() => {
+                let same = Path::new(text) == root.as_path();
+                (same, if same { None } else { Some(text.clone()) })
+            }
+            _ => (false, None),
+        };
+        Ok(StorageGetResult {
+            root: root.to_string_lossy().into_owned(),
+            default_root: zamin_core::platform::paths::data_dir()
+                .to_string_lossy()
+                .into_owned(),
+            redirect_active,
+            redirect_path: redirect_path.to_string_lossy().into_owned(),
+            pending_root,
+            instances_dir: self.instances_dir().to_string_lossy().into_owned(),
+            cache_dir: root.join("cache").to_string_lossy().into_owned(),
+            java_dir: root.join("java").to_string_lossy().into_owned(),
+        })
+    }
+
+    /// `storage.set {root}` (ADR-0034): validate loudly (absolute, a
+    /// directory or creatable, writable), persist the redirect file
+    /// atomically at its fixed platform address, and answer honestly:
+    /// the running daemon keeps its own root until it restarts, and the
+    /// registered servers stay where they are — the daemon never moves
+    /// data on its own. The count rides along so the UI can warn with a
+    /// number instead of a vague dread.
+    pub async fn storage_set(&self, params: StorageSetParams) -> Result<StorageSetResult, EngineError> {
+        let trimmed = params.root.trim();
+        if trimmed.is_empty() {
+            return Err(EngineError::Protocol(ProtocolError::new(
+                ErrorCode::ProtocolInvalidRequest,
+                "The storage root cannot be empty — name the directory ZIM should keep its data under.",
+            )));
+        }
+        let root = PathBuf::from(trimmed);
+        if !root.is_absolute() {
+            return Err(EngineError::Protocol(ProtocolError::new(
+                ErrorCode::ProtocolInvalidRequest,
+                format!(
+                    "The storage root {trimmed:?} is not an absolute path — the data root is a directory on this machine"
+                ),
+            )));
+        }
+        // The disk's own verdict, not the path string's: a file where a
+        // directory belongs is a refusal; a missing directory is created
+        // (the first-run choice — D:\ZIM does not exist yet); then the
+        // same probe the server preflight uses proves the daemon can
+        // actually write there.
+        let blocking = {
+            let root = root.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
+                let meta = std::fs::metadata(&root);
+                match meta {
+                    Ok(meta) if meta.is_dir() => {}
+                    Ok(_) => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "exists and is not a directory",
+                        ))
+                    }
+                    Err(_) => std::fs::create_dir_all(&root)?,
+                }
+                let probe = root.join(".zamin-storage-probe");
+                std::fs::write(&probe, b"ok")?;
+                std::fs::remove_file(&probe)?;
+                Ok(())
+            })
+        };
+        match blocking.await {
+            Ok(Ok(())) => {}
+            Ok(Err(source)) => {
+                return Err(EngineError::Protocol(ProtocolError::new(
+                    ErrorCode::FsNotWritable,
+                    format!(
+                        "The storage root {trimmed:?} could not be used: {source} — pick a directory ZIM can write to"
+                    ),
+                )))
+            }
+            Err(e) => {
+                return Err(internal(&format!("the storage probe task failed: {e}")))
+            }
+        }
+        // The pointer lives OUTSIDE the data dir (the platform's fixed
+        // config address) and lands atomically: a crash mid-write can
+        // never leave a torn redirect.
+        let redirect_path = self.inner.storage_redirect.clone();
+        if let Some(parent) = redirect_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        zamin_core::fsops::atomic_write(&redirect_path, trimmed.as_bytes()).map_err(|e| {
+            internal(&format!("the storage redirect could not be saved: {e}"))
+        })?;
+        let servers_in_current_root = self.registry_lock().all().count() as u64;
+        Ok(StorageSetResult {
+            root: trimmed.to_owned(),
+            restart_required: true,
+            current_root: self.inner.data_dir.to_string_lossy().into_owned(),
+            servers_in_current_root,
+        })
     }
 
     /// The extension inventory (§56/§57, ADR-0031): read the manifests
@@ -2279,7 +2404,7 @@ impl Engine {
                     if ctl.cancelled() {
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress(0, None, None, Some("preparing the server directory"));
+                    ctl.progress_stage("preparing", 0, None, None, Some("preparing the server directory"));
                     std::fs::create_dir_all(&root).map_err(|source| {
                         JobFailure::Error(to_protocol(&zamin_core::error::CoreError::Io {
                             path: root.clone(),
@@ -2293,13 +2418,38 @@ impl Engine {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress(0, None, None, Some("writing server files"));
+                    ctl.progress_stage("files", 0, None, None, Some("writing server files"));
                     if let Err(e) = zamin_core::software::stamp_template(&root, &template_id) {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Error(to_protocol(&e)));
                     }
                     if let Some(port) = params.port {
                         patch_stamped_port(&root, port);
+                    }
+                    // The operator's explicit per-creation EULA acceptance
+                    // (server.create's `autoEula`): the stamped eula.txt
+                    // keeps its `eula=false` unless THIS is true — the
+                    // acceptance is the operator's click, recorded in their
+                    // name before the first boot can ask. The file says who
+                    // accepted and how, because a silent `eula=true` would
+                    // read like a default the daemon invented.
+                    if params.auto_eula == Some(true) {
+                        if ctl.cancelled() {
+                            let _ = std::fs::remove_dir_all(&root);
+                            return Err(JobFailure::Cancelled);
+                        }
+                        ctl.progress_stage("eula", 0, None, None, Some("accepting the EULA as configured"));
+                        let eula = root.join("eula.txt");
+                        let write = std::fs::write(&eula, ACCEPTED_EULA_TXT).map_err(|source| {
+                            zamin_core::error::CoreError::Io {
+                                path: eula.clone(),
+                                source,
+                            }
+                        });
+                        if let Err(e) = write {
+                            let _ = std::fs::remove_dir_all(&root);
+                            return Err(JobFailure::Error(to_protocol(&e)));
+                        }
                     }
 
                     // Download + verify. Cancelled downloads and checksum
@@ -2321,12 +2471,18 @@ impl Engine {
                     // offline included. A hit is re-hashed before use; a
                     // corrupted artifact is dropped, never served.
                     let cache_root = data_dir.join("cache");
-                    ctl.progress(0, size, Some("bytes"), Some(&format!("downloading {name}")));
+                    ctl.progress_stage("downloading", 0, size, Some("bytes"), Some(&format!("downloading {name}")));
                     let options = zamin_core::software::DownloadOptions {
                         cancel: cancel_flag,
                         progress: Some(Arc::new(
                             move |p: zamin_core::software::DownloadProgress| {
-                                progress_ctl.progress(p.bytes_done, p.total, Some("bytes"), None);
+                                progress_ctl.progress_stage(
+                                    "downloading",
+                                    p.bytes_done,
+                                    p.total,
+                                    Some("bytes"),
+                                    None,
+                                );
                             },
                         )),
                         // A server jar never overwrites; fresh downloads only.
@@ -2357,7 +2513,8 @@ impl Engine {
                         ))
                     })?;
                     match outcome {
-                        Ok(outcome) => ctl.progress(
+                        Ok(outcome) => ctl.progress_stage(
+                            "verifying",
                             outcome.size,
                             Some(outcome.size.max(1)),
                             Some("bytes"),
@@ -2383,7 +2540,7 @@ impl Engine {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress(0, None, None, Some("writing the server configuration"));
+                    ctl.progress_stage("config", 0, None, None, Some("writing the server configuration"));
                     let config_path = data_dir
                         .join("servers")
                         .join(sid.as_str())
@@ -2412,7 +2569,7 @@ impl Engine {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress(0, None, None, Some("registering the server"));
+                    ctl.progress_stage("registering", 0, None, None, Some("registering the server"));
                     engine
                         .register_server(sid, display_name, root)
                         .await
@@ -3962,6 +4119,17 @@ fn discord_srv_loaded(root: &Path, running: bool) -> bool {
         name.starts_with("discordsrv") && name.ends_with(".jar")
     })
 }
+
+/// The eula.txt written when the operator explicitly opted into automatic
+/// EULA acceptance at creation (`server.create`'s `autoEula`). The stamped
+/// template's own file (`eula=false`, "acceptance is the user's action")
+/// is replaced by this one — which says the same thing from the other
+/// side: the user DID act, through the checkbox, and the record names it.
+const ACCEPTED_EULA_TXT: &str = "\
+# Accepted through ZIM's automatic-EULA option at server creation.
+# This is the operator's explicit choice, never a default.
+eula=true
+";
 
 /// Point the stamped `server.properties` at the requested port. The file
 /// was written seconds ago by the template stamp; a missing line means a

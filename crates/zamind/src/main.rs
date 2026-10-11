@@ -27,6 +27,10 @@ const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 struct DaemonConfig {
     endpoint: zamin_ipc::Endpoint,
     data_dir: PathBuf,
+    /// Where the storage redirect pointer file lives (ADR-0034). The
+    /// platform config address by default; a flag so tests (and exotic
+    /// launchers) can pin it elsewhere.
+    storage_redirect: PathBuf,
     /// Software catalog base URL (PaperMC Fill API v3). Overridable for
     /// mirrors and tests; the New Server flow is the consumer.
     catalog_url: String,
@@ -59,8 +63,9 @@ const DEFAULT_FABRIC_URL: &str = "https://meta.fabricmc.net";
 fn usage(message: String) -> ! {
     eprintln!("{message}");
     eprintln!(
-        "usage: zamind [--endpoint <endpoint>] [--data-dir <dir>] [--catalog-url <url>] \
-         [--adoptium-url <url>] [--modrinth-url <url>] [--fabric-url <url>] [--version]"
+        "usage: zamind [--endpoint <endpoint>] [--data-dir <dir>] [--storage-redirect <file>] \
+         [--catalog-url <url>] [--adoptium-url <url>] [--modrinth-url <url>] [--fabric-url <url>] \
+         [--version]"
     );
     std::process::exit(2);
 }
@@ -81,6 +86,7 @@ fn parse_args() -> DaemonConfig {
     let mut config = DaemonConfig {
         endpoint: zamin_ipc::Endpoint::default_endpoint(),
         data_dir: zamin_core::platform::paths::data_dir(),
+        storage_redirect: zamin_core::platform::paths::storage_redirect_file(),
         catalog_url: DEFAULT_CATALOG_URL.to_owned(),
         adoptium_url: DEFAULT_ADOPTIUM_URL.to_owned(),
         modrinth_url: DEFAULT_MODRINTH_URL.to_owned(),
@@ -92,6 +98,9 @@ fn parse_args() -> DaemonConfig {
     // panic); --data-dir keeps its OsString — a path is not text, and a
     // lossy decode would invent a directory that does not exist.
     let mut args = std::env::args_os().skip(1);
+    // An explicit --data-dir beats the stored redirect; `None` lets the
+    // operator's storage-location.txt steer (ADR-0034).
+    let mut explicit_data_dir: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.to_string_lossy().as_ref() {
             "--endpoint" => {
@@ -102,7 +111,13 @@ fn parse_args() -> DaemonConfig {
                 let Some(value) = args.next() else {
                     usage("--data-dir needs a value".to_owned());
                 };
-                config.data_dir = PathBuf::from(value);
+                explicit_data_dir = Some(PathBuf::from(value));
+            }
+            "--storage-redirect" => {
+                let Some(value) = args.next() else {
+                    usage("--storage-redirect needs a value".to_owned());
+                };
+                config.storage_redirect = PathBuf::from(value);
             }
             "--catalog-url" => {
                 let value = text_value(&mut args, "--catalog-url");
@@ -129,6 +144,21 @@ fn parse_args() -> DaemonConfig {
             }
         }
     }
+    // The storage redirect (ADR-0034): the operator's chosen data root,
+    // resolved once, here. An unusable redirect (relative, empty) is
+    // LOGGED, never fatal — the platform default runs and the daemon
+    // keeps booting (double-clicking ZIM must never show an error).
+    let resolved = zamin_core::platform::paths::resolve_data_dir(explicit_data_dir);
+    if resolved.redirect_ignored {
+        tracing::warn!(
+            "storage redirect at {:?} was ignored (not an absolute path); using the platform default {:?}",
+            zamin_core::platform::paths::storage_redirect_file(),
+            resolved.root
+        );
+    } else if resolved.redirected {
+        tracing::info!("storage redirect active: data dir {:?}", resolved.root);
+    }
+    config.data_dir = resolved.root;
     config
 }
 
@@ -159,6 +189,7 @@ fn main() {
 async fn run(config: DaemonConfig) {
     let engine = crate::engine::Engine::with_urls(
         config.data_dir.clone(),
+        config.storage_redirect.clone(),
         config.catalog_url,
         config.adoptium_url,
         config.modrinth_url,

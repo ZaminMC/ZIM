@@ -27,6 +27,7 @@ use zamin_protocol::server::{
     EmptyResult, LifecycleResult, ListServersResult, RegisterServerParams, RegisterServerResult,
     RemoveServerParams, ServerDetails, ServerIdParams, StdinParams, UpdateServerParams,
 };
+use zamin_protocol::storage::{StorageGetResult, StorageSetParams, StorageSetResult};
 use zamin_protocol::streams::{StreamKind, StreamNotification, StreamPayload};
 
 #[derive(Parser)]
@@ -89,6 +90,12 @@ enum Commands {
     Discovery {
         #[command(subcommand)]
         command: DiscoveryCommands,
+    },
+    /// Show where the daemon keeps its data, and set the data root
+    /// (ADR-0034: the redirect applies at the next daemon start)
+    Storage {
+        #[command(subcommand)]
+        command: StorageCommands,
     },
     /// List installed extensions and what they declare (§56/§57, ADR-0031)
     Extensions,
@@ -197,6 +204,21 @@ enum DiscoveryCommands {
     Add { path: String },
     /// Remove a root (exact match)
     Remove { path: String },
+}
+
+#[derive(Subcommand)]
+enum StorageCommands {
+    /// Print where the daemon's data lives now (and the platform default)
+    Show,
+    /// Point the daemon's data root elsewhere (absolute path; applies at
+    /// the next daemon start — existing data is NOT moved)
+    Set {
+        /// The new data root directory
+        root: String,
+        /// Skip the confirmation prompt (the restart + not-moved warning)
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -715,6 +737,12 @@ async fn run(cli: Cli) -> Result<(), Failure> {
                 discovery_roots_remove(&client, path.clone()).await
             }
         },
+        Commands::Storage { command } => match command {
+            StorageCommands::Show => storage_show(&cli, &client).await,
+            StorageCommands::Set { root, yes } => {
+                storage_set(&cli, &client, root, *yes).await
+            }
+        },
         Commands::Extensions => extensions(&cli, &client).await,
         Commands::Status { server_id } => status(&cli, &client, server_id).await,
         Commands::Daemon => daemon(&cli, &client).await,
@@ -1149,6 +1177,77 @@ async fn discovery_roots_current(client: &Client) -> Result<Vec<String>, Failure
         .await
         .map_err(protocol_with_usage_hint)?;
     Ok(result.roots)
+}
+
+async fn storage_show(cli: &Cli, client: &Client) -> CmdResult {
+    let result: StorageGetResult = client
+        .request_typed(methods::STORAGE_GET, serde_json::json!({}))
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!("Data root:      {}", result.root);
+    println!(
+        "  instances:    {}",
+        result.instances_dir
+    );
+    println!("  cache:        {}", result.cache_dir);
+    println!("  java:         {}", result.java_dir);
+    println!(
+        "Platform default: {}{}",
+        result.default_root,
+        if result.redirect_active {
+            "  (redirected)"
+        } else {
+            ""
+        }
+    );
+    match result.pending_root.as_deref() {
+        Some(pending) => println!(
+            "Pending: {pending} — applies at the next daemon start (restart required)"
+        ),
+        None => {}
+    }
+    Ok(())
+}
+
+async fn storage_set(cli: &Cli, client: &Client, root: &str, yes: bool) -> CmdResult {
+    if !yes {
+        // The two facts the operator must weigh: the change needs a
+        // daemon restart, and nothing on disk moves by itself.
+        eprintln!("Pointing the data root at '{root}' does two things you should know:");
+        eprintln!("  - it applies at the NEXT daemon start (this one keeps running as-is);");
+        eprintln!("  - existing servers stay in the old root — nothing is moved for you.");
+        eprint!("Type the path to confirm: ");
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() || line.trim() != root.trim() {
+            return Err(Failure::error(format!(
+                "confirmation did not match; the storage root was not changed."
+            )));
+        }
+    }
+    let params = StorageSetParams {
+        root: root.to_owned(),
+    };
+    let result: StorageSetResult = client
+        .request_typed(methods::STORAGE_SET, params)
+        .await?;
+    if cli.json {
+        print_json(&result);
+        return Ok(());
+    }
+    println!("Data root set to {} (applies at the next daemon start).", result.root);
+    if result.servers_in_current_root > 0 {
+        println!(
+            "  {} registered server{} stay in {} — move them yourself if you want them in the new root.",
+            result.servers_in_current_root,
+            if result.servers_in_current_root == 1 { "" } else { "s" },
+            result.current_root
+        );
+    }
+    Ok(())
 }
 
 async fn status(cli: &Cli, client: &Client, server_id: &str) -> CmdResult {

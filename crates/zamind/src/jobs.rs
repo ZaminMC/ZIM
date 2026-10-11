@@ -94,6 +94,34 @@ impl JobCtl {
             total,
             unit: unit.map(str::to_owned),
             message: message.map(str::to_owned),
+            stage: None,
+        };
+        self.hub.publish_event(
+            self.server_id.clone(),
+            CoreEvent::JobProgress {
+                job_id: self.job_id,
+                progress,
+            },
+        );
+    }
+
+    /// The staged dialect: a machine-readable lifecycle step rides the
+    /// same event. `server.create` speaks it; a job that never stages
+    /// keeps the plain verb and the field stays absent on the wire.
+    pub fn progress_stage(
+        &self,
+        stage: &str,
+        current: u64,
+        total: Option<u64>,
+        unit: Option<&str>,
+        message: Option<&str>,
+    ) {
+        let progress = JobProgress {
+            current,
+            total,
+            unit: unit.map(str::to_owned),
+            message: message.map(str::to_owned),
+            stage: Some(stage.to_owned()),
         };
         self.hub.publish_event(
             self.server_id.clone(),

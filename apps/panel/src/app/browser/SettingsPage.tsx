@@ -13,10 +13,10 @@ import {
 import { useFeedback } from "../../state/feedback";
 import { updatesSentence, useUpdates } from "../../state/updates";
 import { useUi } from "../../state/ui";
-import { discoveryRoots, setDiscoveryRoots } from "../../state/actions";
+import { discoveryRoots, setDiscoveryRoots, storageGet, storageSet } from "../../state/actions";
 import { describeError } from "../../state/errors";
 import type { DescribedError } from "../../state/errors";
-import type { RootsGetResult } from "../../protocol/types";
+import type { RootsGetResult, StorageGetResult, StorageSetResult } from "../../protocol/types";
 import { ErrorNote } from "../../ui/ErrorNote";
 import { Button } from "../../ui/Button";
 import styles from "./SettingsPage.module.css";
@@ -213,6 +213,165 @@ function DiscoveryRootsSection() {
         <p className={styles.rowDetail} role="status">
           {note}
         </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** The storage section (ADR-0034): where the daemon's data lives —
+ *  the effective root and the directories under it, stated with their
+ *  real paths — plus the operator-controlled redirect. The honesty
+ *  contract is visible: a new root applies at the next daemon start,
+ *  and existing servers are never moved by the daemon itself. */
+function StorageSection() {
+  const [info, setInfo] = useState<StorageGetResult | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [applied, setApplied] = useState<StorageSetResult | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
+
+  useEffect(() => {
+    // The mount fetch can settle after the page is gone (a slow daemon
+    // answering an unmounted tab) — a stale answer must not touch state.
+    let alive = true;
+    storageGet()
+      .then((result) => {
+        if (alive) setInfo(result);
+      })
+      .catch((cause: unknown) => {
+        if (alive) setError(describeError(cause));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const apply = () => {
+    const root = draft.trim();
+    if (root === "" || busy) return;
+    setBusy(true);
+    setError(null);
+    setApplied(null);
+    void storageSet(root)
+      .then((result) => {
+        setApplied(result);
+        setDraft("");
+        // The read side refreshes: the pending root is now part of the
+        // honest map the section shows.
+        return storageGet();
+      })
+      .then((fresh) => {
+        setInfo(fresh);
+        setBusy(false);
+      })
+      .catch((cause: unknown) => {
+        setError(describeError(cause));
+        setBusy(false);
+      });
+  };
+
+  const offDefault = info !== null && info.root !== info.defaultRoot;
+
+  return (
+    <section className={styles.section} aria-label="Storage">
+      <h2 className={styles.sectionTitle}>Storage</h2>
+      {error ? (
+        <div className={styles.errorRow} role="alert">
+          <ErrorNote error={error} />
+        </div>
+      ) : null}
+      {info === null && !error ? (
+        <p className={styles.rowDetail}>Reading where the data lives…</p>
+      ) : null}
+      {info !== null ? (
+        <>
+          <ul className={styles.list}>
+            <li className={styles.row}>
+              <div className={styles.rowMain}>
+                <span className={styles.rowName}>Data root</span>
+                <span className={styles.pathText}>{info.root}</span>
+                <span className={styles.rowDetail}>
+                  {info.redirectActive
+                    ? `Your chosen location (the redirect at ${info.redirectPath} names it).`
+                    : `The platform default — point it elsewhere if your data drive is not this one.`}
+                </span>
+              </div>
+              {offDefault ? (
+                <span className={styles.activeChip}>Redirected</span>
+              ) : null}
+            </li>
+            <li className={styles.row}>
+              <div className={styles.rowMain}>
+                <span className={styles.rowName}>Servers</span>
+                <span className={styles.pathText}>{info.instancesDir}</span>
+                <span className={styles.rowDetail}>
+                  Every created server's files, one folder per server id.
+                </span>
+              </div>
+            </li>
+            <li className={styles.row}>
+              <div className={styles.rowMain}>
+                <span className={styles.rowName}>Cache</span>
+                <span className={styles.pathText}>{info.cacheDir}</span>
+                <span className={styles.rowDetail}>
+                  Verified downloads shared by every server — a second server
+                  on the same jar reuses these bytes.
+                </span>
+              </div>
+            </li>
+            <li className={styles.row}>
+              <div className={styles.rowMain}>
+                <span className={styles.rowName}>Java runtimes</span>
+                <span className={styles.pathText}>{info.javaDir}</span>
+                <span className={styles.rowDetail}>
+                  The JDKs ZIM fetched for servers that needed them.
+                </span>
+              </div>
+            </li>
+          </ul>
+          {info.pendingRoot ? (
+            <p className={styles.rowDetail} role="status">
+              Pending: {info.pendingRoot} — applies at the next daemon start.
+              Restart ZIM to run on it.
+            </p>
+          ) : null}
+          {applied !== null ? (
+            <p className={styles.rowDetail} role="status">
+              Data root set to {applied.root}. Restart ZIM — close it and open
+              it again — to run on it.
+              {applied.serversInCurrentRoot > 0
+                ? ` ${applied.serversInCurrentRoot} registered server${
+                    applied.serversInCurrentRoot === 1 ? "" : "s"
+                  } stay${applied.serversInCurrentRoot === 1 ? "s" : ""} in ${
+                    applied.currentRoot
+                  } — ZIM does not move them; copy them over yourself if you want them on the new drive.`
+                : ""}
+            </p>
+          ) : null}
+          <div className={styles.addRow}>
+            <input
+              className={styles.pathInput}
+              value={draft}
+              placeholder="D:\ZIM — the folder ZIM should keep its data under"
+              aria-label="New data root"
+              spellCheck={false}
+              autoComplete="off"
+              disabled={busy}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") apply();
+              }}
+            />
+            <Button onClick={apply} disabled={busy || draft.trim() === ""}>
+              Move data to…
+            </Button>
+          </div>
+          <p className={styles.rowDetail}>
+            Absolute paths only. The new root is created if it does not exist;
+            it applies at the next daemon start, and nothing already on disk
+            is moved for you — the C: default is a default, never a cage.
+          </p>
+        </>
       ) : null}
     </section>
   );
@@ -444,6 +603,8 @@ export function SettingsPage() {
         </section>
 
         <DiscoveryRootsSection />
+
+        <StorageSection />
 
         <TabsSection />
 

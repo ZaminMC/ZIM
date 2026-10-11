@@ -123,3 +123,13 @@ pub const PUBLISH_PREVIEW: &str = "publish.preview";
 pub const PUBLISH_EXECUTE: &str = "publish.execute";
 pub const PUBLISH_STATE: &str = "publish.state";
 pub const PUBLISH_REVIEW_SET: &str = "publish.review.set";
+
+// Storage (the user-controlled data root): the daemon's data bulk —
+// server instances, the artifact cache, fetched JDKs — lands under one
+// root, and that root is the operator's choice, not the OS's. A tiny
+// pointer file at the platform's fixed config address names the chosen
+// root; the daemon resolves it once at startup. The verbs are read and
+// write over that pointer plus the honest map of where everything
+// lives — changing it never moves data and never applies mid-session.
+pub const STORAGE_GET: &str = "storage.get";
+pub const STORAGE_SET: &str = "storage.set";

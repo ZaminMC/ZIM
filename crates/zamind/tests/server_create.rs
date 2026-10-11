@@ -661,3 +661,39 @@ async fn fabric_rejects_the_wrong_family_dialect_typed() {
         .unwrap();
     assert!(list["servers"].as_array().unwrap().is_empty(), "{list}");
 }
+
+#[tokio::test]
+async fn create_with_auto_eula_stamps_the_operators_acceptance() {
+    // The additive `autoEula`: TRUE writes eula.txt with eula=true at
+    // creation — the operator's explicit opt-in, recorded in their name
+    // (the file says so) — so the first boot never stops to ask. The
+    // default journey (absent) keeps eula=false; the previous test pins
+    // that half of the law.
+    let jar: Vec<u8> = (0..128 * 1024u32).map(|i| (i % 13) as u8).collect();
+    let (catalog, _jar_sha) = spawn_catalog(jar, 0);
+    let data_dir = scoped_dir("create-autoeula");
+    let endpoint = unique_endpoint();
+    let _daemon = spawn_daemon_with(&data_dir, &endpoint, &["--catalog-url", &catalog.url]);
+    let mut client = connect_daemon(&endpoint).await;
+
+    let mut params = create_params("autoeula", json!(34));
+    params["autoEula"] = json!(true);
+    let result = client
+        .request(methods::SERVER_CREATE, params)
+        .await
+        .expect("server.create");
+    let job_id = result["job"]["jobId"].as_str().unwrap().to_owned();
+    let (state, error) = MockHttp::wait_job(&mut client, &job_id, Duration::from_secs(30)).await;
+    assert_eq!(state, "succeeded", "error: {error:?}");
+
+    let root = data_dir.join("instances").join("autoeula");
+    let eula = std::fs::read_to_string(root.join("eula.txt")).unwrap();
+    assert!(
+        eula.contains("eula=true"),
+        "the opted-in acceptance is on disk: {eula}"
+    );
+    assert!(
+        eula.contains("explicit choice"),
+        "the record names its provenance (the operator's choice, not a default): {eula}"
+    );
+}

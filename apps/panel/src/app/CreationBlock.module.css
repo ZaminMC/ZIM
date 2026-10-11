@@ -1,0 +1,63 @@
+/* The creation block: pixel-art face + destroy-overlay cracks, driven by
+ * REAL job state (the data-stage attribute is the derived crack 0–10).
+ * Motion is the §75/§30 vocabulary: one compositor-only settle on
+ * success, none while working — the cracks themselves are the motion,
+ * and they only ever advance. */
+
+.block {
+  display: block;
+  height: 48px;
+  position: relative;
+  width: 48px;
+}
+
+.face,
+.cracks {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+/* The working block breathes at the page's own slow speed — a
+ * compositor-only opacity pulse that says "alive", never a fake
+ * progress ramp. Reduced motion zeroes the duration (the tokens' hard
+ * floor), and the cracks still carry the story. */
+.block:not([data-succeeded]):not([data-failed]) {
+  animation: blockBreathe var(--speed-slow) steps(2, end) infinite;
+}
+
+@keyframes blockBreathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.86;
+  }
+}
+/* Success: the block resolves — two pixels of settle, then it is gone
+ * with the modal (the dashboard opens). */
+.block[data-succeeded]:not([data-failed]) {
+  animation: blockResolve var(--speed-slow) var(--ease) forwards;
+}
+@keyframes blockResolve {
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(1.12);
+  }
+}
+
+/* Failure: the block stops where it stopped — no animation, the state
+ * speaks beside it (the error note). A permanently "breaking" block
+ * would be the lie §21 forbids. */
+.block[data-failed] {
+  animation: none;
+  filter: saturate(0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block:not([data-succeeded]):not([data-failed]) {
+    animation: none;
+  }
+}

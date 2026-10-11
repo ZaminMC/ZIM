@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "result": {
+    "root": "/d/ZIM",
+    "restartRequired": true,
+    "currentRoot": "/home/u/.local/share/zim",
+    "serversInCurrentRoot": 3
+  }
+}

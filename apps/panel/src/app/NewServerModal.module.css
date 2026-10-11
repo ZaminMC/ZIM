@@ -30,6 +30,18 @@
   border-color: transparent;
 }
 
+/* The creation lock: once the request is away, the controls freeze —
+ * the operation works from the snapshot it took. */
+.input:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.modeTab:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .hint {
   color: var(--text-faint);
   font-size: var(--text-s);
@@ -115,14 +127,45 @@
   justify-content: space-between;
 }
 
-.progressBox {
+/* The premium creation panel (§21/§22): block + title head, the
+ * daemon's own sentence, the REAL byte bar, measured speed/ETA, and
+ * the stage checklist the wire's staged dialect drives. */
+.progressPanel {
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-s);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.progressHead {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+}
+
+.progressTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.progressName {
+  font-weight: 600;
+}
+
+.progressConfig {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+.progressNumbers {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+  font-variant-numeric: tabular-nums;
 }
 
 .progressLabel {
@@ -140,4 +183,55 @@
   background: var(--accent);
   height: 100%;
   transition: width var(--speed-normal) var(--ease);
+}
+
+.stageList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stageList li {
+  align-items: center;
+  color: var(--text-faint);
+  display: flex;
+  font-size: var(--text-s);
+  gap: 6px;
+}
+
+.stageList li[data-status="done"] {
+  color: var(--text-muted);
+}
+
+.stageList li[data-status="active"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.stageGlyph {
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* The EULA checkbox: an explicit, persisted operator choice. */
+.checkRow {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: var(--space-2);
+  font-weight: 500;
+}
+
+.checkRow input[type="checkbox"] {
+  accent-color: var(--accent);
+  height: 16px;
+  width: 16px;
+}
+
+.checkRow:has(input:disabled) {
+  cursor: default;
+  opacity: 0.7;
 }

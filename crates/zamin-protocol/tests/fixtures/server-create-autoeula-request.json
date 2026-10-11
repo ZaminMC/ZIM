@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": 43,
+  "method": "server.create",
+  "params": {
+    "requestId": "018f3d2a-7c1b-7000-8000-000000000000",
+    "serverId": "survival",
+    "displayName": "Survival",
+    "project": "paper",
+    "version": "1.21.11",
+    "build": 34,
+    "port": 25565,
+    "autoEula": true
+  }
+}

@@ -20,10 +20,12 @@ import {
   satisfyingRuntime,
   validateServerId,
 } from "./NewServerModal";
+import styles from "./NewServerModal.module.css";
 import { useUi } from "../state/ui";
 import { useServers } from "../state/servers";
 import { activeKeyOf, tabKeyOf, useTabs } from "../state/tabs";
 import { useJobs } from "../state/jobs";
+import { useCreationPrefs } from "../state/creationPrefs";
 
 vi.mock("../state/wire", () => ({ client: {}, startWire: vi.fn() }));
 vi.mock("../state/actions", () => ({
@@ -31,6 +33,7 @@ vi.mock("../state/actions", () => ({
   catalogVersions: vi.fn(),
   catalogBuilds: vi.fn(),
   createServer: vi.fn(),
+  cancelJob: vi.fn(),
   installJava: vi.fn(),
   listJava: vi.fn(),
   registerServer: vi.fn(),
@@ -42,6 +45,7 @@ import {
   catalogList,
   catalogVersions,
   createServer,
+  cancelJob,
   getServer,
   installJava,
   listJava,
@@ -508,5 +512,182 @@ describe("NewServerModal — register door", () => {
     expect(screen.getByText(/already registered/)).toBeTruthy();
     expect(screen.getByText("Pick another id.")).toBeTruthy();
     expect(useUi.getState().newServerOpen).toBe(true); // modal stays open
+  });
+});
+
+// --- the creation overhaul: locking, staged progress, EULA, cancel ----
+
+describe("NewServerModal — the creation contract", () => {
+  beforeEach(() => {
+    useUi.setState({ newServerOpen: true });
+    useJobs.setState({ jobs: {} });
+    useCreationPrefs.setState({ autoEula: false });
+    const m = {
+      catalogList: catalogList as unknown as ReturnType<typeof vi.fn>,
+      catalogVersions: catalogVersions as unknown as ReturnType<typeof vi.fn>,
+      catalogBuilds: catalogBuilds as unknown as ReturnType<typeof vi.fn>,
+      createServer: createServer as unknown as ReturnType<typeof vi.fn>,
+      cancelJob: cancelJob as unknown as ReturnType<typeof vi.fn>,
+      installJava: installJava as unknown as ReturnType<typeof vi.fn>,
+      listJava: listJava as unknown as ReturnType<typeof vi.fn>,
+      registerServer: registerServer as unknown as ReturnType<typeof vi.fn>,
+      getServer: getServer as unknown as ReturnType<typeof vi.fn>,
+    };
+    for (const mock of Object.values(m)) mock.mockReset();
+    m.getServer.mockResolvedValue({
+      serverId: "locked",
+      displayName: "locked",
+      state: "not-running",
+    });
+    m.catalogList.mockResolvedValue({
+      entries: [
+        { id: "paper", name: "Paper", description: "d", source: "fill" },
+      ],
+    });
+    m.catalogVersions.mockResolvedValue({
+      project: "paper",
+      versions: [{ id: "1.21.11" }],
+    });
+    m.catalogBuilds.mockResolvedValue({
+      project: "paper",
+      version: "1.21.11",
+      javaMajor: 21,
+      builds: [
+        { id: 34, channel: "DEFAULT", download: { name: "p.jar", sha256: "x", url: "u", size: 912 } },
+      ],
+    });
+    m.listJava.mockResolvedValue({
+      runtimes: [
+        { path: "/jvm/21", major: 21, versionString: "21.0.3", vendor: "Temurin", managed: true },
+      ],
+    });
+    m.createServer.mockResolvedValue({
+      kind: "server.create",
+      job: { jobId: "lock-1", kind: "server.create", state: "running" },
+    });
+    m.cancelJob.mockResolvedValue({ jobId: "lock-1", state: "running" });
+  });
+
+  afterEach(cleanup);
+
+  /** Drive the form to a live creation job. */
+  async function startCreation(): Promise<void> {
+    render(<NewServerModal />);
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLSelectElement>(/^version/i).value).toBe("1.21.11"),
+    );
+    fireEvent.change(screen.getByLabelText(/^server id/i), { target: { value: "locked" } });
+    fireEvent.click(screen.getByRole("button", { name: /download & create/i }));
+    await waitFor(() => expect(useJobs.getState().jobs["lock-1"]).toBeDefined());
+  }
+
+  it("locks every configuration control once the creation is away", async () => {
+    await startCreation();
+    expect(screen.getByLabelText<HTMLSelectElement>(/software/i).disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>(/^version/i).disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>(/build/i).disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLSelectElement>(/java runtime/i).disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>(/^server id/i).disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>(/^port/i).disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>(/display name/i).disabled).toBe(true);
+    expect(
+      screen.getByLabelText<HTMLInputElement>(/automatically accept the minecraft eula/i).disabled,
+    ).toBe(true);
+    // The mode doors are locked too — no door-swap mid-download.
+    expect(screen.getByRole("tab", { name: /register existing/i })).toHaveProperty("disabled", true);
+    // A change attempt on the software select goes nowhere: the control
+    // is disabled, the snapshot is what the job works from.
+    fireEvent.change(screen.getByLabelText(/software/i), { target: { value: "other" } });
+    expect(useJobs.getState().jobs["lock-1"]).toBeDefined();
+  });
+
+  it("renders the staged checklist and real byte numbers from the job's events", async () => {
+    await startCreation();
+    useJobs.getState().progress("lock-1", {
+      current: 428 * 1024 * 1024,
+      total: 912 * 1024 * 1024,
+      unit: "bytes",
+      stage: "downloading",
+      message: "downloading paper-1.21.11-34.jar",
+    });
+    await screen.findByText(/downloading paper-1\.21\.11-34\.jar/i);
+    // The real byte pair, straight off the event.
+    expect(screen.getByText(/428\.0 MB \/ 912\.0 MB/i)).toBeTruthy();
+    // The artifact is named; the checklist derives from the stage.
+    expect(screen.getByText(/Downloading server software/)).toBeTruthy();
+    expect(screen.getByText(/Preparing the directory/)).toBeTruthy();
+    expect(screen.getByText(/Verifying the download/)).toBeTruthy();
+    // The unstaged steps never show a fake fraction: no percent bar
+    // exists while the unit is not bytes.
+    const active = document.querySelector('[data-status="active"]');
+    expect(active?.textContent).toContain("Downloading server software");
+  });
+
+  it("keeps the block honest: no byte totals means no fabricated bar width", async () => {
+    await startCreation();
+    useJobs.getState().progress("lock-1", {
+      current: 0,
+      stage: "registering",
+      message: "registering the server",
+    });
+    await screen.findByText(/registering the server/i);
+    expect(document.querySelector(`.${styles.progressFill}`)).toBeNull();
+  });
+
+  it("shows the resolved Java for automatic selection — the machine's own answer", async () => {
+    await startCreation();
+    await screen.findByText(/Java 21 — selected automatically \(Temurin\)/i);
+  });
+
+  it("sends the explicit autoEula acceptance and remembers the choice", async () => {
+    render(<NewServerModal />);
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLInputElement>(/automatically accept the minecraft eula/i)),
+    );
+    fireEvent.click(
+      screen.getByLabelText<HTMLInputElement>(/automatically accept the minecraft eula/i),
+    );
+    expect(useCreationPrefs.getState().autoEula).toBe(true);
+    fireEvent.change(screen.getByLabelText(/^server id/i), { target: { value: "eula-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /download & create/i }));
+    await waitFor(() => expect(createServer).toHaveBeenCalled());
+    expect(createServer).toHaveBeenCalledWith(
+      expect.objectContaining({ serverId: "eula-1", autoEula: true }),
+    );
+  });
+
+  it("the default request carries autoEula false — never an invented acceptance", async () => {
+    await startCreation();
+    expect(createServer).toHaveBeenCalledWith(
+      expect.objectContaining({ serverId: "locked", autoEula: false }),
+    );
+  });
+
+  it("offers the daemon's real cancel verb while the job runs", async () => {
+    await startCreation();
+    const cancel = await screen.findByRole("button", { name: /cancel creation/i });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(cancelJob).toHaveBeenCalledWith("lock-1"));
+    // The job's own completion event is the authority: cancellation lands
+    // through the same effect, unlocking the form with nothing left behind.
+    useJobs.getState().completed("lock-1", "cancelled");
+    await screen.findByText(/creation was cancelled; nothing was left behind/i);
+    expect(screen.getByRole("button", { name: /cancel$/i })).toBeTruthy();
+    expect(screen.getByLabelText<HTMLSelectElement>(/software/i).disabled).toBe(false);
+  });
+
+  it("a failure unlocks the form — nothing stays breaking", async () => {
+    await startCreation();
+    useJobs.getState().completed("lock-1", "failed", {
+      code: "CATALOG_UNAVAILABLE",
+      message: "The software catalog cannot be reached.",
+      remediation: [],
+    });
+    await screen.findByRole("alert");
+    expect(screen.getByLabelText<HTMLSelectElement>(/software/i).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: /download & create/i })).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 });

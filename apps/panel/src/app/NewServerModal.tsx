@@ -5,8 +5,9 @@
 // path, kept for servers that already exist on disk). Everything after
 // this references the id only (ADR-0004).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  cancelJob,
   catalogBuilds,
   catalogList,
   catalogVersions,
@@ -19,6 +20,16 @@ import {
 import { describeError } from "../state/errors";
 import type { DescribedError } from "../state/errors";
 import { useJobs } from "../state/jobs";
+import {
+  formatEta,
+  formatSpeed,
+  measuredSpeed,
+  progressView,
+  pushSample,
+  stageChecklist,
+  type SpeedSample,
+} from "../state/creationProgress";
+import { useCreationPrefs } from "../state/creationPrefs";
 import { sortedServers, useServers, type ServerEntry } from "../state/servers";
 import { useTabs } from "../state/tabs";
 import { useUi } from "../state/ui";
@@ -29,7 +40,13 @@ import type {
 } from "../protocol/types";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
+import { CreationBlock } from "./CreationBlock";
 import styles from "./NewServerModal.module.css";
+
+/** The success resolve beat — the block's exit animation window
+ *  (§75's --speed-slow plus a frame of settle). Completion itself is
+ *  the job's state; this only paces the exit. */
+const RESOLVE_BEAT_MS = 300;
 
 /** Client-side sanity only; the daemon owns the authoritative id rules. */
 export function validateServerId(value: string): string | null {
@@ -149,6 +166,19 @@ export function NewServerModal() {
   // Download mode: the create job the modal watches to completion.
   const [createJobId, setCreateJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The operator's remembered EULA preference (panel-local, persisted;
+  // every request carries it explicitly — the daemon never defaults it).
+  const autoEulaPref = useCreationPrefs((s) => s.autoEula);
+  const setAutoEulaPref = useCreationPrefs((s) => s.setAutoEula);
+  const [autoEula, setAutoEula] = useState(autoEulaPref);
+  // The measured-speed window over the download's own byte events.
+  const samplesRef = useRef<SpeedSample[]>([]);
+  // The success resolve beat: REAL completion (the job's own state)
+  // paces the block's exit animation, then the dashboard opens.
+  const [resolving, setResolving] = useState(false);
+  const resolveStartedRef = useRef(false);
+  // A cancellation ask is in flight (the button must not double-fire).
+  const [cancelling, setCancelling] = useState(false);
 
   const installJob = useJobs((s) =>
     installJobId ? s.jobs[installJobId] : undefined,
@@ -265,15 +295,23 @@ export function NewServerModal() {
     }
   }, [installJob]);
 
-  // The create job completing: open the server, or surface the failure.
+  // The create job completing: the block resolves through its exit beat
+  // (real completion paces the animation — never a timer guessing), then
+  // the server's dashboard opens. A failure or cancellation surfaces in
+  // place: the form unlocks for a retry and nothing stays "breaking".
   useEffect(() => {
     if (!createJob) return;
     if (createJob.state === "succeeded") {
+      if (resolveStartedRef.current) return;
+      resolveStartedRef.current = true;
+      setResolving(true);
       void getServer(serverId)
         .then((details) => upsert(details))
         .catch(() => {}); // the registered event reconciles anyway
-      navigate({ kind: "server", serverId });
-      close(false);
+      window.setTimeout(() => {
+        navigate({ kind: "server", serverId });
+        close(false);
+      }, RESOLVE_BEAT_MS);
     } else if (
       createJob.state === "failed" ||
       createJob.state === "cancelled"
@@ -291,6 +329,15 @@ export function NewServerModal() {
       });
     }
   }, [createJob, serverId, navigate, close, upsert]);
+
+  // The speed window: every byte-unit progress event the download
+  // subsystem reported becomes a sample; the slope over the last ~3 s is
+  // the speed the panel shows. No events, no speed — never a guess.
+  useEffect(() => {
+    const progress = createJob?.progress;
+    if (!progress || progress.unit !== "bytes") return;
+    samplesRef.current = pushSample(samplesRef.current, Date.now(), progress.current);
+  }, [createJob?.progress]);
 
   const installing = installJobId !== null;
   const needsJava =
@@ -343,6 +390,12 @@ export function NewServerModal() {
       "fabric-meta";
     setBusy(true);
     setSubmitError(null);
+    // A fresh operation starts from a fresh measurement window and a
+    // fresh resolve latch — the request itself is the immutable snapshot
+    // (built once, from the controls' values at this instant).
+    samplesRef.current = [];
+    resolveStartedRef.current = false;
+    setResolving(false);
     void createServer({
       serverId,
       displayName: displayName.length > 0 ? displayName : undefined,
@@ -352,6 +405,7 @@ export function NewServerModal() {
       loader: isFabric && loaderId ? loaderId : undefined,
       port,
       javaPath: javaPath === "auto" ? undefined : javaPath,
+      autoEula,
     })
       .then((result) => {
         // Seed the store with the reply's own record: the job.started
@@ -391,14 +445,37 @@ export function NewServerModal() {
   const submit = () =>
     mode === "download" ? submitDownload() : submitRegister();
 
-  const createProgress = createJob?.progress;
-  const percent =
-    createProgress && createProgress.total && createProgress.total > 0
-      ? Math.min(
-          100,
-          Math.round((createProgress.current / createProgress.total) * 100),
-        )
+  // The derivation the panel renders: everything comes from the job's own
+  // events (state/creationProgress owns the laws; this is display sugar).
+  // `locked` is the creation contract: once the request is away, the
+  // controls freeze — the operation works from the snapshot it took.
+  const locked = createJobId !== null;
+  const view = progressView(createJob?.progress);
+  const speed = measuredSpeed(samplesRef.current);
+  const eta =
+    view.bytesTotal != null && view.bytesDone != null && speed !== null
+      ? formatEta(view.bytesTotal - view.bytesDone, speed)
       : null;
+  const checklist = stageChecklist(view.stage ?? "preparing").filter(
+    (stage) => autoEula || stage.id !== "eula",
+  );
+  const projectLabel =
+    (entries ?? []).find((entry) => entry.id === project)?.name ?? project;
+  const versionLabel = version || "…";
+  const buildLabel =
+    loaders !== null
+      ? loaderId
+        ? `loader ${loaderId}`
+        : null
+      : buildId !== null
+        ? `build #${buildId}`
+        : null;
+  // The runtime auto-selection resolves against the machine's own list —
+  // the same candidates the daemon's selector walks at first start.
+  const resolvedJava =
+    javaPath === "auto" && javaMajor !== null
+      ? satisfyingRuntime(runtimes ?? [], javaMajor)
+      : undefined;
 
   return (
     <Modal title="New server" onClose={() => close(false)}>
@@ -411,6 +488,7 @@ export function NewServerModal() {
           role="tab"
           aria-selected={mode === "download"}
           className={`${styles.modeTab} ${mode === "download" ? styles.modeTabActive : ""}`}
+          disabled={locked}
           onClick={() => setMode("download")}
         >
           Download &amp; create
@@ -419,6 +497,7 @@ export function NewServerModal() {
           role="tab"
           aria-selected={mode === "register"}
           className={`${styles.modeTab} ${mode === "register" ? styles.modeTabActive : ""}`}
+          disabled={locked}
           onClick={() => setMode("register")}
         >
           Register existing
@@ -442,6 +521,7 @@ export function NewServerModal() {
                 id="new-server-software"
                 className={styles.input}
                 value={project}
+                disabled={locked}
                 onChange={(event) => setProject(event.target.value)}
               >
                 {(entries ?? []).map((entry) => (
@@ -464,6 +544,7 @@ export function NewServerModal() {
                   id="new-server-version"
                   className={styles.input}
                   value={version}
+                  disabled={locked}
                   onChange={(event) => setVersion(event.target.value)}
                 >
                   {(versions ?? []).map((v) => (
@@ -483,6 +564,7 @@ export function NewServerModal() {
                       id="new-server-loader"
                       className={styles.input}
                       value={loaderId}
+                      disabled={locked}
                       onChange={(event) => setLoaderId(event.target.value)}
                     >
                       {loaders.map((loader) => (
@@ -506,6 +588,7 @@ export function NewServerModal() {
                       id="new-server-build"
                       className={styles.input}
                       value={buildId === null ? "" : String(buildId)}
+                      disabled={locked}
                       onChange={(event) =>
                         setBuildId(Number(event.target.value))
                       }
@@ -533,6 +616,7 @@ export function NewServerModal() {
                   id="new-server-id"
                   className={styles.input}
                   value={serverId}
+                  disabled={locked}
                   onChange={(event) => setServerId(event.target.value)}
                   placeholder="survival"
                 />
@@ -548,6 +632,7 @@ export function NewServerModal() {
                   id="new-server-port"
                   className={styles.input}
                   value={portText}
+                  disabled={locked}
                   onChange={(event) => setPortText(event.target.value)}
                   placeholder={String(firstFreePort(owners))}
                   inputMode="numeric"
@@ -594,6 +679,7 @@ export function NewServerModal() {
                 id="new-server-name"
                 className={styles.input}
                 value={displayName}
+                disabled={locked}
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="Survival"
               />
@@ -613,6 +699,7 @@ export function NewServerModal() {
                 id="new-server-java"
                 className={styles.input}
                 value={javaPath}
+                disabled={locked}
                 onChange={(event) => setJavaPath(event.target.value)}
               >
                 <option value="auto">Select automatically</option>
@@ -624,6 +711,19 @@ export function NewServerModal() {
                   </option>
                 ))}
               </select>
+              {javaPath === "auto" && !needsJava ? (
+                <span className={styles.hint}>
+                  {resolvedJava
+                    ? `Java ${resolvedJava.major} — selected automatically (${
+                        resolvedJava.vendor || "unknown vendor"
+                      })`
+                    : javaMajor !== null
+                      ? `Java ${javaMajor} resolves at the first start${
+                          runtimes === null ? " — inspecting this machine's runtimes…" : ""
+                        }`
+                      : "The runtime resolves at the first start."}
+                </span>
+              ) : null}
               {needsJava ? (
                 <div className={styles.javaNotice}>
                   <span className={styles.hint}>
@@ -652,10 +752,32 @@ export function NewServerModal() {
               ) : null}
             </div>
 
+            <div className={styles.field}>
+              <label className={styles.checkRow} htmlFor="new-server-eula">
+                <input
+                  id="new-server-eula"
+                  type="checkbox"
+                  checked={autoEula}
+                  disabled={locked}
+                  onChange={(event) => {
+                    setAutoEula(event.target.checked);
+                    setAutoEulaPref(event.target.checked);
+                  }}
+                />
+                <span>Automatically accept the Minecraft EULA</span>
+              </label>
+              <span className={styles.hint}>
+                {autoEula
+                  ? "eula.txt is written with eula=true before the first start — this checkbox is your explicit acceptance (aka.ms/minecrafteula), remembered for next time."
+                  : "The first start asks for EULA acceptance, as always. Tick the box to accept it now instead — your choice, never a default."}
+              </span>
+            </div>
+
             <span className={styles.hint}>
               ZIM downloads and verifies the server jar, writes the starter
               files, and registers the server. The first start asks for EULA
-              acceptance — nothing else is manual.
+              acceptance unless you tick the auto-accept box above — nothing
+              else is manual.
             </span>
           </>
         ) : (
@@ -668,6 +790,7 @@ export function NewServerModal() {
                 id="new-server-id-register"
                 className={styles.input}
                 value={serverId}
+                disabled={busy}
                 onChange={(event) => setServerId(event.target.value)}
                 placeholder="survival"
                 autoFocus
@@ -686,6 +809,7 @@ export function NewServerModal() {
                 id="new-server-name-register"
                 className={styles.input}
                 value={displayName}
+                disabled={busy}
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="Survival"
               />
@@ -699,6 +823,7 @@ export function NewServerModal() {
                 id="new-server-root"
                 className={styles.input}
                 value={rootPath}
+                disabled={busy}
                 onChange={(event) => setRootPath(event.target.value)}
                 placeholder="/home/you/servers/survival"
               />
@@ -712,20 +837,73 @@ export function NewServerModal() {
         )}
 
         {createJobId !== null ? (
-          <div className={styles.progressBox} role="status">
+          <div className={styles.progressPanel} role="status">
+            <div className={styles.progressHead}>
+              <CreationBlock
+                view={view}
+                succeeded={resolving}
+                failed={
+                  createJob?.state === "failed" || createJob?.state === "cancelled"
+                }
+              />
+              <div className={styles.progressTitle}>
+                <span className={styles.progressName}>
+                  Creating {displayName.length > 0 ? displayName : serverId}
+                </span>
+                <span className={styles.progressConfig}>
+                  {projectLabel} · {versionLabel}
+                  {buildLabel ? ` · ${buildLabel}` : ""}
+                  {resolvedJava || javaPath !== "auto" ? " · " : ""}
+                  {resolvedJava
+                    ? `Java ${resolvedJava.major} (automatic)`
+                    : javaPath !== "auto"
+                      ? "Java (pinned)"
+                      : ""}
+                </span>
+              </div>
+            </div>
+
             <span className={styles.progressLabel}>
-              {createJob?.progress?.message ?? "Creating the server…"}
+              {createJob?.progress?.message ?? "Starting the creation…"}
             </span>
-            {percent !== null ? (
+
+            {view.percent !== null ? (
               <div className={styles.progressTrack}>
                 <div
                   className={styles.progressFill}
-                  style={{ width: `${percent}%` }}
+                  style={{ width: `${view.percent}%` }}
                 />
               </div>
             ) : (
-              <span className={styles.hint}>Working…</span>
+              /* No honest fraction exists for this stage: a quiet empty
+               * track, never a fabricated ramp. */
+              <div className={styles.progressTrack} />
             )}
+
+            {view.bytesDone !== null ? (
+              <span className={styles.progressNumbers}>
+                {formatSpeed(speed) ?? "— B/s"}
+                {view.bytesTotal != null
+                  ? ` · ${formatProgressBytes(view.bytesDone)} / ${formatProgressBytes(view.bytesTotal)}`
+                  : ` · ${formatProgressBytes(view.bytesDone)}`}
+                {eta ? ` · ETA ${eta}` : ""}
+              </span>
+            ) : null}
+
+            <ol className={styles.stageList}>
+              {checklist.map((stage) => (
+                <li key={stage.id} data-status={stage.status}>
+                  <span className={styles.stageGlyph} aria-hidden>
+                    {stage.status === "done"
+                      ? "✓"
+                      : stage.status === "active"
+                        ? "●"
+                        : "○"}
+                  </span>
+                  {stage.label}
+                </li>
+              ))}
+            </ol>
           </div>
         ) : null}
 
@@ -744,13 +922,32 @@ export function NewServerModal() {
         ) : null}
 
         <div className={styles.row}>
-          <Button onClick={() => close(false)}>Cancel</Button>
+          {locked ? (
+            <Button
+              busy={cancelling}
+              disabled={cancelling}
+              onClick={() => {
+                // `locked` narrows: createJobId is a string in here.
+                setCancelling(true);
+                void cancelJob(createJobId)
+                  .catch(() => {
+                    // The job's own completion event is the authority —
+                    // a refused ask surfaces through the same effect.
+                  })
+                  .finally(() => setCancelling(false));
+              }}
+            >
+              Cancel creation
+            </Button>
+          ) : (
+            <Button onClick={() => close(false)}>Cancel</Button>
+          )}
           <Button
             variant="primary"
             type="submit"
-            busy={busy || createJobId !== null}
+            busy={busy || locked}
             disabled={
-              createJobId !== null ||
+              locked ||
               serverId.length === 0 ||
               portConflict != null ||
               (mode === "register" && rootPath.length === 0) ||

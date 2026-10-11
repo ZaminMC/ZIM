@@ -63,6 +63,9 @@ import type {
   ExtensionsListResult,
   RootsGetResult,
   RootsSetParams,
+  StorageGetResult,
+  StorageSetParams,
+  StorageSetResult,
 } from "../protocol/types";
 import { client } from "./wire";
 
@@ -93,6 +96,17 @@ export async function discoveryRoots(): Promise<RootsGetResult> {
 export async function setDiscoveryRoots(roots: string[]): Promise<RootsGetResult> {
   const params: RootsSetParams = { roots };
   return client.request<RootsGetResult>("discovery.roots.set", params);
+}
+
+// --- storage: the user-controlled data root (ADR-0034) -------------
+
+export async function storageGet(): Promise<StorageGetResult> {
+  return client.request<StorageGetResult>("storage.get");
+}
+
+export async function storageSet(root: string): Promise<StorageSetResult> {
+  const params: StorageSetParams = { root };
+  return client.request<StorageSetResult>("storage.set", params);
 }
 
 export async function listExtensions(): Promise<ExtensionsListResult> {

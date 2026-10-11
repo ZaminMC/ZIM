@@ -623,3 +623,119 @@ fn config_get_response_parses_with_provenance_and_tri_state_jar() {
         zamin_protocol::config::FieldProvenance::Global
     );
 }
+
+#[test]
+fn storage_get_pins_the_map_and_the_pending_dialect() {
+    // ADR-0034's read side: the running root, the platform default, the
+    // redirect pointer's fixed address — and `pendingRoot` (additive,
+    // absent-when-nothing-pending) for the stored-but-not-yet-live case.
+    let original = fixture("storage-get-response");
+    let msg = parse("storage-get-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::storage::StorageGetResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.root, "/d/ZIM");
+    assert_eq!(result.default_root, "/home/u/.local/share/zim");
+    assert!(result.redirect_active);
+    assert_eq!(
+        result.redirect_path,
+        "/home/u/.config/zim/storage-location.txt"
+    );
+    assert_eq!(result.pending_root, None);
+    assert_eq!(result.instances_dir, "/d/ZIM/instances");
+    assert_eq!(result.cache_dir, "/d/ZIM/cache");
+    assert_eq!(result.java_dir, "/d/ZIM/java");
+
+    // The pending dialect: a redirect written after this daemon started
+    // names a root that is not live yet.
+    let pending = fixture("storage-get-pending-response");
+    let msg = parse("storage-get-pending-response");
+    round_trip(&msg, &pending);
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::storage::StorageGetResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert!(!result.redirect_active);
+    assert_eq!(result.pending_root.as_deref(), Some("/e/BIG/ZIM"));
+}
+
+#[test]
+fn storage_set_answer_states_the_restart_and_the_left_behind() {
+    // The write side's honesty contract: the new root, that a restart is
+    // required (always true today — stated, never implied), the root the
+    // daemon still runs on, and how many registered servers stay there.
+    let original = fixture("storage-set-response");
+    let msg = parse("storage-set-response");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Response(resp) = msg else {
+        panic!("expected response");
+    };
+    let result: zamin_protocol::storage::StorageSetResult =
+        serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.root, "/d/ZIM");
+    assert!(result.restart_required);
+    assert_eq!(result.current_root, "/home/u/.local/share/zim");
+    assert_eq!(result.servers_in_current_root, 3);
+}
+
+#[test]
+fn server_create_carries_the_explicit_eula_acceptance() {
+    // The additive `autoEula`: absent keeps the stamped eula.txt at
+    // eula=false (the default that is never silently flipped); true is
+    // the operator's explicit per-creation acceptance.
+    let original = fixture("server-create-autoeula-request");
+    let msg = parse("server-create-autoeula-request");
+    round_trip(&msg, &original);
+
+    let IncomingMessage::Request(req) = msg else {
+        panic!("expected request");
+    };
+    assert_eq!(req.method, methods::SERVER_CREATE);
+    let params = req
+        .parse_params::<zamin_protocol::software::ServerCreateParams>()
+        .unwrap();
+    assert_eq!(params.auto_eula, Some(true));
+    assert_eq!(params.build, Some(34));
+    assert_eq!(params.java_path, None);
+
+    // Absent stays absent — old clients keep parsing unchanged.
+    let legacy: zamin_protocol::software::ServerCreateParams = serde_json::from_value(json!({
+        "requestId": "018f3d2a-7c1b-7000-8000-000000000000",
+        "serverId": "survival",
+        "project": "paper",
+        "version": "1.21.11"
+    }))
+    .unwrap();
+    assert_eq!(legacy.auto_eula, None);
+}
+
+#[test]
+fn job_progress_carries_the_machine_readable_stage() {
+    // The staged dialect (§7's progress grows a lifecycle step):
+    // `server.create` speaks it so a UI's stage checklist derives from
+    // STATE, not from pattern-matching the human sentence.
+    let staged: zamin_protocol::jobs::JobProgress = serde_json::from_value(json!({
+        "current": 428, "total": 912, "unit": "bytes",
+        "message": "downloading paper-1.21.11-34.jar", "stage": "downloading"
+    }))
+    .unwrap();
+    assert_eq!(staged.stage.as_deref(), Some("downloading"));
+    let wire = serde_json::to_value(&staged).unwrap();
+    assert_eq!(wire["stage"], "downloading");
+
+    // Plain progress stays plain: absent in, absent out.
+    let plain: zamin_protocol::jobs::JobProgress =
+        serde_json::from_value(json!({ "current": 1, "total": 3 })).unwrap();
+    assert_eq!(plain.stage, None);
+    let wire = serde_json::to_value(&plain).unwrap();
+    assert!(
+        wire.get("stage").is_none(),
+        "absent stages stay absent on the wire"
+    );
+}

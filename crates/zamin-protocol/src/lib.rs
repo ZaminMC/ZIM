@@ -33,6 +33,7 @@ pub mod publish;
 pub mod schedules;
 pub mod server;
 pub mod software;
+pub mod storage;
 pub mod streams;
 
 /// Wire protocol version. Additive changes do not bump it; breaking changes

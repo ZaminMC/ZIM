@@ -29,6 +29,7 @@ use zamin_protocol::server::{
     RemoveServerParams, ServerIdParams, UpdateServerParams,
 };
 use zamin_protocol::streams::{SubscribeParams, UnsubscribeParams};
+use zamin_protocol::storage::StorageSetParams;
 
 use crate::audit::{Audit, AUDITED_METHODS};
 use crate::engine::{Engine, EngineError, LifecycleKind};
@@ -555,6 +556,20 @@ async fn dispatch(request: &Request, engine: &Engine, audit: &Audit) -> Response
                 Err(e) => return unreadable(id, e),
             };
             match engine.discovery_roots_set(params).await {
+                Ok(result) => json_ok(id, result),
+                Err(e) => dispatch_error(id, e),
+            }
+        }
+        methods::STORAGE_GET => match engine.storage_get().await {
+            Ok(result) => json_ok(id, result),
+            Err(e) => dispatch_error(id, e),
+        },
+        methods::STORAGE_SET => {
+            let params: StorageSetParams = match request.parse_params() {
+                Ok(params) => params,
+                Err(e) => return unreadable(id, e),
+            };
+            match engine.storage_set(params).await {
                 Ok(result) => json_ok(id, result),
                 Err(e) => dispatch_error(id, e),
             }

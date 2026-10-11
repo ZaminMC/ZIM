@@ -126,6 +126,35 @@ export interface RootsSetParams {
   roots: string[];
 }
 
+/** ADR-0034 — `storage.get`: the honest map of where the daemon's data
+ *  lives, the platform default it would otherwise use, and the redirect
+ *  pointer's own fixed address. `pendingRoot` is the stored-but-not-yet-
+ *  live root (written after this daemon started). */
+export interface StorageGetResult {
+  root: string;
+  defaultRoot: string;
+  redirectActive: boolean;
+  redirectPath: string;
+  pendingRoot?: string;
+  instancesDir: string;
+  cacheDir: string;
+  javaDir: string;
+}
+
+/** ADR-0034 — `storage.set { root }`: validate, persist the redirect,
+ *  answer honestly. The running daemon keeps its root until it
+ *  restarts, and registered servers stay where they are. */
+export interface StorageSetParams {
+  root: string;
+}
+
+export interface StorageSetResult {
+  root: string;
+  restartRequired: boolean;
+  currentRoot: string;
+  serversInCurrentRoot: number;
+}
+
 /** §56/§57 (ADR-0031): the daemon's extension inventory — the
  *  declaration half of the permission model. */
 export interface ExtensionView {
@@ -238,6 +267,10 @@ export interface JobProgress {
   total?: number;
   unit?: string;
   message?: string;
+  /** Machine-readable lifecycle step (§7's staged dialect —
+   *  `server.create` speaks it). A UI's stage checklist derives from
+   *  this state, never from matching the human `message`. */
+  stage?: string;
 }
 
 export interface Job {
@@ -571,6 +604,10 @@ export interface ServerCreateParams {
   templateId?: string;
   port?: number;
   javaPath?: string;
+  /** The operator's explicit EULA acceptance: eula.txt is written with
+   *  `eula=true` before the first boot. Absent = the stamped
+   *  `eula=false` stands (the typed NEEDS_EULA dialog on first start). */
+  autoEula?: boolean;
 }
 
 export type ServerCreateResult = BackupJobResult;

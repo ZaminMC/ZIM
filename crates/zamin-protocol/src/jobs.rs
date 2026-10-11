@@ -63,6 +63,13 @@ pub struct JobProgress {
     pub unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// A machine-readable lifecycle stage (e.g. `server.create`'s
+    /// `downloading`) — the authoritative state a UI's stage checklist
+    /// derives from, instead of pattern-matching the human sentence in
+    /// `message`. Additive: jobs that don't speak stages simply omit it,
+    /// and clients that don't know it ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

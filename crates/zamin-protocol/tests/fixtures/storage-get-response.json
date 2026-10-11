@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 41,
+  "result": {
+    "root": "/d/ZIM",
+    "defaultRoot": "/home/u/.local/share/zim",
+    "redirectActive": true,
+    "redirectPath": "/home/u/.config/zim/storage-location.txt",
+    "instancesDir": "/d/ZIM/instances",
+    "cacheDir": "/d/ZIM/cache",
+    "javaDir": "/d/ZIM/java"
+  }
+}
