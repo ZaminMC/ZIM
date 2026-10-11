@@ -67,7 +67,7 @@ describe("the stats and the grid", () => {
     expect(screen.getByText("In transition")).toBeTruthy();
   });
 
-  it("renders one card per server with its meta chips", () => {
+  it("renders a server card with quiet metadata and a join address", () => {
     const servers = [
       entryOf({ serverId: "alpha", displayName: "Alpha", software: "paper", version: "1.21", port: 25565 }),
     ];
@@ -75,22 +75,20 @@ describe("the stats and the grid", () => {
     expect(screen.getByText("Alpha")).toBeTruthy();
     expect(screen.getByText("alpha")).toBeTruthy();
     expect(screen.getByText("paper")).toBeTruthy();
-    expect(screen.getByText("v1.21")).toBeTruthy();
-    expect(screen.getByText(":25565")).toBeTruthy();
+    expect(screen.getByText("1.21")).toBeTruthy();
+    expect(screen.getByText("localhost:25565")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open Alpha" })).toBeTruthy();
   });
 
-  it("a card opens by click, Enter, and Space — pointer and keyboard are equals", () => {
+  it("opens with a native button on click", () => {
     const onOpen = vi.fn();
     render(<FleetPage servers={FOUR} onOpen={onOpen} onNewServer={() => {}} />);
     const card = screen.getByRole("button", { name: "Open Delta" });
+    expect(card.tagName).toBe("BUTTON");
     fireEvent.click(card);
+    expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenLastCalledWith("delta");
-    fireEvent.keyDown(card, { key: "Enter" });
-    expect(onOpen).toHaveBeenLastCalledWith("delta");
-    fireEvent.keyDown(card, { key: " " });
-    expect(onOpen).toHaveBeenLastCalledWith("delta");
-    expect(onOpen).toHaveBeenCalledTimes(3);
+  });
   });
 });
 
