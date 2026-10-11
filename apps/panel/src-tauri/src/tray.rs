@@ -662,8 +662,13 @@ pub async fn quit_shutdown_daemon() {
     }
 
     // Still listening: either wedged (answers nothing) or a stubborn
-    // server. The operator said QUIT — the force kill ends both the
-    // daemon and every server tree it owns (the installer's own verb).
+    // server. The operator said QUIT — the force kill ends the DAEMON,
+    // honestly and finally ("no zamind.exe left behind"). The servers it
+    // was supervising keep their processes: the job objects carry no
+    // kill-on-close flag by design (ADR-0005's adoption law — a daemon
+    // that dies must leave servers that the next start can adopt, not a
+    // fleet of corpses), and killing java by image name would kill
+    // servers ZIM never owned. The next daemon start adopts them back.
     crate::daemon_ensure::kill_daemons_by_image();
     // One final settle so the exit and the kill never race in the OS's
     // eyes (the pipe lingers one scheduling tick after the kill).

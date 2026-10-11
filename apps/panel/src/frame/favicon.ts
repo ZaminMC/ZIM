@@ -331,9 +331,26 @@ export function startFaviconLane(): void {
           serverId?: string;
           to?: ServerState;
           reason?: string;
+          displayName?: string;
         };
-        if (event.type !== "serverStateChanged" || !event.serverId || !event.to)
+        if (!event.serverId) return;
+        // The registry's rename: the projection's name is what the
+        // omnibox's suggestions read — it moves here the same way the
+        // tray's rows move (the events stream is the reconcile channel).
+        if (event.type === "serverRenamed") {
+          const displayName = event.displayName;
+          if (displayName == null || displayName === "") return;
+          const serverId = event.serverId;
+          useFavicons.setState((s) => {
+            const existing = s.servers[serverId];
+            if (!existing || existing.name === displayName) return s;
+            return {
+              servers: { ...s.servers, [serverId]: { ...existing, name: displayName } },
+            };
+          });
           return;
+        }
+        if (event.type !== "serverStateChanged" || !event.to) return;
         if (event.reason === "removed") {
           useFavicons.setState((s) => {
             const servers = { ...s.servers };
