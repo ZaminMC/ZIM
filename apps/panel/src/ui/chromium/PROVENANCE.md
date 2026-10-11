@@ -187,6 +187,54 @@ Files ported (chromium/src main, fetched 2026-10-10):
   selected-hover at 85% — kHoveredSelectedTabOpacity — unused until the
   two-opacity law has a consumer that needs the distinction).
 
+## Task 18 — the tab width solver is Chromium's own (2026-10-12)
+
+Files ported (chromium/src `main`, fetched 2026-10-12 from
+raw.githubusercontent.com/chromium/chromium):
+
+- `chrome/browser/ui/views/tabs/tab_strip_layout.cc` — the WHOLE solver:
+  `CalculateSpaceFractionAvailable` (one `space_fraction_available` for
+  every tab, from the three chain totals — minimum, crossover,
+  preferred), `TabSizer::CalculateTabWidth` (the two layout domains:
+  `kInactiveWidthBelowActiveWidth` interpolates min→crossover,
+  `kInactiveWidthEqualsActiveWidth` interpolates crossover→preferred —
+  the domain's own name is the law: crowded tabs are ONE width, active
+  and inactive alike), `TabSizer::TabAcceptsExtraSpace` (never a pinned
+  or closed tab, never at a domain's far anchor, never at fraction 0 or
+  1), `AllocateExtraSpace` (the floored widths' whole-pixel leftovers
+  ride out LEFT-TO-RIGHT, one pixel per accepting tab), and
+  `CalculateTabBounds`' chain accounting (each tab's width less one
+  overlap, the last tab's overlap added back).
+- `chrome/browser/ui/views/tabs/tab_width_constraints.{h,cc}` — the
+  three anchors per tab: `GetMinimumWidth` (min_active for the active
+  tab, min_inactive otherwise), `GetLayoutCrossoverWidth`
+  (min_active_width for every open unpinned tab),
+  `GetPreferredWidth` (standard), each through
+  `TransformForPinnednessAndOpenness` (closed ⇒ overlap, pinned ⇒
+  pinned width).
+
+The old port shrank inactive tabs to their minimum first, then the
+active tab, then handed the leftover out with a per-tab `free * 0.5`
+halving — the founder's "the first tabs don't compact, the new ones do,
+it's uneven". That rule does not exist upstream; the sizer's shared
+fraction is the whole law.
+
+### Documented deltas
+
+- **The group chips join the chain, not the sizer.** Upstream lays group
+  header views as fixed-width slots the sizer never resizes; ZIM runs
+  the sizer over the visible tabs with the chain width the chips leave
+  (`budget − Σchips + overlap × chip-bearing units`) — each chip adds
+  its own width to the spend and one link to the overlap chain.
+- **ZIM's contents insets are the build's own divergence** (porting-spec
+  §1: inset 8, not 20) — so the model's min_active/min_inactive/pinned
+  anchors answer 32/32/40, not upstream's 56/32/64. The SOLVER is
+  verbatim; the anchors it reads are this build's constants.
+- **Below the crossover total this build's domain degenerates**: min
+  inactive == crossover (32), so the below-crossover domain pins every
+  tab at 32 — the crowded-strip regime is the equals domain, which is
+  where Chrome's own strips live.
+
 ## Task 17 — the selection drags as a block (TabDragController's carry + MoveSelectedTabsTo)
 
 Files ported (chromium/src main, fetched 2026-10-10):

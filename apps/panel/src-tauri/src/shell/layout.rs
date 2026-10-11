@@ -167,15 +167,29 @@ fn group_header_width(label: &str) -> f32 {
     (PAD + PER_CHAR * label.chars().count() as f32).clamp(MIN, MAX)
 }
 
-/// The width law, ported from tab_width_constraints.cc: closed ⇒ overlap,
-/// pinned ⇒ pinned width, otherwise min(active/inactive) .. standard.
-/// Group law (tab_group_header.h / tab_group_views.cc): every group
-/// leads with its header chip; a collapsed group reduces to the chip.
+/// The width law, ported verbatim from tab_width_constraints.cc +
+/// tab_strip_layout.cc (chromium @ main, fetched 2026-10-12): closed ⇒
+/// overlap, pinned ⇒ pinned width, otherwise the TabSizer's TWO layout
+/// domains. Group law (tab_group_header.h / tab_group_views.cc): every
+/// group leads with its header chip; a collapsed group reduces to the chip.
 ///
-/// Distribution rule (documented divergence, porting spec §1): when the
-/// strip overflows, inactive tabs shrink to their minimum first, then the
-/// active tab, then everything clamps at its minimum (upstream scrolls
-/// with chevron buttons — reserved, not ported in this phase).
+/// THE SIZER'S LAW (tab_strip_layout.cc CalculateSpaceFractionAvailable +
+/// TabSizer::CalculateTabWidth): every tab shares ONE
+/// `space_fraction_available`, and each tab's width interpolates between
+/// its own three anchors — minimum, crossover (`GetLayoutCrossoverWidth`,
+/// the minimum-active width), and preferred (standard). Two domains:
+/// below the crossover total the strip interpolates min→crossover
+/// (`kInactiveWidthBelowActiveWidth`); at or above it, crossover→
+/// preferred (`kInactiveWidthEqualsActiveWidth` — the domain's own name
+/// is the law: crowded tabs are ONE width, active and inactive alike).
+/// The fractional leftovers ride upstream's AllocateExtraSpace: whole
+/// pixels handed out left-to-right to the tabs that still accept them.
+///
+/// The group chips are upstream's fixed-width slots (a group header view
+/// is never resized by the strip): the sizer runs over the VISIBLE tabs
+/// with the chain width the chips leave — `budget − Σchips + overlap ×
+/// chip-bearing units` (each chip adds one unit to the overlap chain and
+/// its own width to the spend).
 pub fn compute_layout(
     strip_width: f32,
     tabs: &[(u32, bool, bool, Option<u32>)], // (id, pinned, closing, group)
@@ -236,100 +250,143 @@ pub fn compute_layout(
         return Vec::new();
     }
 
-    let width_of = |i: usize| -> f32 {
+    // -- The sizer (tab_width_constraints.cc's three anchors per tab) -----
+    // TransformForPinnednessAndOpenness: a closed tab's every anchor is
+    // the overlap; a pinned tab's every anchor is the pinned width; an
+    // open unpinned tab answers min / crossover / preferred.
+    let anchors_of = |i: usize| -> (f32, f32, f32) {
         let (id, pinned, closing, _) = tabs[i];
         if closing {
-            return overlap;
+            return (overlap, overlap, overlap);
         }
-        let floor = if id == active {
-            min_active_width()
-        } else {
-            min_inactive_width()
-        };
         if pinned {
-            pinned_width().max(floor)
+            let w = pinned_width();
+            return (w, w, w);
+        }
+        if id == active {
+            (min_active_width(), min_active_width(), standard_width())
         } else {
-            standard_width().max(floor)
+            (min_inactive_width(), min_active_width(), standard_width())
         }
     };
 
-    let preferred: f32 = laid_out
+    let widths: Vec<f32> = {
+        let chips: f32 = laid_out
+            .iter()
+            .filter(|i| headers[**i].is_some())
+            .map(|i| group_header_width(&label_of(headers[*i].unwrap_or(0))))
+            .sum();
+        let chip_units = laid_out.iter().filter(|i| headers[**i].is_some()).count() as f32;
+        // The chain width the tabs alone must fill (see the doc block):
+        // the chips spend their own width and each adds one chain link.
+        let tab_chain_width = budget - chips + overlap * chip_units;
+        let vis: Vec<usize> = laid_out.iter().copied().filter(|i| visible[*i]).collect();
+        if vis.is_empty() {
+            Vec::new()
+        } else {
+            // CalculateSpaceFractionAvailable: the three totals ride the
+            // chain accounting (each tab's width less one overlap, the
+            // last tab's overlap added back).
+            let mut s_min = overlap;
+            let mut s_cross = overlap;
+            let mut s_pref = overlap;
+            let mut anchors: Vec<(f32, f32, f32)> = Vec::with_capacity(vis.len());
+            for i in &vis {
+                let (min, cross, pref) = anchors_of(*i);
+                anchors.push((min, cross, pref));
+                s_min += min - overlap;
+                s_cross += cross - overlap;
+                s_pref += pref - overlap;
+            }
+            // The two domains and the one fraction every tab shares.
+            let (below, fraction) = if tab_chain_width < s_cross {
+                let f = if s_min == s_cross {
+                    1.0
+                } else {
+                    (tab_chain_width - s_min) / (s_cross - s_min)
+                };
+                (true, f.clamp(0.0, 1.0))
+            } else {
+                let f = if s_pref == s_cross {
+                    1.0
+                } else {
+                    (tab_chain_width - s_cross) / (s_pref - s_cross)
+                };
+                (false, f.clamp(0.0, 1.0))
+            };
+            // TabSizer::CalculateTabWidth — floor, upstream's own rounding.
+            let mut widths: Vec<f32> = anchors
+                .iter()
+                .map(|(min, cross, pref)| {
+                    if below {
+                        (min + fraction * (cross - min)).floor()
+                    } else {
+                        (cross + fraction * (pref - cross)).floor()
+                    }
+                })
+                .collect();
+            // AllocateExtraSpace: the floored widths leave the chain short
+            // of the chain width by up to one pixel per tab; the whole
+            // pixels go out left-to-right, one each, to the tabs that
+            // still accept them (a pinned/closed tab never does; a tab
+            // already at its domain's far anchor does not either).
+            let already_preferred = !below && fraction == 1.0;
+            let extra = if already_preferred {
+                0
+            } else {
+                let used: f32 = widths.iter().sum::<f32>() - overlap * (vis.len() as f32 - 1.0);
+                ((tab_chain_width - used).floor().max(0.0)) as i32
+            };
+            if extra > 0 {
+                let mut left = extra;
+                for (k, i) in vis.iter().enumerate() {
+                    if left <= 0 {
+                        break;
+                    }
+                    let (_, pinned, closing, _) = tabs[*i];
+                    if pinned || closing {
+                        continue;
+                    }
+                    let (min, cross, pref) = anchors[k];
+                    let accepts = if below { cross > min } else { pref > cross };
+                    if accepts {
+                        widths[k] += 1.0;
+                        left -= 1;
+                    }
+                }
+            }
+            widths
+        }
+    };
+
+    // Repack the sizer's widths back onto the laid-out order (chips stay
+    // their fixed width; a lone chip's "tab width" is unused).
+    let mut next_vis = 0usize;
+    let unit_widths: Vec<f32> = laid_out
         .iter()
         .map(|i| {
-            headers[*i]
-                .map(|gid| group_header_width(&label_of(gid)))
-                .unwrap_or(0.0)
-                + if visible[*i] { width_of(*i) } else { 0.0 }
+            if visible[*i] {
+                let w = widths[next_vis];
+                next_vis += 1;
+                w
+            } else {
+                0.0
+            }
         })
-        .sum::<f32>()
-        - overlap * (laid_out.len().max(1) as f32 - 1.0);
-
-    let mut widths: Vec<f32> = laid_out
-        .iter()
-        .map(|i| if visible[*i] { width_of(*i) } else { 0.0 })
         .collect();
     let header_w: Vec<Option<f32>> = laid_out
         .iter()
         .map(|i| headers[*i].map(|gid| group_header_width(&label_of(gid))))
         .collect();
 
-    if preferred > budget {
-        // Shrink inactive to their minimum, keep the active tab alive
-        // longest (the LayoutDomain crossover, simplified).
-        for (k, i) in laid_out.iter().enumerate() {
-            let (id, pinned, closing, _) = tabs[*i];
-            if !pinned && !closing && id != active && visible[*i] {
-                widths[k] = min_inactive_width();
-            }
-        }
-        // The laid-out units' total width (tabs + chips minus overlaps).
-        let sum_units = |widths: &[f32], header_w: &[Option<f32>]| -> f32 {
-            widths
-                .iter()
-                .zip(header_w)
-                .map(|(w, h)| w + h.unwrap_or(0.0))
-                .sum::<f32>()
-                - overlap * (widths.len().max(1) as f32 - 1.0)
-        };
-        let mut total = sum_units(&widths, &header_w);
-        if total > budget {
-            // Even the active tab goes to its minimum.
-            for (k, i) in laid_out.iter().enumerate() {
-                let (id, pinned, closing, _) = tabs[*i];
-                if !pinned && !closing && id == active && visible[*i] {
-                    widths[k] = min_active_width();
-                }
-            }
-            total = sum_units(&widths, &header_w);
-            if total > budget {
-                // Clamped overflow: upstream would scroll (reserved).
-                return finish(
-                    tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap,
-                );
-            }
-        }
-        // Distribute the leftover to the active tab first, then evenly to
-        // the inactive ones, up to standard width.
-        let mut free = budget - total;
-        for (k, i) in laid_out.iter().enumerate() {
-            if free <= 0.0 {
-                break;
-            }
-            let (id, pinned, closing, _) = tabs[*i];
-            if !pinned && !closing && visible[*i] {
-                let room = standard_width() - widths[k];
-                let give = if id == active {
-                    room.min(free)
-                } else {
-                    room.min(free * 0.5)
-                };
-                widths[k] += give;
-                free -= give;
-            }
-        }
-    }
     finish(
-        tabs, &laid_out, &headers, &visible, &widths, &header_w, overlap,
+        tabs,
+        &laid_out,
+        &headers,
+        &visible,
+        &unit_widths,
+        &header_w,
+        overlap,
     )
 }
 
@@ -589,14 +646,56 @@ mod tests {
     }
 
     #[test]
-    fn overflow_shrinks_inactive_first() {
+    fn crowded_tabs_answer_one_shared_width() {
+        // The sizer's own law (kInactiveWidthEqualsActiveWidth): the
+        // fraction is SHARED, so crowded tabs are ONE width — active and
+        // inactive alike. The old port's first-tab-first halving made the
+        // strip lopsided; the domain's name forbids it.
         let tabs: Vec<(u32, bool, bool, Option<u32>)> =
             (1..=20).map(|i| (i, false, false, None)).collect();
         let slots = compute_layout(600.0, &tabs, 1, &[]);
-        let active = slots.iter().find(|s| s.id == 1).unwrap();
-        let inactive = slots.iter().find(|s| s.id == 10).unwrap();
-        assert!(active.width >= inactive.width);
-        assert!(inactive.width >= min_inactive_width() - 0.01);
+        let first = slots[0].width;
+        for slot in &slots {
+            assert!(
+                (slot.width - first).abs() <= 1.0,
+                "slot {} is {} wide; the first is {}",
+                slot.id,
+                slot.width,
+                first,
+            );
+            assert!(slot.width >= min_inactive_width() - 0.01);
+            assert!(slot.width <= standard_width() + 0.01);
+        }
+        // And the chain fills the budget: the last slot ends at the
+        // caption reserve (the + button's home is the leftover, not a
+        // stretched strip).
+        let budget = 600.0 - STRIP_PADDING - NEW_TAB_BUTTON_W - WINDOW_CONTROLS_W;
+        let last = slots.last().unwrap();
+        let used = last.x + last.width - STRIP_PADDING;
+        assert!(
+            (used - budget).abs() <= 1.0,
+            "chain uses {} of {}",
+            used,
+            budget,
+        );
+    }
+
+    #[test]
+    fn widths_interpolate_smoothly_as_tabs_accumulate() {
+        // One fraction, linear: 10 tabs must be WIDER than 20 tabs at the
+        // same strip width, and the shrink is monotone — no tab regime
+        // where an early tab keeps its width while a late one collapses.
+        let strip = 600.0;
+        let ten: Vec<(u32, bool, bool, Option<u32>)> =
+            (1..=10).map(|i| (i, false, false, None)).collect();
+        let twenty: Vec<(u32, bool, bool, Option<u32>)> =
+            (1..=20).map(|i| (i, false, false, None)).collect();
+        let w10 = compute_layout(strip, &ten, 1, &[])[0].width;
+        let w20 = compute_layout(strip, &twenty, 1, &[])[0].width;
+        assert!(w10 > w20, "{} must exceed {}", w10, w20);
+        // Both uniform within the extra-space pixel law.
+        let s10 = compute_layout(strip, &ten, 1, &[]);
+        assert!(s10.iter().all(|s| (s.width - s10[0].width).abs() <= 1.0));
     }
 
     #[test]
