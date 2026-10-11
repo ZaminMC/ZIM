@@ -77,7 +77,7 @@ import {
   type HoverCardPayload,
 } from "../ui/chromium/hoverCard";
 import { HoverCard } from "../ui/chromium/hoverCardView";
-import { seedFaviconsForDemo, startFaviconLane, useFavicons, fleetBrief } from "./favicon";
+import { seedFaviconsForDemo, startFaviconLane, useFavicons, fleetBrief, fleetHost } from "./favicon";
 import { FAVICON_DOT_COLORS, SOFTWARE_GLYPHS, faviconDot } from "./faviconLaw";
 import { softwareMark } from "./softwareMarks";
 import { useFaviconDots } from "../state/faviconPrefs";
@@ -1232,7 +1232,7 @@ export function FrameApp() {
     }
     const ticket = ++suggestSeq.current;
     suggestTimer.current = window.setTimeout(() => {
-      void omniboxSuggest(text, fleetBrief(useFavicons.getState())).then(
+      void omniboxSuggest(text, fleetBrief(useFavicons.getState()), fleetHost()).then(
         (rows) => {
           if (ticket !== suggestSeq.current) return; // a newer keystroke owns the popup
           setSuggests(rows.length > 0 ? rows : null);

@@ -29,6 +29,7 @@ import {
   type SoftwareKey,
 } from "./faviconLaw";
 import { logWarn } from "../logger";
+import { boxHostOfAddr } from "../state/connections";
 
 export interface FaviconEntry {
   software: SoftwareKey;
@@ -92,6 +93,16 @@ export function fleetBrief(state: FaviconState): Array<{
     state: entry.state,
     ...(entry.port != null ? { port: entry.port } : {}),
   }));
+}
+
+/** The box the frame's wire speaks to, as the join dialect spells it —
+ *  the host the omnibox's suggestion subtitles label a fleet server's
+ *  port with (the same law the new tab's input matches joins by). Read
+ *  from the persisted profile directly: the frame realm runs the favicon
+ *  lane, not the content's zustand wire. */
+export function fleetHost(): string {
+  const remote = persistedProfile().remote;
+  return remote === null ? "localhost" : boxHostOfAddr(remote.addr);
 }
 
 // --- the lane ---------------------------------------------------------------

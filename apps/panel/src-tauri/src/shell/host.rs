@@ -1422,15 +1422,22 @@ pub fn shell_omnibox_classify(text: String) -> crate::shell::omnibox::AddressReq
 }
 
 /// The omnibox popup's rows (OmniboxPopupViewViews' matches): the typed
-/// text against the frame's own fleet projection. The frame passes the
-/// names the registry holds; the host classifies and orders — one
-/// authority, the same classifier a commit speaks.
+/// text against the frame's fleet projection. The frame passes the
+/// names the registry holds and the box host the active connection
+/// profile speaks to; the host classifies and orders — one authority,
+/// the same classifier a commit speaks, and subtitles that label the
+/// fleet's ports with the box the panel is actually pointed at.
 #[tauri::command]
 pub fn shell_omnibox_suggest(
     text: String,
     servers: Option<Vec<crate::shell::omnibox::FleetServer>>,
+    host: Option<String>,
 ) -> Vec<crate::shell::omnibox::Suggestion> {
-    crate::shell::omnibox::suggest(&text, &servers.unwrap_or_default())
+    crate::shell::omnibox::suggest_with_host(
+        &text,
+        &servers.unwrap_or_default(),
+        host.as_deref().unwrap_or("localhost"),
+    )
 }
 
 /// The omnibox commit: classify, then land through the model's OpenURL

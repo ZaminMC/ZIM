@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { parseAddressInput, resolveJoin, joinAddress, searchServers } from "../../state/destinations";
 import { registerServer } from "../../state/actions";
+import { activeProfile, boxHostOf, useConnections } from "../../state/connections";
 import type { DiscoveredServer } from "../../protocol/types";
 import { sortedServers, useServers, type ServerEntry } from "../../state/servers";
 import { useTabs } from "../../state/tabs";
@@ -51,9 +52,12 @@ export function NewTabPage() {
   const setNewServerOpen = useUi((s) => s.setNewServerOpen);
   const serverMap = useServers((s) => s.servers);
   const entries = sortedServers(serverMap);
-  // This window's reach: localhost for the local daemon, the box's host
-  // for a remote profile — the same rule the address bar rests by.
-  const host = "localhost";
+  // This window's reach (§22): the box the active connection profile
+  // speaks to — "localhost" for the local daemon, the remote profile's
+  // own host for an agent. Follows the profile live, so a panel pointed
+  // at a remote box resolves its box-host joins, not just localhost
+  // ones (connections.ts's one law, shared with the omnibox).
+  const host = useConnections((s) => boxHostOf(activeProfile(s)));
 
   // The query dialect lands here: consume the carried query once, then
   // the input is the page's own state. Filtering is live — the results

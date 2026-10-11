@@ -111,7 +111,9 @@ export interface Suggestion {
 
 /** The popup's rows: the typed text against the frame's fleet
  *  projection (the favicon lane's names), classified and ordered by the
- *  host — one authority, the same classifier a commit speaks. */
+ *  host — one authority, the same classifier a commit speaks. The box
+ *  host labels a fleet server's port in the subtitles (the same law the
+ *  new tab's input matches joins by). */
 export const omniboxSuggest = (
   text: string,
   servers: Array<{
@@ -120,9 +122,10 @@ export const omniboxSuggest = (
     state: string;
     port?: number;
   }>,
+  host: string,
 ): Promise<Suggestion[]> =>
   isTauri()
-    ? invokeHost<Suggestion[]>("shell_omnibox_suggest", { text, servers })
+    ? invokeHost<Suggestion[]>("shell_omnibox_suggest", { text, servers, host })
     : Promise.resolve([]);
 
 /** The clipboard's TEXT, honestly empty when nothing can be read — a

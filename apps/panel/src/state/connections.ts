@@ -87,6 +87,32 @@ export function activeProfile(state: {
   );
 }
 
+/** The box this panel speaks to, as the join dialect spells it — the
+ *  alias hint a typed join address is matched against (resolveJoin's
+ *  bind law) and the host the address labels spell. One law for the
+ *  new tab's input, the omnibox's suggestion subtitles, and the frame's
+ *  own fleet projection: "localhost" for the local daemon; the remote
+ *  profile's host for an agent (the addr's `host:port`, with bracketed
+ *  IPv6 spellings keeping their brackets only as input sugar). A
+ *  malformed addr degrades to localhost — the local aliases — rather
+ *  than an unmatchable hint. */
+export function boxHostOf(profile: ConnectionProfile): string {
+  if (!("addr" in profile)) return "localhost";
+  return boxHostOfAddr(profile.addr);
+}
+
+/** The addr-level law, shared with realms that read the persisted
+ *  profile directly (the frame's favicon lane) instead of through the
+ *  zustand store. */
+export function boxHostOfAddr(addr: string): string {
+  if (addr.startsWith("[")) {
+    const close = addr.indexOf("]");
+    return close > 1 ? addr.slice(1, close) : "localhost";
+  }
+  const colon = addr.indexOf(":");
+  return colon > 0 ? addr.slice(0, colon) : "localhost";
+}
+
 /** Transport spec for the active profile: the WebSocket URL the dev bridge
  *  relays from, plus the hello credential. Browser/dev path only — the
  *  Tauri host speaks to the agent from Rust (ADR-0011). */

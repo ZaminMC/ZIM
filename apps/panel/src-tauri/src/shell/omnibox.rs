@@ -274,8 +274,20 @@ pub struct Suggestion {
 pub const MAX_SUGGESTIONS: usize = 8;
 
 /// The popup's rows for the typed text against the frame's fleet
-/// projection. Deterministic: same text, same list, same rows.
+/// projection. Deterministic: same text, same list, same rows. The local
+/// spelling — subtitles label a fleet server's port as localhost — kept
+/// for the tests and any local-only caller.
 pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
+    suggest_with_host(text, servers, "localhost")
+}
+
+/// The popup's rows with the BOX the panel actually speaks to (ADR-0011):
+/// the frame passes the active connection profile's host, so a panel
+/// pointed at a remote agent labels its fleet's ports with the box's own
+/// host — the same law the new tab's input matches typed joins by. The
+/// host only spells the subtitle labels; matching and ordering never
+/// read it (a typed join resolves by port and bind, not by label).
+pub fn suggest_with_host(text: &str, servers: &[FleetServer], host: &str) -> Vec<Suggestion> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Vec::new();
@@ -360,7 +372,7 @@ pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
                     .then_with(|| a.display_name.cmp(&b.display_name))
             });
             for server in owned {
-                rows.push(server_row(server));
+                rows.push(server_row(server, host));
             }
         }
         AddressRequest::Query(_) => {
@@ -391,7 +403,7 @@ pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
             };
             if let Some(rest) = &console_needle {
                 for server in matches_for(rest).into_iter().take(3) {
-                    rows.push(console_row(server));
+                    rows.push(console_row(server, host));
                 }
             }
             let console_proposed: std::collections::HashSet<String> = rows
@@ -408,7 +420,7 @@ pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
                 if console_proposed.contains(server.server_id.as_str()) {
                     continue; // the console row already proposed this server
                 }
-                rows.push(server_row(server));
+                rows.push(server_row(server, host));
             }
             if console_needle.is_none() || rows.is_empty() {
                 // The search row — the honest floor (§22): the text is
@@ -437,7 +449,7 @@ fn rank_match(needle: &str, haystack: &str) -> u8 {
     }
 }
 
-fn server_row(server: &FleetServer) -> Suggestion {
+fn server_row(server: &FleetServer, host: &str) -> Suggestion {
     let destination = Destination::Server {
         server_id: server.server_id.clone(),
     };
@@ -445,14 +457,14 @@ fn server_row(server: &FleetServer) -> Suggestion {
         text: destination.url(),
         title: server.display_name.clone(),
         subtitle: Some(match server.port {
-            Some(port) => format!("localhost:{port} · {}", server.state),
+            Some(port) => format!("{host}:{port} · {}", server.state),
             None => server.state.clone(),
         }),
         kind: SuggestionKind::Server,
     }
 }
 
-fn console_row(server: &FleetServer) -> Suggestion {
+fn console_row(server: &FleetServer, host: &str) -> Suggestion {
     let destination = Destination::Console {
         server_id: server.server_id.clone(),
     };
@@ -460,7 +472,7 @@ fn console_row(server: &FleetServer) -> Suggestion {
         text: destination.url(),
         title: destination.label(),
         subtitle: Some(match server.port {
-            Some(port) => format!("localhost:{port} · {}", server.state),
+            Some(port) => format!("{host}:{port} · {}", server.state),
             None => server.state.clone(),
         }),
         kind: SuggestionKind::Console,
@@ -850,6 +862,34 @@ mod tests {
         assert_eq!(
             rows[1].subtitle.as_deref(),
             Some("localhost:25566 · stopped")
+        );
+    }
+
+    #[test]
+    fn the_box_host_labels_the_fleets_ports_on_a_remote_panel() {
+        // A panel pointed at an agent on 10.0.0.5: the subtitle spells
+        // the box the fleet actually lives on — the same law the new
+        // tab's input matches typed joins by. The join row's own text is
+        // the typed address, untouched by the hint.
+        let rows = suggest_with_host("25566", &fleet(), "10.0.0.5");
+        assert_eq!(rows[0].text, "zim://join/:25566");
+        assert_eq!(
+            rows[1].subtitle.as_deref(),
+            Some("10.0.0.5:25566 · stopped")
+        );
+        // Matching and ordering never read the hint: the port owner is
+        // found by the port, exactly as on a local panel.
+        assert_eq!(rows[1].text, "zim://server/creative");
+    }
+
+    #[test]
+    fn the_console_dialect_labels_with_the_box_host_too() {
+        let rows = suggest_with_host("console creative", &fleet(), "10.0.0.5");
+        assert_eq!(rows[0].kind, SuggestionKind::Console);
+        assert_eq!(rows[0].text, "zim://console/creative");
+        assert_eq!(
+            rows[0].subtitle.as_deref(),
+            Some("10.0.0.5:25566 · stopped")
         );
     }
 

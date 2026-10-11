@@ -12,6 +12,7 @@ import { useServers } from "../../state/servers";
 import type { ServerEntry } from "../../state/servers";
 import { useTabs } from "../../state/tabs";
 import { useUi } from "../../state/ui";
+import { useConnections } from "../../state/connections";
 import type { DiscoveredServer } from "../../protocol/types";
 
 vi.mock("../../state/actions", () => ({
@@ -48,6 +49,9 @@ function resetStores(entries: ServerEntry[]): void {
   const map: Record<string, ServerEntry> = {};
   for (const e of entries) map[e.serverId] = e;
   useServers.setState({ servers: map });
+  // The join hint follows the active connection profile — reset it so a
+  // remote-profile test never leaks its box host into the next one.
+  useConnections.setState({ remotes: [], activeId: "local" });
   const tab = {
     id: "t1",
     history: [{ kind: "new" } as never],
@@ -165,6 +169,54 @@ describe("the address dialects on Enter", () => {
     });
     fireEvent.submit(screen.getByRole("search"));
     expect(activeDestination()).toEqual({ kind: "new" });
+  });
+
+  it("a join typed against a remote profile's box host resolves — the hint follows the connection", () => {
+    // A panel pointed at an agent on 10.0.0.5: the registry it sees is
+    // the box's, and the box's own host spells the all-interfaces
+    // servers' join addresses. localhost-only matching used to turn
+    // this into a silent miss.
+    useConnections.setState({
+      remotes: [
+        {
+          id: "r1",
+          name: "Box",
+          addr: "10.0.0.5:7001",
+          token: "t",
+          fingerprint: "",
+        },
+      ],
+      activeId: "r1",
+    });
+    render(<NewTabPage />);
+    fireEvent.change(input0(), {
+      target: { value: "10.0.0.5:25565" },
+    });
+    fireEvent.submit(screen.getByRole("search"));
+    expect(activeDestination()).toEqual({ kind: "server", serverId: "alpha" });
+  });
+
+  it("an IPv6 agent addr spells its box host without the brackets — the hint parses the agent's own form", () => {
+    useConnections.setState({
+      remotes: [
+        {
+          id: "r6",
+          name: "V6 Box",
+          addr: "[::1]:7001",
+          token: "t",
+          fingerprint: "",
+        },
+      ],
+      activeId: "r6",
+    });
+    render(<NewTabPage />);
+    // The bracketed join form (Chrome's fixup): the brackets are input
+    // sugar around the v6 host, the trailing colon group is the port.
+    fireEvent.change(input0(), {
+      target: { value: "[::1]:25565" },
+    });
+    fireEvent.submit(screen.getByRole("search"));
+    expect(activeDestination()).toEqual({ kind: "server", serverId: "alpha" });
   });
 
   it("free text is not a navigation — the results already followed the typing", () => {

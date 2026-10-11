@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   LOCAL_PROFILE,
   activeProfile,
+  boxHostOf,
+  boxHostOfAddr,
   hostSpec,
   transportSpec,
   useConnections,
@@ -160,5 +162,39 @@ describe("hostSpec (the Tauri path)", () => {
       remote: null,
       auth: undefined,
     });
+  });
+});
+
+describe("boxHostOf (the join dialect's box host)", () => {
+  beforeEach(resetStore);
+
+  it("local profile: the box is localhost", () => {
+    expect(boxHostOf(activeProfile(useConnections.getState()))).toBe("localhost");
+  });
+
+  it("remote profile: the addr's host part, port stripped", () => {
+    const id = useConnections.getState().addRemote({
+      name: "box",
+      addr: "203.0.113.7:7443",
+      token: "t",
+      fingerprint: "",
+    });
+    useConnections.getState().setActive(id);
+    expect(boxHostOf(activeProfile(useConnections.getState()))).toBe("203.0.113.7");
+  });
+
+  it("bracketed IPv6 addr: the host without the brackets", () => {
+    expect(boxHostOfAddr("[::1]:7001")).toBe("::1");
+    expect(boxHostOfAddr("[fe80::1]:7001")).toBe("fe80::1");
+  });
+
+  it("a malformed addr degrades to localhost — never an unmatchable hint", () => {
+    expect(boxHostOfAddr("")).toBe("localhost");
+    expect(boxHostOfAddr("no-port-host")).toBe("localhost");
+    expect(boxHostOfAddr("[]:7001")).toBe("localhost");
+    // A hostname with no port colon: the whole word IS the host when a
+    // colon exists nowhere — but the agent addr always carries a port,
+    // so a colon-less spelling is malformed, not a host.
+    expect(boxHostOfAddr("box.local")).toBe("localhost");
   });
 });
