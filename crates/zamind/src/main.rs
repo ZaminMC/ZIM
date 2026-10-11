@@ -73,7 +73,12 @@ fn usage(message: String) -> ! {
 /// One flag's value as text: present and valid UTF-8, or the usage exit.
 /// URLs and endpoints are text by contract; a value the OS delivered in
 /// non-UTF-8 bytes is a usage error the operator can read and fix.
-fn text_value(args: &mut std::env::ArgsOs, flag: &str) -> String {
+/// Generic over the iterator: the parse loop drives a `skip(1)` view of
+/// the OS's own bytes (argv), not the raw `ArgsOs` itself.
+fn text_value<I>(args: &mut I, flag: &str) -> String
+where
+    I: Iterator<Item = std::ffi::OsString>,
+{
     let Some(value) = args.next() else {
         usage(format!("{flag} needs a value"));
     };

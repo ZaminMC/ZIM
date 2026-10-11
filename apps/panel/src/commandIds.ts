@@ -47,12 +47,14 @@ export const CMD = {
   UPDATE_RESTART: 50031,
   // The group editor (tab_group_editor_bubble_view.cc's writes, routed
   // through the command lane — no upstream browser IDCs exist for them).
-  RENAME_GROUP: 50024,
-  SET_GROUP_COLOR: 50025,
-  REMOVE_TAB_FROM_GROUP: 50026,
-  UNGROUP_GROUP: 50027,
-  NEW_TAB_IN_GROUP: 50028,
-  ADD_TAB_TO_EXISTING_GROUP: 50029,
+  // 50038+: keeps clear of SELECT_TAB_BY_ID (50024) — a shared id makes
+  // the dispatch table's earlier case swallow every later verb.
+  RENAME_GROUP: 50038,
+  SET_GROUP_COLOR: 50039,
+  REMOVE_TAB_FROM_GROUP: 50040,
+  UNGROUP_GROUP: 50041,
+  NEW_TAB_IN_GROUP: 50042,
+  ADD_TAB_TO_EXISTING_GROUP: 50043,
   // The multi-selection gestures (Tab::OnMousePressed's modifier
   // branches, tab.cc:726-764) and the tab menu's selection-scoped close
   // (GetIndicesForCommand's law).

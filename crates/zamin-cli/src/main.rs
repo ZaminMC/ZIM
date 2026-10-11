@@ -739,9 +739,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         },
         Commands::Storage { command } => match command {
             StorageCommands::Show => storage_show(&cli, &client).await,
-            StorageCommands::Set { root, yes } => {
-                storage_set(&cli, &client, root, *yes).await
-            }
+            StorageCommands::Set { root, yes } => storage_set(&cli, &client, root, *yes).await,
         },
         Commands::Extensions => extensions(&cli, &client).await,
         Commands::Status { server_id } => status(&cli, &client, server_id).await,
@@ -1188,10 +1186,7 @@ async fn storage_show(cli: &Cli, client: &Client) -> CmdResult {
         return Ok(());
     }
     println!("Data root:      {}", result.root);
-    println!(
-        "  instances:    {}",
-        result.instances_dir
-    );
+    println!("  instances:    {}", result.instances_dir);
     println!("  cache:        {}", result.cache_dir);
     println!("  java:         {}", result.java_dir);
     println!(
@@ -1203,11 +1198,8 @@ async fn storage_show(cli: &Cli, client: &Client) -> CmdResult {
             ""
         }
     );
-    match result.pending_root.as_deref() {
-        Some(pending) => println!(
-            "Pending: {pending} — applies at the next daemon start (restart required)"
-        ),
-        None => {}
+    if let Some(pending) = result.pending_root.as_deref() {
+        println!("Pending: {pending} — applies at the next daemon start (restart required)");
     }
     Ok(())
 }
@@ -1223,22 +1215,23 @@ async fn storage_set(cli: &Cli, client: &Client, root: &str, yes: bool) -> CmdRe
         let _ = std::io::stderr().flush();
         let mut line = String::new();
         if std::io::stdin().read_line(&mut line).is_err() || line.trim() != root.trim() {
-            return Err(Failure::error(format!(
-                "confirmation did not match; the storage root was not changed."
-            )));
+            return Err(Failure::error(
+                "confirmation did not match; the storage root was not changed.".to_owned(),
+            ));
         }
     }
     let params = StorageSetParams {
         root: root.to_owned(),
     };
-    let result: StorageSetResult = client
-        .request_typed(methods::STORAGE_SET, params)
-        .await?;
+    let result: StorageSetResult = client.request_typed(methods::STORAGE_SET, params).await?;
     if cli.json {
         print_json(&result);
         return Ok(());
     }
-    println!("Data root set to {} (applies at the next daemon start).", result.root);
+    println!(
+        "Data root set to {} (applies at the next daemon start).",
+        result.root
+    );
     if result.servers_in_current_root > 0 {
         println!(
             "  {} registered server{} stay in {} — move them yourself if you want them in the new root.",

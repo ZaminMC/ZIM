@@ -20,22 +20,24 @@ fn unique_endpoint() -> zamin_ipc::Endpoint {
 }
 
 /// A daemon whose redirect pointer lives inside the scoped test tree.
-async fn daemon_with_redirect(tag: &str) -> (std::path::PathBuf, zamin_ipc::Endpoint) {
+/// Returns the process handle: the caller MUST bind it for the whole
+/// test (e.g. `let (.., _daemon) = …`) — dropping `TestServer` kills
+/// the daemon, and a helper-local handle would die before the first
+/// request ever connects.
+async fn daemon_with_redirect(
+    tag: &str,
+) -> (std::path::PathBuf, zamin_ipc::Endpoint, common::TestServer) {
     let data_dir = scoped_dir(tag);
     let redirect = data_dir.join("redirect.txt");
     let endpoint = unique_endpoint();
     let redirect_str = redirect.to_str().unwrap().to_owned();
-    let _daemon = spawn_daemon_with(
-        &data_dir,
-        &endpoint,
-        &["--storage-redirect", &redirect_str],
-    );
-    (data_dir, endpoint)
+    let daemon = spawn_daemon_with(&data_dir, &endpoint, &["--storage-redirect", &redirect_str]);
+    (data_dir, endpoint, daemon)
 }
 
 #[tokio::test]
 async fn storage_get_maps_where_everything_lives() {
-    let (data_dir, endpoint) = daemon_with_redirect("get-map").await;
+    let (data_dir, endpoint, _daemon) = daemon_with_redirect("get-map").await;
     let mut client = connect_daemon(&endpoint).await;
 
     let result = client
@@ -51,10 +53,7 @@ async fn storage_get_maps_where_everything_lives() {
         result["instancesDir"],
         data_dir.join("instances").to_str().unwrap()
     );
-    assert_eq!(
-        result["cacheDir"],
-        data_dir.join("cache").to_str().unwrap()
-    );
+    assert_eq!(result["cacheDir"], data_dir.join("cache").to_str().unwrap());
     assert_eq!(result["javaDir"], data_dir.join("java").to_str().unwrap());
     // No redirect stored, and the daemon runs on an explicit --data-dir:
     // nothing pending, nothing claimed active.
@@ -78,7 +77,7 @@ async fn storage_get_maps_where_everything_lives() {
 
 #[tokio::test]
 async fn storage_set_writes_the_pointer_and_states_the_honest_facts() {
-    let (data_dir, endpoint) = daemon_with_redirect("set-pointer").await;
+    let (data_dir, endpoint, _daemon) = daemon_with_redirect("set-pointer").await;
     let mut client = connect_daemon(&endpoint).await;
 
     // A not-yet-existing directory is the first-run case: it is created
@@ -116,7 +115,7 @@ async fn storage_set_writes_the_pointer_and_states_the_honest_facts() {
 
 #[tokio::test]
 async fn a_relative_storage_root_is_a_typed_refusal() {
-    let (_data_dir, endpoint) = daemon_with_redirect("set-relative").await;
+    let (_data_dir, endpoint, _daemon) = daemon_with_redirect("set-relative").await;
     let mut client = connect_daemon(&endpoint).await;
 
     // Relative on every platform (no drive letter, no leading slash) —
@@ -136,7 +135,7 @@ async fn a_relative_storage_root_is_a_typed_refusal() {
 
 #[tokio::test]
 async fn a_file_where_the_root_should_be_is_refused() {
-    let (data_dir, endpoint) = daemon_with_redirect("set-file").await;
+    let (data_dir, endpoint, _daemon) = daemon_with_redirect("set-file").await;
     let mut client = connect_daemon(&endpoint).await;
 
     let file_path = data_dir.join("not-a-dir.txt");
@@ -159,7 +158,7 @@ async fn the_pointer_survives_and_never_retcons_a_running_daemon() {
     // owes is that the stored pointer is exactly what resolve reads —
     // one absolute path, stable bytes — and that a running daemon keeps
     // its own root no matter what the pointer says.
-    let (data_dir, endpoint) = daemon_with_redirect("steer").await;
+    let (data_dir, endpoint, _daemon) = daemon_with_redirect("steer").await;
     let mut client = connect_daemon(&endpoint).await;
 
     let target = scoped_dir("steer-target");

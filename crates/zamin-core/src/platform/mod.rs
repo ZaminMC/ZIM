@@ -20,6 +20,42 @@ pub mod private_file;
 // Platform-specific discovery data (install roots, executable naming).
 pub use imp::{java_exe_name, java_install_roots};
 
+/// True when an `accept` error is fd/table/memory pressure at the OS
+/// level (EMFILE 24 / ENFILE 23 / ENOMEM 12 on Linux; the same numbers
+/// on the BSDs and macOS), which has no dedicated `ErrorKind` — the
+/// raw errno is the only honest signal. The errno read is OS
+/// conditional, so the whole question lives in the seam (ADR-0008).
+/// Callers shed the connection and back off rather than tearing down
+/// the listener.
+pub fn is_fd_pressure_error(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        matches!(error.raw_os_error(), Some(24) | Some(23) | Some(12))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+/// Best-effort durability for a rename that just landed: on POSIX,
+/// syncing the parent directory is what makes the rename itself
+/// survive a crash (tmpfs parents refuse fsync; that is fine — best
+/// effort). No-op on Windows, where the file's own fsync before the
+/// rename is the whole durability story. The OS conditional lives in
+/// the seam (ADR-0008).
+pub fn sync_parent_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

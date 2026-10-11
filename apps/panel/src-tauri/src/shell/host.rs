@@ -893,9 +893,7 @@ pub fn shell_open_claim(
     };
     let mut inner = state.lock();
     Ok(match inner.pending_open.take() {
-        Some((addressed, path)) if window_name == "main" && addressed == tab_id => {
-            Some(path)
-        }
+        Some((addressed, path)) if window_name == "main" && addressed == tab_id => Some(path),
         // Not this tab's offer: put it back untouched. A sibling's nudge
         // must not eat the active tab's handoff.
         other => {
@@ -1068,12 +1066,12 @@ pub async fn shell_command(
                         // so the booting webview still receives it through
                         // hello.
                         let destination = match &arg_destination {
-                            Some(value) => match
-                                serde_json::from_value::<Destination>(value.clone())
-                            {
-                                Ok(destination) => destination,
-                                Err(_) => Destination::New,
-                            },
+                            Some(value) => {
+                                match serde_json::from_value::<Destination>(value.clone()) {
+                                    Ok(destination) => destination,
+                                    Err(_) => Destination::New,
+                                }
+                            }
                             None => Destination::New,
                         };
                         let query = arg
@@ -1083,9 +1081,7 @@ pub async fn shell_command(
                             .map(String::from);
                         let id = strip.append(destination, true);
                         if let Some(query) = query {
-                            if let Some(tab) =
-                                strip.tabs.iter_mut().find(|t| t.id == id)
-                            {
+                            if let Some(tab) = strip.tabs.iter_mut().find(|t| t.id == id) {
                                 tab.pending_query = Some(query);
                             }
                         }

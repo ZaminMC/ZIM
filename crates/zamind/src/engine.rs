@@ -731,7 +731,10 @@ impl Engine {
     /// registered servers stay where they are — the daemon never moves
     /// data on its own. The count rides along so the UI can warn with a
     /// number instead of a vague dread.
-    pub async fn storage_set(&self, params: StorageSetParams) -> Result<StorageSetResult, EngineError> {
+    pub async fn storage_set(
+        &self,
+        params: StorageSetParams,
+    ) -> Result<StorageSetResult, EngineError> {
         let trimmed = params.root.trim();
         if trimmed.is_empty() {
             return Err(EngineError::Protocol(ProtocolError::new(
@@ -794,9 +797,8 @@ impl Engine {
         if let Some(parent) = redirect_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        zamin_core::fsops::atomic_write(&redirect_path, trimmed.as_bytes()).map_err(|e| {
-            internal(&format!("the storage redirect could not be saved: {e}"))
-        })?;
+        zamin_core::fsops::atomic_write(&redirect_path, trimmed.as_bytes())
+            .map_err(|e| internal(&format!("the storage redirect could not be saved: {e}")))?;
         let servers_in_current_root = self.registry_lock().all().count() as u64;
         Ok(StorageSetResult {
             root: trimmed.to_owned(),
@@ -2404,7 +2406,13 @@ impl Engine {
                     if ctl.cancelled() {
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress_stage("preparing", 0, None, None, Some("preparing the server directory"));
+                    ctl.progress_stage(
+                        "preparing",
+                        0,
+                        None,
+                        None,
+                        Some("preparing the server directory"),
+                    );
                     std::fs::create_dir_all(&root).map_err(|source| {
                         JobFailure::Error(to_protocol(&zamin_core::error::CoreError::Io {
                             path: root.clone(),
@@ -2438,7 +2446,13 @@ impl Engine {
                             let _ = std::fs::remove_dir_all(&root);
                             return Err(JobFailure::Cancelled);
                         }
-                        ctl.progress_stage("eula", 0, None, None, Some("accepting the EULA as configured"));
+                        ctl.progress_stage(
+                            "eula",
+                            0,
+                            None,
+                            None,
+                            Some("accepting the EULA as configured"),
+                        );
                         let eula = root.join("eula.txt");
                         let write = std::fs::write(&eula, ACCEPTED_EULA_TXT).map_err(|source| {
                             zamin_core::error::CoreError::Io {
@@ -2471,7 +2485,13 @@ impl Engine {
                     // offline included. A hit is re-hashed before use; a
                     // corrupted artifact is dropped, never served.
                     let cache_root = data_dir.join("cache");
-                    ctl.progress_stage("downloading", 0, size, Some("bytes"), Some(&format!("downloading {name}")));
+                    ctl.progress_stage(
+                        "downloading",
+                        0,
+                        size,
+                        Some("bytes"),
+                        Some(&format!("downloading {name}")),
+                    );
                     let options = zamin_core::software::DownloadOptions {
                         cancel: cancel_flag,
                         progress: Some(Arc::new(
@@ -2540,7 +2560,13 @@ impl Engine {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress_stage("config", 0, None, None, Some("writing the server configuration"));
+                    ctl.progress_stage(
+                        "config",
+                        0,
+                        None,
+                        None,
+                        Some("writing the server configuration"),
+                    );
                     let config_path = data_dir
                         .join("servers")
                         .join(sid.as_str())
@@ -2569,7 +2595,13 @@ impl Engine {
                         let _ = std::fs::remove_dir_all(&root);
                         return Err(JobFailure::Cancelled);
                     }
-                    ctl.progress_stage("registering", 0, None, None, Some("registering the server"));
+                    ctl.progress_stage(
+                        "registering",
+                        0,
+                        None,
+                        None,
+                        Some("registering the server"),
+                    );
                     engine
                         .register_server(sid, display_name, root)
                         .await

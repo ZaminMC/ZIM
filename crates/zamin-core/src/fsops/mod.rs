@@ -580,12 +580,9 @@ fn write_via_unique_temp(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
             attempt += 1;
             match fs::rename(&tmp, path) {
                 Ok(()) => {
-                    #[cfg(unix)]
-                    if let Some(parent) = path.parent() {
-                        if let Ok(dir) = fs::File::open(parent) {
-                            let _ = dir.sync_all();
-                        }
-                    }
+                    // POSIX: the rename's own durability rides the parent
+                    // dir sync — the OS conditional lives in the seam.
+                    crate::platform::sync_parent_dir(path);
                     return Ok(());
                 }
                 Err(source) if attempt < ATOMIC_WRITE_RETRIES && is_sharing_violation(&source) => {

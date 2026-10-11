@@ -276,7 +276,8 @@ pub const MAX_SUGGESTIONS: usize = 8;
 /// The popup's rows for the typed text against the frame's fleet
 /// projection. Deterministic: same text, same list, same rows. The local
 /// spelling — subtitles label a fleet server's port as localhost — kept
-/// for the tests and any local-only caller.
+/// for the tests only (the frame always speaks `suggest_with_host`).
+#[cfg(test)]
 pub fn suggest(text: &str, servers: &[FleetServer]) -> Vec<Suggestion> {
     suggest_with_host(text, servers, "localhost")
 }
@@ -342,10 +343,10 @@ pub fn suggest_with_host(text: &str, servers: &[FleetServer], host: &str) -> Vec
                 });
             }
         },
-        AddressRequest::Join { host, port } => {
+        AddressRequest::Join { host: typed, port } => {
             // Row one: the address itself — "Join host:port".
             let destination = Destination::Join {
-                host: host.clone(),
+                host: typed.clone(),
                 port,
             };
             rows.push(Suggestion {

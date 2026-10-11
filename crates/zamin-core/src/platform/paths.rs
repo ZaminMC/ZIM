@@ -1,7 +1,7 @@
 //! Platform application directories (ADR-0008). Pure functions take the
 //! environment as input so tests never mutate process state.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Daemon-owned state: registry, per-server state, logs of the daemon
 /// itself (ADR-0004). Windows: `%LOCALAPPDATA%\ZIM`. Linux:
@@ -169,11 +169,7 @@ pub fn resolve_data_dir_from(
 pub fn resolve_data_dir(explicit: Option<PathBuf>) -> ResolvedDataDir {
     let redirect_file = storage_redirect_file();
     let text = std::fs::read_to_string(&redirect_file).ok();
-    resolve_data_dir_from(
-        explicit.as_deref(),
-        text.as_deref(),
-        &data_dir(),
-    )
+    resolve_data_dir_from(explicit.as_deref(), text.as_deref(), &data_dir())
 }
 
 #[cfg(test)]
@@ -234,11 +230,8 @@ mod tests {
     #[test]
     #[cfg(unix)] // "D:\ZIM" is relative only from Unix's point of view
     fn a_relative_redirect_is_ignored_and_says_so() {
-        let verdict = resolve_data_dir_from(
-            None,
-            Some("D:\\ZIM"),
-            Path::new("/home/u/.local/share/zim"),
-        );
+        let verdict =
+            resolve_data_dir_from(None, Some("D:\\ZIM"), Path::new("/home/u/.local/share/zim"));
         assert_eq!(verdict.root, PathBuf::from("/home/u/.local/share/zim"));
         assert!(!verdict.redirected);
         assert!(verdict.redirect_ignored);
@@ -246,11 +239,7 @@ mod tests {
 
     #[test]
     fn no_redirect_is_the_plain_default() {
-        let verdict = resolve_data_dir_from(
-            None,
-            None,
-            Path::new("/home/u/.local/share/zim"),
-        );
+        let verdict = resolve_data_dir_from(None, None, Path::new("/home/u/.local/share/zim"));
         assert_eq!(verdict.root, PathBuf::from("/home/u/.local/share/zim"));
         assert!(!verdict.redirected);
         assert!(!verdict.redirect_ignored);

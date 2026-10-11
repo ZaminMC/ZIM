@@ -66,19 +66,22 @@ pub const NAV_FORWARD: u32 = 50007;
 /// ⓩ Local: the group editor's name field (upstream's bubble writes the
 /// visual data straight from the title controller — no browser IDC; this
 /// build numbers the frame verbs locally). An EMPTY name is legal.
-pub const RENAME_GROUP: u32 = 50024;
+/// Numbered 50038+: the editor block must keep clear of
+/// SELECT_TAB_BY_ID (50024) — a shared id would make the match's
+/// earlier arm swallow every later verb (and did, until the pin).
+pub const RENAME_GROUP: u32 = 50038;
 /// ⓩ Local: the editor's color grid (tabs/groups/color_picker_view.cc —
 /// one circle per TabGroupColorId in the enum's wire order).
-pub const SET_GROUP_COLOR: u32 = 50025;
+pub const SET_GROUP_COLOR: u32 = 50039;
 /// ⓩ Local: "Remove tab from group" (tab_menu_model.cc's
 /// CommandRemoveFromGroup; no browser IDC exists for it).
-pub const REMOVE_TAB_FROM_GROUP: u32 = 50026;
+pub const REMOVE_TAB_FROM_GROUP: u32 = 50040;
 /// ⓩ Local: the editor's "Ungroup" — every member leaves, the group dies.
-pub const UNGROUP_GROUP: u32 = 50027;
+pub const UNGROUP_GROUP: u32 = 50041;
 /// ⓩ Local: the editor's "New tab in group".
-pub const NEW_TAB_IN_GROUP: u32 = 50028;
+pub const NEW_TAB_IN_GROUP: u32 = 50042;
 /// ⓩ Local: the tab menu's "Add to existing group" item, one per group.
-pub const ADD_TAB_TO_EXISTING_GROUP: u32 = 50029;
+pub const ADD_TAB_TO_EXISTING_GROUP: u32 = 50043;
 
 /// ⓩ Local: the multi-selection gestures (Tab::OnMousePressed's
 /// modifier branches — tab.cc:726-764 — routed through the command lane

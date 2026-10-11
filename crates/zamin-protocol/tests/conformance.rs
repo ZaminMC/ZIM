@@ -161,6 +161,26 @@ fn server_renamed_notification() {
     let n: StreamNotification = note.parse_params().unwrap();
     assert_eq!(n.stream, StreamKind::Events);
     assert_eq!(n.server_id.as_deref(), Some("production"));
+    // The wire shape, pinned where the hand-rolled consumers read it: the
+    // payload is tagged by `kind` with the CoreEvent under `event`, its
+    // variant camelCased, its fields camelCased (the tray's law). Pinned
+    // BEFORE the typed destructure below moves the event out of `n`.
+    let raw = serde_json::to_value(&n).unwrap();
+    assert_eq!(
+        raw["payload"]["kind"],
+        json!("event"),
+        "the payload carries the event under kind=event"
+    );
+    assert_eq!(
+        raw["payload"]["event"]["type"],
+        json!("serverRenamed"),
+        "the variant name is camelCase on the wire"
+    );
+    assert_eq!(raw["payload"]["event"]["serverId"], json!("production"));
+    assert_eq!(
+        raw["payload"]["event"]["displayName"],
+        json!("Survival Prime")
+    );
     let StreamPayload::Event { event } = n.payload else {
         panic!("expected event payload");
     };
@@ -173,20 +193,6 @@ fn server_renamed_notification() {
     };
     assert_eq!(server_id, "production");
     assert_eq!(display_name, "Survival Prime");
-    // The wire shape, pinned where the hand-rolled consumers read it: the
-    // payload is tagged by `kind` with the CoreEvent under `event`, its
-    // variant camelCased, its fields camelCased (the tray's law).
-    let raw = serde_json::to_value(&n).unwrap();
-    assert_eq!(
-        raw["payload"]["kind"], json!("event"),
-        "the payload carries the event under kind=event"
-    );
-    assert_eq!(
-        raw["payload"]["event"]["type"], json!("serverRenamed"),
-        "the variant name is camelCase on the wire"
-    );
-    assert_eq!(raw["payload"]["event"]["serverId"], json!("production"));
-    assert_eq!(raw["payload"]["event"]["displayName"], json!("Survival Prime"));
 }
 
 #[test]

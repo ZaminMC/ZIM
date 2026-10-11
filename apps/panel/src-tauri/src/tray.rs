@@ -92,7 +92,10 @@ struct TrayModel {
 
 impl TrayModel {
     fn running_count(&self) -> usize {
-        self.servers.iter().filter(|(_, _, s)| s == "running").count()
+        self.servers
+            .iter()
+            .filter(|(_, _, s)| s == "running")
+            .count()
     }
 
     /// The tooltip: "ZIM — 2 of 5 servers running".
@@ -104,7 +107,11 @@ impl TrayModel {
         if total == 0 {
             return "ZIM — no servers registered".to_owned();
         }
-        format!("ZIM — {} of {} servers running", self.running_count(), total)
+        format!(
+            "ZIM — {} of {} servers running",
+            self.running_count(),
+            total
+        )
     }
 }
 
@@ -231,15 +238,13 @@ enum Transition {
 enum TrayCommand {
     /// One protocol request; the outcome rides the events stream.
     Call { method: String, params: Value },
-    /// Re-snapshot `server.list` (the safety net).
-    Refresh,
 }
 
 /// Build the tray's menu from the current model. Runs on the MAIN thread
 /// (Tauri's menu law) via `run_on_main_thread`.
 fn rebuild_menu<R: Runtime>(app: &AppHandle<R>, state: &TrayState) {
     let model = state.lock_model();
-    let mut menu = match Menu::new(app) {
+    let menu = match Menu::new(app) {
         Ok(menu) => menu,
         Err(_) => return,
     };
@@ -271,8 +276,13 @@ fn rebuild_menu<R: Runtime>(app: &AppHandle<R>, state: &TrayState) {
     // CURRENT state is re-read at click time.
     for (id, name, state) in &model.servers {
         let text = format!("{}  {} — {}", state_glyph(state), name, state);
-        let row =
-            MenuItem::with_id(app, format!("{MENU_SRV_PREFIX}{id}"), text, true, None::<&str>);
+        let row = MenuItem::with_id(
+            app,
+            format!("{MENU_SRV_PREFIX}{id}"),
+            text,
+            true,
+            None::<&str>,
+        );
         if let Ok(row) = row {
             let _ = menu.append(&row);
         }
@@ -437,8 +447,7 @@ impl TrayWire {
                         }
                         Some("serverRenamed") => {
                             let server_id = event["serverId"].as_str().unwrap_or_default();
-                            let display_name =
-                                event["displayName"].as_str().unwrap_or_default();
+                            let display_name = event["displayName"].as_str().unwrap_or_default();
                             if !server_id.is_empty()
                                 && !display_name.is_empty()
                                 && state.apply_rename(server_id, display_name)
@@ -529,7 +538,11 @@ async fn run_tray_wire(app: AppHandle<tauri::Wry>, state: Arc<TrayState>) {
         // subscribe can be lost.
         let (sub_tx, sub_rx) = oneshot::channel();
         if wire
-            .request("streams.subscribe", json!({ "stream": "events" }), Some(sub_tx))
+            .request(
+                "streams.subscribe",
+                json!({ "stream": "events" }),
+                Some(sub_tx),
+            )
             .await
             .is_err()
         {
@@ -585,9 +598,6 @@ async fn run_tray_wire(app: AppHandle<tauri::Wry>, state: Arc<TrayState>) {
                                 break; // write failed: the wire is dead
                             }
                         }
-                        Some(TrayCommand::Refresh) => {
-                            needs_snapshot = true;
-                        }
                         None => return,          // the tray went away (app exit)
                     }
                 }
@@ -598,7 +608,11 @@ async fn run_tray_wire(app: AppHandle<tauri::Wry>, state: Arc<TrayState>) {
             if needs_snapshot {
                 needs_snapshot = false;
                 let (list_tx, list_rx) = oneshot::channel();
-                if wire.request("server.list", Value::Null, Some(list_tx)).await.is_ok() {
+                if wire
+                    .request("server.list", Value::Null, Some(list_tx))
+                    .await
+                    .is_ok()
+                {
                     if let Ok(Ok(Ok(result))) =
                         tokio::time::timeout(Duration::from_secs(3), list_rx).await
                     {

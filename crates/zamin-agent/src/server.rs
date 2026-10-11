@@ -107,9 +107,9 @@ impl AgentServer {
 }
 
 /// Accept errors that shed one connection rather than ending the
-/// listener. ErrorKind covers the portable set; the raw errno arm covers
-/// fd pressure (EMFILE 24 / ENFILE 23 / ENOMEM 12 on Linux; the same
-/// numbers on the BSDs and macOS), which has no dedicated ErrorKind.
+/// listener. ErrorKind covers the portable set; the fd-pressure
+/// errnos (EMFILE/ENFILE/ENOMEM) have no ErrorKind arm, so that
+/// question is asked through the platform seam (ADR-0008).
 fn is_transient_accept_error(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -118,16 +118,7 @@ fn is_transient_accept_error(error: &std::io::Error) -> bool {
             | std::io::ErrorKind::ConnectionAborted
             | std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::TimedOut
-    ) || {
-        #[cfg(unix)]
-        {
-            matches!(error.raw_os_error(), Some(24) | Some(23) | Some(12))
-        }
-        #[cfg(not(unix))]
-        {
-            false
-        }
-    }
+    ) || zamin_core::platform::is_fd_pressure_error(error)
 }
 
 /// A connected TLS stream, re-exported so tests and the binary stay
