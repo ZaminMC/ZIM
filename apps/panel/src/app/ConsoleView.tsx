@@ -2,7 +2,10 @@
 // as typed rows over the same file-backed feed engine as the log viewer —
 // so the founder's console rules are render-time views over an intact
 // stream, never a second log system:
-//   §26  the command input at the bottom, sent over the ordinary stdin path
+//   §26  the command input at the bottom, sent over the ordinary stdin
+//        path — with terminal recall: Up/Down walks this server's sent
+//        commands (per-server, persisted, cross-tab), Escape restores the
+//        draft mid-walk
 //   §27  the icon that hands the console a dedicated, full-height tab
 //   §28  one copy button whose mode (All errors / All warnings / All) is
 //        changed by right-click — a contextual menu, not a modal — and
@@ -15,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendStdin } from "../state/actions";
 import { useServers } from "../state/servers";
+import { recordCommand, useConsoleHistory } from "../state/consoleHistory";
 import { rowKey, useLogFeed } from "../state/logFeed";
 import type { LogLine, LogLevel } from "../protocol/types";
 import { Button } from "../ui/Button";
@@ -92,6 +96,12 @@ export function ConsoleView({
   const [copyMode, setCopyMode] = useState<CopyMode>(DEFAULT_COPY_MODE);
   const [copyMenuOpen, setCopyMenuOpen] = useState(false);
   const [copyNote, setCopyNote] = useState<string | null>(null);
+  // §26's recall lane: the per-server history the composer walks, the
+  // walker's position (null = at the live draft), and the draft itself.
+  const commandHistory = useConsoleHistory(serverId);
+  const [histIndex, setHistIndex] = useState<number | null>(null);
+  const draftRef = useRef("");
+  const commandRef = useRef<HTMLInputElement>(null);
   const [command, setCommand] = useState("");
   const [stdinNote, setStdinNote] = useState<string | null>(null);
 
@@ -162,6 +172,44 @@ export function ConsoleView({
     [],
   );
 
+  // §26's recall walk, with the terminal's own laws: Up steps into the
+  // NEWEST entry (the storage is newest-first) and walks older; Down
+  // walks back and — before the newest — returns the draft; Escape
+  // restores the draft outright. A recalled entry arrives SELECTED (the
+  // omnibox's law): the next keystroke types over it instead of
+  // appending.
+  const recallCommand = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        if (commandHistory.length === 0) return;
+        event.preventDefault();
+        if (event.key === "ArrowUp") {
+          if (histIndex === null) draftRef.current = command;
+          const next =
+            histIndex === null ? 0 : Math.min(commandHistory.length - 1, histIndex + 1);
+          setHistIndex(next);
+          setCommand(commandHistory[next] ?? command);
+        } else if (histIndex !== null) {
+          const next = histIndex - 1;
+          if (next < 0) {
+            setHistIndex(null);
+            setCommand(draftRef.current);
+          } else {
+            setHistIndex(next);
+            setCommand(commandHistory[next] ?? draftRef.current);
+          }
+        }
+        requestAnimationFrame(() => commandRef.current?.select());
+      } else if (event.key === "Escape" && histIndex !== null) {
+        event.preventDefault();
+        setHistIndex(null);
+        setCommand(draftRef.current);
+        requestAnimationFrame(() => commandRef.current?.select());
+      }
+    },
+    [command, commandHistory, histIndex],
+  );
+
   const submitCommand = useCallback(
     (event: React.FormEvent) => {
       event.preventDefault();
@@ -169,6 +217,8 @@ export function ConsoleView({
       if (line === "" || !running) return;
       setStdinNote(null);
       setCommand("");
+      setHistIndex(null);
+      recordCommand(serverId, line);
       void sendStdin(serverId, line).catch(() => {
         setStdinNote("stdin rejected: is the server running?");
       });
@@ -327,12 +377,15 @@ export function ConsoleView({
 
       <form className={styles.composer} onSubmit={submitCommand}>
         <input
+          ref={commandRef}
           className={styles.command}
           type="text"
           value={command}
           onChange={(event) => setCommand(event.target.value)}
+          onKeyDown={recallCommand}
           placeholder="Type a Minecraft command…"
           aria-label="Minecraft command"
+          title="Up and Down arrows recall previously sent commands; Escape restores the draft"
           disabled={!running}
         />
         <Button type="submit" variant="primary" disabled={!running || command.trim() === ""}>

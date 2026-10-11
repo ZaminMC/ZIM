@@ -59,6 +59,16 @@ obligations:
 - **§26 composer** — the command input at the bottom, over the ordinary
   `server.stdin` path. Disabled while the server is not running, with
   the honest note; a stdin rejection surfaces instead of vanishing.
+  The terminal's other half rides with it: Up/Down recall walks this
+  server's sent commands (per-server, panel-local, persisted under
+  `zamin.consoleHistory` at a 100-entry cap — consecutive duplicates
+  collapse, re-sending an older entry moves it to the front). Each tab
+  webview is its own JS realm, so writes publish through a module
+  emitter and the storage event — a command sent in the dedicated
+  console tab is recallable from the embedded console at once. A
+  recalled entry arrives selected (the omnibox's law: the next
+  keystroke types over it), the live draft is saved on the first Up
+  and restored by Down-past-the-newest or Escape.
 - **§30 performance** — inherited from the engine: paged history by byte
   offset, live lines buffered while scrolled away, cheap rows with
   `content-visibility`, and the file as the unbounded memory.

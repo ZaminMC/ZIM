@@ -45,12 +45,12 @@ function line(level: LogLine["level"], text: string, thread = "Server thread"): 
   return { tsMs: 0, level, thread, line: text };
 }
 
-function seedRegistry(state: "running" | "stopped"): void {
+function seedRegistry(state: "running" | "stopped", serverId = "alpha"): void {
   useServers.setState({
     servers: {
-      alpha: {
-        serverId: "alpha",
-        displayName: "Alpha",
+      [serverId]: {
+        serverId,
+        displayName: serverId === "alpha" ? "Alpha" : "Beta",
         state,
       },
     },
@@ -60,6 +60,11 @@ function seedRegistry(state: "running" | "stopped"): void {
 beforeEach(() => {
   sendStdinMock.mockReset();
   sendStdinMock.mockResolvedValue(undefined);
+  // §26's history is panel-local storage — the composer's submits must
+  // not leak between tests (the storage event with a null key is the
+  // honest wholesale-clear invalidation).
+  localStorage.removeItem("zamin.consoleHistory");
+  window.dispatchEvent(new StorageEvent("storage", { key: null }));
   mocks.clipboardWrite.mockReset();
   mocks.clipboardWrite.mockResolvedValue(undefined);
   rangeLogsMock.mockReset();
@@ -224,6 +229,86 @@ describe("command composer (§26)", () => {
     fireEvent.submit(input.closest("form") as HTMLFormElement);
 
     expect(await screen.findByText("stdin rejected: is the server running?")).toBeTruthy();
+  });
+
+  it("Up and Down walk the sent commands; past the newest, the draft returns", async () => {
+    rangeLogsMock.mockResolvedValue(page(0, ["ready"], false));
+    seedRegistry("running");
+    render(<ConsoleView serverId="alpha" />);
+    await waitFor(() => screen.getByText("ready"));
+
+    const input = screen.getByLabelText<HTMLInputElement>("Minecraft command");
+    // Two sent commands seed the walk: list, then say hello.
+    for (const command of ["list", "say hello"]) {
+      fireEvent.change(input, { target: { value: command } });
+      fireEvent.submit(input.closest("form") as HTMLFormElement);
+    }
+    await waitFor(() => expect(sendStdinMock).toHaveBeenCalledTimes(2));
+
+    // A live draft, saved on the first Up and restored past the newest.
+    fireEvent.change(input, { target: { value: "tp" } });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("say hello");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("list");
+    fireEvent.keyDown(input, { key: "ArrowUp" }); // clamped at the oldest
+    expect(input.value).toBe("list");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.value).toBe("say hello");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.value).toBe("tp");
+    // With the walk over, Down is a no-op, not a warp.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.value).toBe("tp");
+  });
+
+  it("Escape restores the draft from mid-walk, and an empty history ignores the arrows", async () => {
+    rangeLogsMock.mockResolvedValue(page(0, ["ready"], false));
+    seedRegistry("running", "beta");
+    render(<ConsoleView serverId="beta" />);
+    await waitFor(() => screen.getByText("ready"));
+
+    const input = screen.getByLabelText<HTMLInputElement>("Minecraft command");
+    // No history for this server yet: the arrows change nothing.
+    fireEvent.change(input, { target: { value: "draft" } });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("draft");
+
+    // A sent command, then a mid-walk Escape returns the draft.
+    fireEvent.change(input, { target: { value: "list" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(sendStdinMock).toHaveBeenCalledWith("beta", "list"));
+    fireEvent.change(input, { target: { value: "draft2" } });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("list");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("draft2");
+  });
+
+  it("a recalled command re-sends on submit — and moves to the front of the history", async () => {
+    rangeLogsMock.mockResolvedValue(page(0, ["ready"], false));
+    seedRegistry("running");
+    render(<ConsoleView serverId="alpha" />);
+    await waitFor(() => screen.getByText("ready"));
+
+    const input = screen.getByLabelText<HTMLInputElement>("Minecraft command");
+    for (const command of ["list", "say hello"]) {
+      fireEvent.change(input, { target: { value: command } });
+      fireEvent.submit(input.closest("form") as HTMLFormElement);
+    }
+    await waitFor(() => expect(sendStdinMock).toHaveBeenCalledTimes(2));
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("say hello");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("list");
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+    await waitFor(() => expect(sendStdinMock).toHaveBeenCalledTimes(3));
+    expect(sendStdinMock).toHaveBeenLastCalledWith("alpha", "list");
+    // Re-sending an older entry moves it to the front: one Up press away.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("list");
   });
 });
 
