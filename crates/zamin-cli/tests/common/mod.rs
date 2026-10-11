@@ -230,6 +230,48 @@ pub fn wait_until(deadline: Duration, mut check: impl FnMut() -> bool) -> bool {
     false
 }
 
+/// A child's stdout, read on a dedicated thread with BOUNDED receives.
+/// A plain `read_line` on a silent child blocks forever — the exact way
+/// this harness once hung a Windows CI lane for six hours (the runner
+/// was cancelled at the workflow timeout, and the real failure it was
+/// hiding never surfaced). `line_within` turns silence into `None`, so
+/// a dead or mute child is a test FAILURE with a message, never a hang.
+pub struct LineReader {
+    receiver: std::sync::mpsc::Receiver<String>,
+}
+
+impl LineReader {
+    /// Own the child's piped stdout; lines arrive on the channel until
+    /// the child closes or errors its stream (then `line_within` answers
+    /// `None` forever).
+    pub fn spawn(stdout: std::process::ChildStdout) -> LineReader {
+        use std::io::{BufRead, BufReader};
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if sender.send(line).is_err() {
+                            break; // the asking side is gone
+                        }
+                    }
+                }
+            }
+        });
+        LineReader { receiver }
+    }
+
+    /// The next line within `timeout`, or `None` when the window passes
+    /// without one (silent child, closed stream — indistinguishable on
+    /// purpose: both mean "the expected output did not arrive").
+    pub fn line_within(&self, timeout: Duration) -> Option<String> {
+        self.receiver.recv_timeout(timeout).ok()
+    }
+}
+
 pub fn spawn_daemon(data_dir: &std::path::Path, endpoint: &zamin_ipc::Endpoint) -> TestDaemon {
     let endpoint = endpoint_arg(endpoint);
     let child = {

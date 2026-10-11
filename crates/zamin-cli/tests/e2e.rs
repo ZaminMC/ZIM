@@ -7,13 +7,14 @@
 
 mod common;
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use common::{
     connect_with_retry, endpoint_arg, scoped_dir, spawn_daemon, wait_until, workspace_bin, Harness,
+    LineReader,
 };
 
 #[test]
@@ -115,7 +116,9 @@ fn cli_logs_follow_streams_live_output() {
     harness.zamin(&["start", "demo"]);
 
     // Follow mode: the opening replay carries the boot lines; read until
-    // the startup-complete signature arrives, then detach.
+    // the startup-complete signature arrives, then detach. Every read is
+    // BOUNDED (LineReader) — a silent child must fail the test, never
+    // hang the lane.
     let mut child = Command::new(&harness.zamin)
         .arg("--endpoint")
         .arg(&harness.endpoint)
@@ -124,14 +127,11 @@ fn cli_logs_follow_streams_live_output() {
         .stderr(Stdio::null())
         .spawn()
         .expect("zamin logs -f spawns");
-    let stdout = child.stdout.take().expect("piped stdout");
-    let mut reader = BufReader::new(stdout);
-    let saw_done = wait_until(Duration::from_secs(15), || {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => false,
-            Ok(_) => line.contains("Done (1.234s)"),
-        }
+    let reader = LineReader::spawn(child.stdout.take().expect("piped stdout"));
+    let saw_done = wait_until(Duration::from_secs(20), || {
+        reader
+            .line_within(Duration::from_millis(500))
+            .is_some_and(|line| line.contains("Done (1.234s)"))
     });
     let _ = child.kill();
     let _ = child.wait();
@@ -155,26 +155,25 @@ fn cli_attach_round_trips_console_input() {
         .spawn()
         .expect("zamin attach spawns");
     let mut stdin = child.stdin.take().expect("piped stdin");
-    let stdout = child.stdout.take().expect("piped stdout");
-    let mut reader = BufReader::new(stdout);
+    let reader = LineReader::spawn(child.stdout.take().expect("piped stdout"));
 
-    // The banner confirms attachment; then a console command and its
-    // round-tripped reply prove the stdin pipe works end to end.
-    let mut line = String::new();
-    let _ = reader.read_line(&mut line);
+    // The banner confirms attachment (bounded: a mute child fails here,
+    // never hangs); then a console command and its round-tripped reply
+    // prove the stdin pipe works end to end.
+    let banner = reader.line_within(Duration::from_secs(10));
     assert!(
-        line.contains("Attached to 'demo'"),
-        "banner first, got: {line}"
+        banner
+            .as_deref()
+            .is_some_and(|line| line.contains("Attached to 'demo'")),
+        "banner first, got: {banner:?}"
     );
 
     stdin.write_all(b"list\n").expect("write list");
     stdin.flush().expect("flush stdin");
-    let saw_reply = wait_until(Duration::from_secs(10), || {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => false,
-            Ok(_) => line.contains("There are 0 of a max of 20 players online"),
-        }
+    let saw_reply = wait_until(Duration::from_secs(15), || {
+        reader
+            .line_within(Duration::from_millis(500))
+            .is_some_and(|line| line.contains("There are 0 of a max of 20 players online"))
     });
 
     stdin.write_all(b"/quit\n").expect("write /quit");
@@ -254,8 +253,13 @@ async fn client_library_demuxes_requests_and_notifications() {
         .await
         .expect("start");
 
-    // Notifications and further requests interleave.
-    let deadline = Instant::now() + Duration::from_secs(15);
+    // Notifications and further requests interleave. The window is
+    // CI-runner honest: a cold Windows runner (AV scanning the fresh
+    // binaries) can take well past 15 s from spawn to the validated
+    // Running event — the deadline guards the wait, not the machine's
+    // mood. A request starving behind the notification stream still
+    // fails loudly at the expect below, whatever the timing.
+    let deadline = Instant::now() + Duration::from_secs(60);
     let mut saw_running = false;
     while Instant::now() < deadline && !saw_running {
         let note = tokio::time::timeout(Duration::from_secs(2), logs.recv()).await;
