@@ -1,0 +1,24 @@
+/* Focused shell fixes for the desktop tab strip.
+ *
+ * The model owns tab geometry; this sheet only prevents the view from
+ * painting outside the slot and removes the decorative separators that
+ * made compressed tabs look like broken dividers. */
+
+.strip-lane .tab {
+  overflow: hidden;
+  min-width: 0;
+}
+
+.strip-lane .tab-glyph,
+.strip-lane .tab-title,
+.strip-lane .tab-muted,
+.strip-lane .tab-close {
+  min-width: 0;
+}
+
+/* The explicit separator spans were useful during the Chromium port, but
+ * with a compressed/scrolling strip they read as stray window dividers.
+ * Tab boundaries are already conveyed by the tab bodies and spacing. */
+.strip-lane .tab-separator {
+  display: none !important;
+}
