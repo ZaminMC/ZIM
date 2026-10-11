@@ -531,6 +531,53 @@ impl tokio::io::AsyncWrite for WriterBridge {
     }
 }
 
+/// The child's environment entries: the parent's variables with TMP/TEMP
+/// aimed inside the jail, deduplicated and ordered the way CreateProcessW
+/// demands.
+///
+/// CreateProcessW looks names up in the block with a binary search, so the
+/// entries must be sorted case-insensitively — an unsorted block fails the
+/// whole spawn with ERROR_ENVVAR_NOT_FOUND (win32 error 203), which on the
+/// surface reads as "the sandbox could not be built". The parent's own
+/// block is sorted by the loader, but nothing keeps it that way after the
+/// daemon (or anything it loads) calls SetEnvironmentVariable, and the old
+/// construction appended TMP/TEMP past the end regardless. Sorting here is
+/// the contract; deduplication is its twin: names that differ only by case
+/// poison the same search, so the first spelling wins (Windows' own blocks
+/// are case-insensitively unique; a daemon that set "tmp" and "TMP" both
+/// must not smuggle the pair into the child).
+fn prepared_environment(env: &[(String, String)], jail_tmp: &str) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = Vec::with_capacity(env.len() + 2);
+    for (key, value) in env {
+        if key.eq_ignore_ascii_case("TMP") || key.eq_ignore_ascii_case("TEMP") {
+            continue;
+        }
+        if entries
+            .iter()
+            .any(|(existing, _)| existing.eq_ignore_ascii_case(key))
+        {
+            continue; // an earlier spelling of this name already rides along
+        }
+        entries.push((key.clone(), value.clone()));
+    }
+    // TMP/TEMP ride inside the sorted list — never appended past it.
+    entries.push(("TEMP".to_owned(), jail_tmp.to_owned()));
+    entries.push(("TMP".to_owned(), jail_tmp.to_owned()));
+    entries.sort_by(|a, b| a.0.to_uppercase().cmp(&b.0.to_uppercase()));
+    entries
+}
+
+/// The wide, double-terminated block CreateProcessW consumes: each entry
+/// `NAME=value`, NUL-terminated, the whole block terminated again.
+fn environment_block(entries: &[(String, String)]) -> Vec<u16> {
+    let mut block: Vec<u16> = Vec::new();
+    for (key, value) in entries {
+        block.extend(wide(&format!("{key}={value}")));
+    }
+    block.push(0); // the block's own double terminator
+    block
+}
+
 pub fn spawn_appcontainer(
     spec: &SpawnSpec,
     container: &Container,
@@ -576,30 +623,8 @@ pub fn spawn_appcontainer(
     let tmp = spec.working_dir.join("tmp");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_s = tmp.to_string_lossy().into_owned();
-    let mut env_block: Vec<u16> = Vec::new();
-    let mut seen_tmp = false;
-    let mut seen_temp = false;
-    for (key, value) in std::env::vars() {
-        let (key, value) = match key.as_str() {
-            "TMP" => {
-                seen_tmp = true;
-                ("TMP".to_owned(), tmp_s.clone())
-            }
-            "TEMP" => {
-                seen_temp = true;
-                ("TEMP".to_owned(), tmp_s.clone())
-            }
-            _ => (key, value),
-        };
-        env_block.extend(wide(&format!("{key}={value}")));
-    }
-    if !seen_tmp {
-        env_block.extend(wide(&format!("TMP={tmp_s}")));
-    }
-    if !seen_temp {
-        env_block.extend(wide(&format!("TEMP={tmp_s}")));
-    }
-    env_block.push(0); // the block's own double terminator
+    let parent_env: Vec<(String, String)> = std::env::vars().collect();
+    let env_block = environment_block(&prepared_environment(&parent_env, &tmp_s));
 
     // 5. The capability set rides process creation — a plugin can never
     //    grant more network to itself later.
@@ -851,6 +876,84 @@ mod adversarial {
     use super::*;
     use crate::platform::SandboxSpawn;
     use std::path::PathBuf;
+
+    // The environment contract CreateProcessW enforces, pinned as ordinary
+    // (non-ignored) tests: these run in the hermetic sweep on every Windows
+    // build, because an unsorted block fails the spawn at a distance —
+    // ERROR_ENVVAR_NOT_FOUND — and nothing else in the daemon could tell
+    // you why the server never started.
+
+    fn entries(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn the_environment_is_sorted_case_insensitively() {
+        let prepared = prepared_environment(
+            &entries(&[
+                ("SystemRoot", r"C:\Windows"),
+                ("path", r"C:\bin"),
+                ("APPDATA", r"C:\r"),
+            ]),
+            r"C:\jail\tmp",
+        );
+        let names: Vec<&str> = prepared.iter().map(|(k, _)| k.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_by_key(|n| n.to_uppercase());
+        assert_eq!(names, sorted, "names ride in binary-search order");
+        // Case-insensitive means mixed-case input lands alphabetically.
+        assert_eq!(names[0], "APPDATA");
+        assert_eq!(names[1], "path");
+        assert_eq!(names[2], "SystemRoot");
+    }
+
+    #[test]
+    fn jail_tmp_replaces_every_spelling_of_tmp_and_temp() {
+        let prepared = prepared_environment(
+            &entries(&[
+                ("TMP", r"C:\old"),
+                ("temp", r"C:\older"),
+                ("PATH", r"C:\bin"),
+            ]),
+            r"C:\jail\tmp",
+        );
+        let tmps: Vec<&(String, String)> = prepared
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("tmp") || k.eq_ignore_ascii_case("temp"))
+            .collect();
+        assert_eq!(tmps.len(), 2, "exactly TMP and TEMP remain");
+        assert!(tmps.iter().all(|(_, v)| v == r"C:\jail\tmp"));
+        // The parent's spellings did not survive alongside the overrides.
+        assert!(prepared.iter().all(|(k, _)| k != "temp"));
+    }
+
+    #[test]
+    fn a_name_with_two_case_spellings_keeps_the_first() {
+        let prepared = prepared_environment(
+            &entries(&[("Path", r"C:\first"), ("PATH", r"C:\second")]),
+            r"C:\jail\tmp",
+        );
+        let paths: Vec<&(String, String)> = prepared
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("path"))
+            .collect();
+        assert_eq!(paths.len(), 1, "the search dies on a case-twin pair");
+        assert_eq!(paths[0].0, "Path", "the first spelling wins");
+        assert_eq!(paths[0].1, r"C:\first");
+    }
+
+    #[test]
+    fn the_wide_block_carries_every_entry_and_terminates_twice() {
+        let block = environment_block(&entries(&[("A", "1"), ("B", "2")]));
+        let text: String = String::from_utf16(&block).expect("the block is valid UTF-16");
+        assert_eq!(
+            text, "A=1\0B=2\0\0",
+            "entries NUL-terminated, block double-terminated"
+        );
+    }
 
     /// Spawn a one-shot command inside the container and return
     /// (exit_code, stdout). Used by every escape attempt below.
