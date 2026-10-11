@@ -6,7 +6,7 @@
 
 import { lazy, Suspense, useEffect, useState } from "react";
 import { getServer, killServer, restartServer, startServer, stopServer, writeWholeFile } from "../state/actions";
-import { describeError, LIFECYCLE_VERBS } from "../state/errors";
+import { describeError } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
 import type { ServerState } from "../protocol/types";
 import { useServers } from "../state/servers";
@@ -107,6 +107,13 @@ const LOWER_VIEWS = [
 ] as const;
 
 type LowerView = (typeof LOWER_VIEWS)[number]["id"];
+
+const VIEW_GROUPS: { label: string; ids: LowerView[] }[] = [
+  { label: "Operate", ids: ["console", "metrics", "logs"] },
+  { label: "Manage", ids: ["files", "players", "plugins"] },
+  { label: "Automation", ids: ["schedules"] },
+  { label: "System", ids: ["network", "startup", "settings", "backups"] },
+];
 
 /** Live sampler values in the header. Owns its store subscription so a
  *  1 Hz sample re-renders two chips, not the whole workspace (the panel
@@ -229,26 +236,50 @@ export function ServerView({ serverId }: { serverId: string }) {
         </div>
 
         <div className={styles.actions} role="toolbar" aria-label="Server actions">
-          {LIFECYCLE_VERBS.map((verb) => {
-            const allowed = verbs.includes(verb);
-            return (
-              <Button
-                key={verb}
-                variant={verb === "start" ? "primary" : verb === "kill" ? "danger" : "default"}
-                disabled={!allowed}
-                busy={pendingVerb === verb}
-                onClick={() => dispatch(verb)}
-                title={allowed ? undefined : `${verb} is not available while ${server.state}`}
-              >
-                {verb.charAt(0).toUpperCase() + verb.slice(1)}
-              </Button>
-            );
-          })}
-          {/* §24 reserves this slot: the primary publish action, always
-              reachable — the workspace opens over the server page. */}
+          <Button
+            variant="primary"
+            busy={pendingVerb === (isLiveState(server.state) ? "stop" : "start")}
+            disabled={pendingVerb !== null && pendingVerb !== undefined || !verbs.includes(isLiveState(server.state) ? "stop" : "start")}
+            onClick={() => dispatch(isLiveState(server.state) ? "stop" : "start")}
+          >
+            {isLiveState(server.state) ? "Stop" : "Start"}
+          </Button>
+          {verbs.includes("restart") ? (
+            <Button
+              variant="default"
+              busy={pendingVerb === "restart"}
+              disabled={pendingVerb !== null && pendingVerb !== undefined}
+              onClick={() => dispatch("restart")}
+            >
+              Restart
+            </Button>
+          ) : null}
+          {verbs.includes("kill") ? (
+            <details className={styles.moreActions}>
+              <summary aria-label="More server actions">More</summary>
+              <div className={styles.actionMenu}>
+                <Button
+                  variant="danger"
+                  className={styles.killAction}
+                  busy={pendingVerb === "kill"}
+                  disabled={pendingVerb !== null && pendingVerb !== undefined}
+                  onClick={(event) => {
+                    const confirmed = window.confirm(
+                      `Force-kill “${server.displayName}”? Unsaved server data may be lost.`,
+                    );
+                    if (confirmed) dispatch("kill");
+                    (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
+                  }}
+                >
+                  Kill server
+                </Button>
+              </div>
+            </details>
+          ) : null}
           <Button
             variant="default"
             data-testid="publish-open"
+            disabled={pendingVerb !== null && pendingVerb !== undefined}
             onClick={() => setPublishOpen(true)}
             title="Package and publish a selection of this server's files"
           >
@@ -314,20 +345,28 @@ export function ServerView({ serverId }: { serverId: string }) {
         onRecover={() => setLowerView("backups")}
       />
 
-      <div className={styles.viewSwitch} role="tablist" aria-label="Output view">
-        {LOWER_VIEWS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={lowerView === id}
-            className={`${styles.viewTab} ${lowerView === id ? styles.viewTabActive : ""}`}
-            onClick={() => setLowerView(id)}
-          >
-            <Icon size={15} />
-            {label}
-          </button>
-        ))}
-      </div>
+      <div className={styles.workspace}>
+        <nav className={styles.viewSwitch} aria-label="Server workspace">
+          {VIEW_GROUPS.map((group) => (
+            <div className={styles.viewGroup} key={group.label}>
+              <h2 className={styles.viewGroupTitle}>{group.label}</h2>
+              <div className={styles.viewGroupItems}>
+                {LOWER_VIEWS.filter(({ id }) => group.ids.includes(id)).map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-current={lowerView === id ? "page" : undefined}
+                    className={`${styles.viewTab} ${lowerView === id ? styles.viewTabActive : ""}`}
+                    onClick={() => setLowerView(id)}
+                  >
+                    <Icon size={16} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
 
       <div className={styles.panel}>
         <Suspense fallback={<div className={styles.lazyLoad} aria-busy="true" />}>
@@ -360,6 +399,7 @@ export function ServerView({ serverId }: { serverId: string }) {
             <BackupsView serverId={serverId} running={server.state === "running"} />
           )}
         </Suspense>
+        </div>
       </div>
 
       {publishOpen ? (
