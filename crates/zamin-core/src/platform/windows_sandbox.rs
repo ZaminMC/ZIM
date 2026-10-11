@@ -302,6 +302,37 @@ fn policy_capabilities(network: NetworkSandbox) -> Vec<SID_AND_ATTRIBUTES> {
     out
 }
 
+/// Run a one-shot system tool with a deadline. Best-effort machine state
+/// (the loopback grants) must never hold the spawn path hostage: the
+/// caller sits inside the start request, and a wedged tool would cost the
+/// server its start — a worse trade than a missing exemption. The tool's
+/// stdio is detached (the daemon's own captured pipes must not inherit
+/// into a system tool) and a refusal to die inside the deadline is killed.
+fn run_briefly(program: &str, args: &[String], seconds: u64) {
+    let Ok(mut child) = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+    else {
+        return; // the tool is absent or unspawnable: best-effort, done
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    }
+}
+
 /// Exempt the container from the default loopback block (local-only).
 /// `CheckNetIsolation.exe` is the documented, unprivileged path; the
 /// exemption is per-user machine state that outlives processes, so the
@@ -311,17 +342,19 @@ fn add_loopback_exemption(sid_string: &str) {
     // `-p <sid>` reads as a stray argument and answers "Invalid
     // Parameters" with the usage text, so LocalOnly servers silently
     // never got their loopback exemption.
-    let _ = std::process::Command::new("checknetisolation")
-        .args(["loopbackexempt", "-a", &format!("-p={sid_string}")])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    run_briefly(
+        "checknetisolation",
+        &["loopbackexempt".to_owned(), "-a".to_owned(), format!("-p={sid_string}")],
+        3,
+    );
 }
 
 pub fn remove_loopback_exemption(sid_string: &str) {
-    let _ = std::process::Command::new("checknetisolation")
-        .args(["loopbackexempt", "-d", &format!("-p={sid_string}")])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    run_briefly(
+        "checknetisolation",
+        &["loopbackexempt".to_owned(), "-d".to_owned(), format!("-p={sid_string}")],
+        3,
+    );
 }
 
 /// Enable the container's listener to RECEIVE loopback connections (the
@@ -331,10 +364,11 @@ pub fn remove_loopback_exemption(sid_string: &str) {
 /// unreachable from the box itself, which the players surface would
 /// surface as an honest empty room.
 fn enable_loopback_inbound(sid_string: &str) {
-    let _ = std::process::Command::new("checknetisolation")
-        .args(["loopbackexempt", "-is", &format!("-p={sid_string}")])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    run_briefly(
+        "checknetisolation",
+        &["loopbackexempt".to_owned(), "-is".to_owned(), format!("-p={sid_string}")],
+        3,
+    );
 }
 
 /// Delete the server's AppContainer profile (server removal). Self-
