@@ -31,6 +31,20 @@ pub type GroupId = u32;
 /// The closed set of places a tab can show (§58) — the Rust twin of
 /// state/destinations.ts. `zim://` URLs canonicalize through
 /// [`Destination::url`] / [`Destination::parse`].
+///
+/// THE SEAM LAW (the founder's "clicking a server takes me nowhere"):
+/// this enum crosses the webview boundary in BOTH directions — the host
+/// ships destinations inside snapshots and `shell://tab` payloads (Rust →
+/// TS), and the content layer sends TS-built destinations back through
+/// `shell_tab_navigate` (TS → Rust). serde's enum-level `rename_all`
+/// renames VARIANTS only; without the per-field renames below, the wire
+/// spelled `server_id` while state/destinations.ts types and sends
+/// `serverId` — so every TS-built server/console navigation was REFUSED
+/// by serde ("missing field server_id", both lanes, "ZIM's shell refused
+/// the navigation on both lanes"), and every host-shipped destination
+/// read as `serverId: undefined` in the content layer. The fields
+/// therefore ride camelCase, with the snake_case alias kept so sessions
+/// persisted by older hosts still restore.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Destination {
@@ -38,9 +52,11 @@ pub enum Destination {
     DevTools,
     Servers,
     Server {
+        #[serde(rename = "serverId", alias = "server_id")]
         server_id: String,
     },
     Console {
+        #[serde(rename = "serverId", alias = "server_id")]
         server_id: String,
     },
     /// A join address the operator typed (§7): the shell lands it on its
@@ -1222,6 +1238,74 @@ mod tests {
         let strip = Strip::new();
         assert_eq!(strip.tabs.len(), 1);
         assert_eq!(strip.tabs[0].destination(), &Destination::New);
+    }
+
+    // -- THE SEAM CONTRACT (the founder's "clicking a server takes me
+    //    nowhere"): the JSON shape of a Destination IS a cross-boundary
+    //    contract — the TS side (state/destinations.ts) builds and reads
+    //    these objects by hand. These tests pin the literal wire spelling
+    //    so the seam can never drift again: variant names camelCase
+    //    (rename_all), payload fields camelCase (the per-field renames),
+    //    and the snake_case aliases accept what older hosts persisted. --
+
+    #[test]
+    fn the_wire_spells_fields_camelcase_matching_the_ts_types() {
+        let server = Destination::Server {
+            server_id: "survival".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&server).unwrap(),
+            r#"{"kind":"server","serverId":"survival"}"#
+        );
+        let console = Destination::Console {
+            server_id: "hub".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&console).unwrap(),
+            r#"{"kind":"console","serverId":"hub"}"#
+        );
+        let join = Destination::Join {
+            host: Some("localhost".into()),
+            port: 25565,
+        };
+        assert_eq!(
+            serde_json::to_string(&join).unwrap(),
+            r#"{"kind":"join","host":"localhost","port":25565}"#
+        );
+    }
+
+    #[test]
+    fn the_ts_built_destination_parses_the_way_the_panel_sends_it() {
+        // Exactly what navigateHost sends for a server-row click — the
+        // shape that used to die as "missing field server_id" and refuse
+        // both navigation lanes.
+        let ts_shape = r#"{"kind":"server","serverId":"survival"}"#;
+        assert_eq!(
+            serde_json::from_str::<Destination>(ts_shape).unwrap(),
+            Destination::Server {
+                server_id: "survival".into()
+            }
+        );
+        let ts_console = r#"{"kind":"console","serverId":"hub"}"#;
+        assert_eq!(
+            serde_json::from_str::<Destination>(ts_console).unwrap(),
+            Destination::Console {
+                server_id: "hub".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_old_snake_persisted_shape_still_restores() {
+        // Sessions and bookmarks persisted by hosts before the seam fix
+        // carry snake_case fields; the alias keeps them readable.
+        let old_shape = r#"{"kind":"server","server_id":"survival"}"#;
+        assert_eq!(
+            serde_json::from_str::<Destination>(old_shape).unwrap(),
+            Destination::Server {
+                server_id: "survival".into()
+            }
+        );
     }
 
     // -- the multi-selection laws (Tab::OnMousePressed's dispatch, the

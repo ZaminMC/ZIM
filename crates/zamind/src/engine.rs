@@ -175,10 +175,7 @@ impl Engine {
         fabric_url: String,
     ) -> Engine {
         let _ = std::fs::create_dir_all(data_dir.join("servers"));
-        let registry = Registry::load(data_dir.join("registry.json")).unwrap_or_else(|e| {
-            tracing::error!("registry is unreadable: {e}; refusing to start over it");
-            std::process::exit(1);
-        });
+        let registry = Self::load_registry_resiliently(&data_dir);
         let hub = HubHandle::new();
         let jobs = JobRunner::new(hub.clone());
         let journal = std::sync::Arc::new(zamin_core::sandbox::SecurityJournal::new(&data_dir));
@@ -202,6 +199,84 @@ impl Engine {
                 publish_io: Mutex::new(()),
                 boot_ms: now_ms_unix(),
             }),
+        }
+    }
+
+    /// The registry load that never kills the daemon. The old law —
+    /// "registry is unreadable; refusing to start over it; exit(1)" — was
+    /// the founder's whole disease in one line: a registry.json torn by a
+    /// hard kill (their installer battle ran taskkill /F mid-write) made
+    /// EVERY subsequent daemon boot exit at startup, the panel's
+    /// daemon_ensure spawned corpse after corpse ("did not start
+    /// answering within 10 s"), and the operator read "always
+    /// disconnected — unable to make servers" with stderr nulled and no
+    /// word of why. The remedy they found by hand was deleting the file.
+    ///
+    /// The resilient law, in three beats:
+    /// 1. QUARANTINE, never destroy — the unreadable file is renamed to
+    ///    `registry.json.corrupt-<unix-ms>` (evidence preserved; a
+    ///    destroyed file would also burn a teardown-path write into a
+    ///    data dir that may be half-broken);
+    /// 2. SELF-HEAL from the anchors that outrank the registry — every
+    ///    instance dir under `instances/` carrying a valid
+    ///    `.zamin/server.json` marker (ADR-0004: the marker binds a root
+    ///    to its id) re-registers itself, so a torn registry costs the
+    ///    operator NOTHING (the dir name is the honest display name;
+    ///    rename_server is one click away);
+    /// 3. START — an empty-but-healthy registry always beats a dead
+    ///    daemon, and the audit log speaks the whole story.
+    fn load_registry_resiliently(data_dir: &std::path::Path) -> Registry {
+        let path = data_dir.join("registry.json");
+        match Registry::load(&path) {
+            Ok(registry) => registry,
+            Err(load_error) => {
+                tracing::error!(
+                    "registry at {:?} is unreadable: {load_error}; quarantining it and rebuilding from the instance markers",
+                    path
+                );
+                let quarantine = data_dir.join(format!("registry.json.corrupt-{}", now_ms_unix()));
+                if let Err(e) = std::fs::rename(&path, &quarantine) {
+                    // The file may not exist at all (ENOENT is the empty
+                    // boot); anything else still must not stop the daemon.
+                    tracing::error!("could not quarantine the corrupt registry: {e}");
+                }
+                let mut registry = Registry::empty(&path);
+                let instances = data_dir.join("instances");
+                let Ok(entries) = std::fs::read_dir(&instances) else {
+                    tracing::warn!(
+                        "no instances dir at {:?}; starting with an empty registry",
+                        instances
+                    );
+                    return registry;
+                };
+                for entry in entries.flatten() {
+                    let root = entry.path();
+                    if !root.is_dir() {
+                        continue;
+                    }
+                    let Ok(Some(server_id)) = marker::read_marker(&root) else {
+                        continue; // not a managed instance; not ours to guess
+                    };
+                    let display = root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| server_id.to_string());
+                    match registry.register(server_id.clone(), display, &root) {
+                        Ok(_) => tracing::info!(
+                            "self-healed registry entry for server {server_id} from {:?}",
+                            root
+                        ),
+                        // A duplicate id/root cannot happen against a fresh
+                        // registry unless two dirs claim one id — the first
+                        // wins, the loser is logged, nothing is deleted.
+                        Err(e) => tracing::error!(
+                            "instance dir {:?} carries marker {server_id} but could not register: {e}",
+                            root
+                        ),
+                    }
+                }
+                registry
+            }
         }
     }
 

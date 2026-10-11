@@ -37,6 +37,18 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// An empty registry bound to `path` — the self-heal's constructor:
+    /// the daemon quarantines an unreadable registry.json and rebuilds
+    /// from the instance markers into a registry that saves back to the
+    /// SAME path (an unbound empty registry would heal in memory only
+    /// and vanish on the next boot).
+    pub fn empty(path: impl Into<PathBuf>) -> Registry {
+        Registry {
+            path: path.into(),
+            entries: BTreeMap::new(),
+        }
+    }
+
     /// Load, or start empty when absent. Unknown fields are preserved out of
     /// scope here — the registry round-trips only known data; a corrupt or
     /// wrong-version file is a loud error, never a silent reset.

@@ -111,16 +111,53 @@ async fn daemon_answers(endpoint: &Endpoint) -> bool {
     )
 }
 
+/// The daemon's own startup voice, kept where the panel can speak it.
+/// A daemon that dies at boot used to die SILENTLY: stdout/stderr were
+/// nulled, so a corrupt registry ("refusing to start over it") or any
+/// other startup verdict produced an eternal "Connecting to ZIM…" with
+/// zero words of why — the founder cleared files by hand to find out.
+/// The spawn now tees both streams into `daemon-start.log` in the data
+/// dir (truncated per spawn attempt — the file always holds the LAST
+/// attempt's verdict, and a running daemon's info logs append to it),
+/// and [`ensure_daemon`]'s failures carry its tail.
+pub(crate) fn daemon_start_log() -> PathBuf {
+    zamin_core::platform::paths::data_dir().join("daemon-start.log")
+}
+
+const START_LOG_CAP: u64 = 16 * 1024;
+
+/// Read the tail of the startup log (bounded — a flood must not become
+/// the panel's error string). Empty when nothing was captured.
+fn start_log_tail() -> String {
+    let Ok(bytes) = std::fs::read(daemon_start_log()) else {
+        return String::new();
+    };
+    let capped = if bytes.len() as u64 > START_LOG_CAP {
+        &bytes[bytes.len() - START_LOG_CAP as usize..]
+    } else {
+        &bytes[..]
+    };
+    String::from_utf8_lossy(capped)
+        .lines()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 /// Spawn the daemon without arguments — defaults are already correct
 /// (per-user endpoint, XDG/Known-Folders data dir).
 ///
 /// Windows: `zamind` is a console-subsystem binary; spawned by this GUI
 /// process without CREATE_NO_WINDOW it would allocate a brand-new
 /// console — the mysterious CMD window on every first launch. The flag
-/// detaches the child from any console allocation; its stdout/stderr are
-/// null anyway. This is the same mechanism the daemon itself uses when
-/// it spawns server processes (zamin-core platform/windows.rs, ADR-0005),
-/// applied one level up.
+/// detaches the child from any console allocation; its stdout/stderr
+/// ride the startup log, not a terminal. This is the same mechanism the
+/// daemon itself uses when it spawns server processes (zamin-core
+/// platform/windows.rs, ADR-0005), applied one level up.
 pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
     let mut command = Command::new(binary);
@@ -128,6 +165,19 @@ pub fn spawn_daemon(binary: &Path) -> std::io::Result<()> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // The startup voice: the log file is the daemon's only witness now.
+    // TRUNCATED per spawn attempt — the file is the last attempt's
+    // verdict, never an unbounded history; a daemon that comes up keeps
+    // appending its own info logs until the next attempt resets it.
+    if let Ok(log) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(daemon_start_log())
+    {
+        command.stdout(log.try_clone()?);
+        command.stderr(log);
+    }
     #[cfg(windows)]
     {
         // CREATE_NO_WINDOW — a daemon is a background service, not a
@@ -242,7 +292,17 @@ pub async fn ensure_daemon() -> Result<String, String> {
             return Ok("spawned".to_owned());
         }
         if Instant::now() >= deadline {
-            return Err("the daemon did not start answering within 10 s".to_owned());
+            // The daemon's own words ride the failure — a startup that
+            // dies (corrupt file, bind refusal, anything) names itself
+            // here instead of an eternal silent "Connecting to ZIM…".
+            let tail = start_log_tail();
+            return Err(if tail.is_empty() {
+                "the daemon did not start answering within 10 s (its startup log is empty — \
+                 it may not have launched at all; see daemon-start.log)"
+                    .to_owned()
+            } else {
+                format!("the daemon did not start answering within 10 s — its own words: {tail}")
+            });
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
