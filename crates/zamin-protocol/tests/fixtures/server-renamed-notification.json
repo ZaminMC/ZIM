@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "method": "streams.notification",
+  "params": {
+    "stream": "events",
+    "serverId": "production",
+    "seq": 48211,
+    "payload": {
+      "kind": "event",
+      "event": {
+        "type": "serverRenamed",
+        "serverId": "production",
+        "displayName": "Survival Prime"
+      }
+    }
+  }
+}

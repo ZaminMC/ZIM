@@ -152,6 +152,44 @@ fn state_changed_notification() {
 }
 
 #[test]
+fn server_renamed_notification() {
+    let msg = parse("server-renamed-notification");
+    let IncomingMessage::Notification(note) = msg else {
+        panic!("expected notification");
+    };
+    assert_eq!(note.method, methods::STREAMS_NOTIFICATION);
+    let n: StreamNotification = note.parse_params().unwrap();
+    assert_eq!(n.stream, StreamKind::Events);
+    assert_eq!(n.server_id.as_deref(), Some("production"));
+    let StreamPayload::Event { event } = n.payload else {
+        panic!("expected event payload");
+    };
+    let CoreEvent::ServerRenamed {
+        server_id,
+        display_name,
+    } = event
+    else {
+        panic!("expected server renamed event");
+    };
+    assert_eq!(server_id, "production");
+    assert_eq!(display_name, "Survival Prime");
+    // The wire shape, pinned where the hand-rolled consumers read it: the
+    // payload is tagged by `kind` with the CoreEvent under `event`, its
+    // variant camelCased, its fields camelCased (the tray's law).
+    let raw = serde_json::to_value(&n).unwrap();
+    assert_eq!(
+        raw["payload"]["kind"], json!("event"),
+        "the payload carries the event under kind=event"
+    );
+    assert_eq!(
+        raw["payload"]["event"]["type"], json!("serverRenamed"),
+        "the variant name is camelCase on the wire"
+    );
+    assert_eq!(raw["payload"]["event"]["serverId"], json!("production"));
+    assert_eq!(raw["payload"]["event"]["displayName"], json!("Survival Prime"));
+}
+
+#[test]
 fn logs_notification_with_batch() {
     let msg = parse("logs-notification");
     let IncomingMessage::Notification(note) = msg else {
