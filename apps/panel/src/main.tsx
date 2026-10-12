@@ -2,11 +2,15 @@
 // frame (strip/toolbar/omnibox/bookmarks) boots from frame.html —
 // this document is what a tab webview loads, one destination at a time.
 //
-// The Arix port's boot law (2026-10-12): the inline script in index.html
-// already painted the saved theme's ground before this module ran; here
-// the store takes over — the same values re-stated through applyTheme,
-// the cross-webview broadcast attached, and the splash retired with the
-// app's first commit underneath it (the fade, never a pop).
+// The corrected Arix port's boot law (2026-10-12): the app's ground is
+// the official white (index.html paints it inline before the CSS
+// lands); the DASHBOARD's theme (the scoped glass) is the store's own
+// truth — applyTheme below mints the dialect variables on <html> BEFORE
+// the first render, so the server view's scope paints its saved look
+// immediately, and the broadcast lane keeps every open dashboard live.
+// The splash rides index.html's self-contained inline CSS (the retire
+// classes included — the rule lives WITH the markup it commands); this
+// module only drives the classes.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";

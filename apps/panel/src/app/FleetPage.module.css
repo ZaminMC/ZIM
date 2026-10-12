@@ -1,7 +1,4 @@
-/* Overview dashboard: stat cards, fleet grid, empty hero — the Arix
-   port's glass band: cards are translucent surfaces with the glass
-   blur (tokens carry the translucency; the blur is the surfaces'
-   own), riding the stage layer the app root mounts. */
+/* Overview dashboard: stat cards, fleet grid, empty hero. */
 
 .page {
   max-width: 1240px;
@@ -102,22 +99,13 @@
   box-sizing: border-box;
   padding: var(--space-4) 44px var(--space-4) var(--space-4);
   background: var(--surface);
-  /* The Arix glass card: ServerCard's own law — the backdrop blur the
-     token translucency needs to read as glass. */
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius-box);
+  border-radius: var(--radius-m);
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition: background var(--speed-fast) var(--ease), border-color var(--speed-fast) var(--ease);
-}
-
-:root[data-glass="off"] .card {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .card:hover { background: var(--surface-2); border-color: var(--accent-border); }
@@ -175,19 +163,12 @@
   text-align: center;
   gap: var(--space-3);
   background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-l);
   padding: var(--space-7) var(--space-5);
   max-width: 560px;
   width: 100%;
   margin: auto;
-}
-
-:root[data-glass="off"] .empty {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .emptyIcon {

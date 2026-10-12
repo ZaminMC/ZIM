@@ -337,42 +337,53 @@ export function App() {
 
   return (
     <div className={styles.content}>
-      {/* The Arix stage (the theme port): the fixed background layer the
-          glass surfaces blur — the ground plus the preset image, fading in
-          below the frame band's matching ground so the seam is invisible.
-          The class is the global glass layer's own (theme/arix.css). */}
-      <div className="arix-bg" aria-hidden />
-      {wireStatus !== "ready" && wireDwelled ? (
-        <div className={styles.wireBanner} role="status" data-state={wireStatus}>
-          <span className={styles.wireDot} aria-hidden />
-          <span className={styles.wireText}>
-            {wireStatus === "connecting"
-              ? "Connecting…"
-              : "Reconnecting — ZIM is not answering"}
-          </span>
-        </div>
-      ) : null}
       <TabBoundary>
         <Suspense fallback={<div className={styles.lazyFallback} />}>
-          {/* The page band: one destination at a time, keyed by the
-              destination's TAB IDENTITY and the reload token. The key is
-              §60's law — the reload verb rebuilds the view on EVERY
-              page (the evidence and settings pages used to ignore the
-              token, so ⟳ did nothing there). The identity — not the
-              full destination — keys the band because the URL model
-              (§8–§12) walks a server's PAGES through history: the
-              tab is the same document family, so the walk must UPDATE
-              in place (state, scroll, subscriptions preserved), never
-              remount per page; a different destination (another server,
-              an evidence page) is a different identity and remounts.
-              The swap is Chromium's paint holding (App.module.css): one
-              atomic commit, no blank beat — the old page's paint stands
-              until the new page's lands. */}
+          {/* THE SCOPE HOST (the corrected Arix port, 2026-10-12): the
+              column that owns the wire banner and the page band. On the
+              server view it carries the global scope classes —
+              `arix-scope` re-values ZIM's token names through Arix's
+              design system inside this subtree only (theme/arix.css),
+              `arix-stage` mounts the background image the glass blurs —
+              so the banner and the destination sit ON the dashboard's
+              own ground. Every other destination renders the official
+              white theme, untouched by the port. */}
           <div
-            className={`${styles.page} page-enter`}
-            key={`${tabKey(destination)}:${reloadToken}`}
+            className={`${styles.scopeHost}${
+              destination.kind === "server" ? " arix-scope arix-stage" : ""
+            }`}
           >
-            <DestinationView destination={destination} />
+            {wireStatus !== "ready" && wireDwelled ? (
+              <div className={styles.wireBanner} role="status" data-state={wireStatus}>
+                <span className={styles.wireDot} aria-hidden />
+                <span className={styles.wireText}>
+                  {wireStatus === "connecting"
+                    ? "Connecting…"
+                    : "Reconnecting — ZIM is not answering"}
+                </span>
+              </div>
+            ) : null}
+            {/* The page band: one destination at a time, keyed by the
+                destination's TAB IDENTITY and the reload token. The key is
+                §60's law — the reload verb rebuilds the view on EVERY
+                page (the evidence and settings pages used to ignore the
+                token, so ⟳ did nothing there). The identity — not the
+                full destination — keys the band because the URL model
+                (§8–§12) walks a server's PAGES through history: the
+                tab is the same document family, so the walk must UPDATE
+                in place (state, scroll, subscriptions preserved), never
+                remount per page; a different destination (another server,
+                an evidence page) is a different identity and remounts.
+                The swap is Chromium's paint holding (App.module.css): one
+                atomic commit, no blank beat — the old page's paint stands
+                until the new page's lands. The keyed band lives INSIDE
+                the scope host so the scope survives the walk. */}
+            <div
+              className={`${styles.page} page-enter`}
+              key={`${tabKey(destination)}:${reloadToken}`}
+            >
+              <DestinationView destination={destination} />
+            </div>
           </div>
         </Suspense>
       </TabBoundary>

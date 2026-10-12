@@ -1,100 +1,74 @@
 /* Design tokens (STYLE-GUIDE: one tokens file, CSS custom properties).
-   Official theme: ARIX GLASS (the 2026-10-12 port of the Arix
-   Pterodactyl theme's dashboard face — config/arix.php's design system
-   rendered as ZIM's own token ladder). The port's law: ZIM's token
-   NAMES are the panel's contract (every module, the frame band, the
-   popups consume them), so the port re-values the ladder instead of
-   renaming it — one layer, every surface follows, nothing cursed.
-   Arix's own variable identities (--primary, the gray ladder,
-   --radiusBox, --radiusInput, backdrop blur) are preserved verbatim
-   beneath the names so the customization studio speaks Arix's
-   dialect. */
+   Official theme: WHITE. This is a desktop product, and its face is the
+   browser-grade light palette — white surfaces, a quiet gray strip,
+   hairline borders, one blue. The reference is Chromium's light theme:
+   precise, dense, hierarchical, quiet. Dark surfaces survive exactly
+   where the domain owns them (the terminal), never as decoration. */
 
 :root {
-  /* Arix's dark ladder is the DEFAULT (its defaultMode: darkmode) —
-     the glass face the port exists for. Light is the [data-mode]
-     override below, Arix's lightmode_* set, also inverted the way
-     Arix inverts it (its gray50 is the DARKEST light-mode text). */
-  color-scheme: dark;
-  --primary: #4a35cf; /* arix primary — the studio's --primary */
+  color-scheme: light;
 
-  /* -- Arix's gray ladder (config/arix.php) --------------------------
-     gray800 is the ground; gray700 is every card; gray600 hover;
-     gray500 the hairline. The GLASS LAW (wrapper.blade.php): gray700
-     is a color-mix of itself at --glass-opacity with transparent, so
-     every surface that asks for it becomes the glass the background
-     layer shows through; --glass (the studio's backdrop switch) sets
-     the translucency's floor — glass off = fully opaque surfaces. */
-  --glass-opacity: 80%;
-  --glass-blur: 16px;
-  --glass-alpha: var(--glass-opacity);
-  --gray50: #f4f4f4;
-  --gray100: #d5d5db;
-  --gray200: #b2b2c1;
-  --gray300: #8282a4;
-  --gray400: #5e5e7f;
-  --gray500: #42425b;
-  --gray600: #2b2b40;
-  --gray700: #1d1d37;
-  --gray800: #0b0d2a;
-  --gray900: #040519;
+  /* surfaces — layered, each step clearly above the last */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f8f9fa;
+  --surface-3: #f1f3f4;
+  --surface-4: #e8eaed;
+  --border: #dadce0;
+  --border-strong: #bdc1c6;
 
-  /* surfaces — ZIM's ladder re-valued through the glass law */
-  --bg: var(--gray800);
-  --surface: color-mix(in srgb, var(--gray700) var(--glass-alpha), transparent);
-  --surface-2: color-mix(in srgb, var(--gray600) var(--glass-alpha), transparent);
-  --surface-3: color-mix(in srgb, var(--gray500) var(--glass-alpha), transparent);
-  --surface-4: color-mix(in srgb, var(--gray500) calc(var(--glass-alpha) + 10%), transparent);
-  --surface-raised: var(--surface-2);
-  --border: var(--gray500);
-  --border-strong: var(--gray400);
+  /* text */
+  --text: #202124;
+  --text-muted: #5f6368;
+  --text-faint: #80868b;
 
-  /* text — Arix's own contrast pairs on the dark ground */
-  --text: var(--gray50);
-  --text-muted: var(--gray200);
-  --text-faint: var(--gray300);
-
-  /* brand + semantics — the primary ladder Arix derives */
-  --accent: var(--primary);
-  --accent-strong: color-mix(in srgb, var(--primary) 85%, black);
-  --accent-soft: color-mix(in srgb, var(--primary) 16%, transparent);
-  --accent-border: color-mix(in srgb, var(--primary) 45%, transparent);
+  /* brand + semantics */
+  --accent: #1a73e8;
+  --accent-strong: #1967d2;
+  --accent-soft: rgba(26, 115, 232, 0.08);
+  --accent-border: rgba(26, 115, 232, 0.4);
   --accent-contrast: #ffffff;
-  --success: #56aa2b;
-  --success-soft: color-mix(in srgb, #56aa2b 14%, transparent);
-  --warning: #d0a03a;
-  --warning-soft: color-mix(in srgb, #d0a03a 14%, transparent);
-  --danger: #d9534f;
-  --danger-strong: #c53030;
-  --danger-soft: color-mix(in srgb, #d9534f 12%, transparent);
+  --success: #188038;
+  --success-soft: rgba(24, 128, 56, 0.08);
+  --warning: #b06000;
+  --warning-soft: rgba(249, 171, 0, 0.12);
+  --danger: #c5221f;
+  --danger-strong: #d93025;
+  --danger-soft: rgba(197, 34, 31, 0.07);
 
-  /* semantic borders */
-  --success-border: color-mix(in srgb, #56aa2b 45%, transparent);
-  --warning-border: color-mix(in srgb, #d0a03a 45%, transparent);
-  --danger-border: color-mix(in srgb, #d9534f 45%, transparent);
+  /* semantic borders — the same 0.35 alpha the accent border set; the
+     outcome chips (audit, jobs, feedback) used to reach for these with
+     var() fallbacks, which worked by luck. Stated once, here. */
+  --success-border: rgba(24, 128, 56, 0.35);
+  --warning-border: rgba(176, 96, 0, 0.35);
+  --danger-border: rgba(197, 34, 31, 0.35);
 
-  /* the accent ladder's lighter rungs (chart series) */
-  --accent-2: color-mix(in srgb, var(--primary) 60%, var(--gray200));
-  --accent-3: color-mix(in srgb, var(--primary) 30%, var(--gray200));
+  /* the accent ladder's lighter rungs — chart series (cpu/rss/players
+     bars) once asked for these and all fell back to the base accent,
+     rendering three data series in one indistinguishable color. */
+  --accent-2: #6aa1e8;
+  --accent-3: #a8c7fa;
 
-  /* state colors (ADR-0005 lifecycle) — legible on the dark ground */
-  --state-running: #7ac943;
-  --state-starting: #d0a03a;
-  --state-stopping: #d0a03a;
-  --state-stopped: var(--gray200);
-  --state-not-running: var(--gray300);
-  --state-failed-preflight: #d9534f;
-  --state-crashed: #d9534f;
-  --state-adopting: #a78bfa;
-  --state-unknown: var(--gray300);
+  /* state colors (ADR-0005 lifecycle) */
+  --state-running: #188038;
+  --state-starting: #b06000;
+  --state-stopping: #b06000;
+  --state-stopped: #5f6368;
+  --state-not-running: #80868b;
+  --state-failed-preflight: #c5221f;
+  --state-crashed: #c5221f;
+  --state-adopting: #9334e6;
+  --state-unknown: #80868b;
 
-  /* geometry — Arix's radius knobs (the studio's sliders) */
-  --radius-box: 10px; /* arix radiusBox */
-  --radius-input: 7px; /* arix radiusInput */
-  --radius-s: var(--radius-input);
-  --radius-m: var(--radius-input);
-  --radius-l: var(--radius-box);
+  /* geometry */
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  /* The pre-refresh aliases, still used by card containers and inputs —
+     they used to resolve to nothing (invalid → 0/transparent), which the
+     2026-10 refresh's rename never caught. */
   --radius: var(--radius-m);
+  --surface-raised: var(--surface-2);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -102,12 +76,16 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
+  /* The ladder's top step. It went missing in the 2026-10 rename, and
+     every var(--space-8) became an invalid declaration whose whole
+     padding line silently dropped (the settings page hugged its top
+     edge). Defined here so the ladder is contiguous 4..64. */
   --space-8: 64px;
 
-  /* elevation — dark glass: depth reads as soft black lift, never glow */
-  --shadow-s: 0 1px 2px rgba(4, 5, 25, 0.4);
-  --shadow-m: 0 2px 6px rgba(4, 5, 25, 0.45), 0 8px 24px rgba(4, 5, 25, 0.3);
-  --shadow-l: 0 4px 12px rgba(4, 5, 25, 0.5), 0 16px 48px rgba(4, 5, 25, 0.35);
+  /* elevation — Chrome light: hairline shadows, never glows */
+  --shadow-s: 0 1px 2px rgba(60, 64, 67, 0.16);
+  --shadow-m: 0 1px 3px rgba(60, 64, 67, 0.2), 0 4px 8px 2px rgba(60, 64, 67, 0.08);
+  --shadow-l: 0 1px 3px rgba(60, 64, 67, 0.25), 0 6px 16px 4px rgba(60, 64, 67, 0.12);
 
   /* type */
   --font-ui:
@@ -122,54 +100,72 @@
   --text-xl: 20px;
   --text-2xl: 26px;
 
-  /* motion (§75) */
+  /* motion (§75): fast, intentional, compositor-only. --speed-slow is
+     for the major entrances (modals, page changes); everything else is
+     fast or normal. Loops (pulses, spinners) keep their own cadence. */
   --speed-fast: 120ms;
   --speed-normal: 200ms;
   --speed-slow: 280ms;
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
 
-  /* terminal (xterm surface) — the domain's own dark canvas */
-  --term-bg: #101225;
+  /* terminal (xterm surface) — the terminal stays a terminal: its
+     dark canvas is the domain's own, not the theme's decoration. */
+  --term-bg: #202124;
 
-  /* -- The browser shell's band (ADR-0033) -----------------------------
-     The frame speaks THIS palette, re-valued to Arix's dark band: the
-     strip is the glass gray700, the toolbar the ground gray800, fields
-     sit between. The band's translucency law: the frame is its own
-     webview — it cannot blur the content below it — so its glass is
-     the TOKEN translucency over its own opaque ground, and the band's
-     bottom melts into the content webview's matching --bg. */
-  --frame-bg: var(--gray800);
-  --frame-surface: color-mix(in srgb, var(--gray700) var(--glass-alpha), var(--gray800));
-  --frame-field: var(--gray700);
-  --frame-field-hover: var(--gray600);
-  --frame-fg: var(--gray50);
-  --frame-fg-dim: var(--gray300);
-  --frame-hover: rgba(244, 244, 244, 0.06);
-  --frame-hover-strong: rgba(244, 244, 244, 0.12);
-  /* Chromium's strip-hover law, re-mixed on the dark strip: 40% of the
-     toolbar (gray800) over the strip (gray700). */
-  --strip-hover: color-mix(in srgb, var(--gray800) 40%, var(--gray700));
-  /* 75% of the toolbar over the strip (the multi-selected fill). */
-  --strip-selected: color-mix(in srgb, var(--gray800) 75%, var(--gray700));
-  --frame-line: rgba(66, 66, 91, 0.8);
-  --frame-accent: var(--primary);
-  --frame-accent-soft: color-mix(in srgb, var(--primary) 14%, transparent);
+  /* -- The browser shell's band (ADR-0033) ---------------------------------
+     The frame (strip, toolbar, omnibox, bookmarks) and the popup overlay
+     speak THIS palette, and it is defined here — the theme-token layer's
+     whole point: a theme change reaches the band without touching
+     frame.css or popup.css. The ladder is Chromium light: gray strip <
+     white surface (the active tab melts into the white toolbar through
+     the shared surface), fields sit between. */
+  --frame-bg: #dee1e6;
+  --frame-surface: #ffffff;
+  --frame-field: #f1f3f4;
+  --frame-field-hover: #e9ebee;
+  --frame-fg: #202124;
+  --frame-fg-dim: #5f6368;
+  --frame-hover: rgba(32, 33, 36, 0.057);
+  --frame-hover-strong: rgba(32, 33, 36, 0.1);
+  /* The STRIP's own hover: the pipeline's law, not a guess — Chromium's
+     tab_strip_color_mixer.cc paints an inactive tab's hover as
+     AlphaBlend(active bg, inactive bg, 40%), i.e. 40% of the white
+     toolbar over the #dee1e6 strip = #ebedf0, OPAQUE (a translucent
+     wash bled neighbors through the 18px overlap zone). The squarcle,
+     the rail's row hover, and every strip-ground hover consume this. */
+  --strip-hover: #ebedf0;
+  /* The multi-selection's fill: the pipeline's next answer — an
+     INACTIVE multi-selected tab paints 75% of the toolbar over the frame
+     (tab_strip_color_mixer.cc's selected law, kDefaultSelectedTabOpacity
+     = 0.75): 0.75 × #ffffff over #dee1e6 = #f7f7f7, OPAQUE (the same
+     overlap-zone law as the hover). */
+  --strip-selected: #f7f7f7;
+  --frame-line: rgba(32, 33, 36, 0.16);
+  --frame-accent: #1a73e8;
+  --frame-accent-soft: rgba(26, 115, 232, 0.1);
   --frame-accent-contrast: #ffffff;
 
-  /* The popup overlay — the glass menu: translucent gray700 + blur. */
-  --popup-bg: color-mix(in srgb, var(--gray700) calc(var(--glass-alpha) + 8%), var(--gray800));
-  --popup-line: var(--gray500);
+  /* The popup overlay (menus, the group form): white over white chrome,
+     lifted by the shadow ladder and a hairline — a floating menu reads
+     above the toolbar it covers. */
+  --popup-bg: #ffffff;
+  --popup-line: rgba(32, 33, 36, 0.12);
 
-  /* Tab groups: Chromium's nine-color enum stays (the wire format). */
-  --group-grey: #b2b2c1;
-  --group-blue: #5b8def;
-  --group-red: #e06c75;
-  --group-yellow: #e5c07b;
-  --group-green: #7ac943;
-  --group-pink: #e58fb1;
-  --group-purple: #a78bfa;
-  --group-cyan: #56b6c2;
-  --group-orange: #e8a26a;
+  /* Tab groups: Chromium's nine-color enum, verbatim (components/
+     tab_groups/tab_group_color.h order — the wire format; values from
+     chrome_color_mixer.cc's classic palette: base_light entries). The
+     frame's chip + underline consume these through the backported law
+     (ui/chromium/chromiumTabs.ts); the legacy six aliases keep the
+     content-side shim rendering until it, too, speaks the enum. */
+  --group-grey: #5f6368; /* kGoogleGrey700 */
+  --group-blue: #1a73e8; /* kGoogleBlue600 */
+  --group-red: #d93025; /* kGoogleRed600 */
+  --group-yellow: #f9ab00; /* kGoogleYellow600 */
+  --group-green: #188038; /* kGoogleGreen700 */
+  --group-pink: #d01884; /* kGooglePink700 */
+  --group-purple: #a142f4; /* kGooglePurple500 */
+  --group-cyan: #007b83; /* kGoogleCyan900 */
+  --group-orange: #fa903e; /* kGoogleOrange400 */
 
   /* Legacy aliases (the pre-port names the content shim still asks for). */
   --group-sky: var(--group-blue);
@@ -178,127 +174,18 @@
   --group-rose: var(--group-red);
   --group-violet: var(--group-purple);
   --group-slate: var(--group-grey);
-
-  /* -- The background layer (the port's own stage) --------------------
-     Arix's backgroundImage: the fixed, cover-fit layer the glass
-     surfaces blur. The --background-image var is the studio's preset
-     (an inline boot script and applyTheme both write it); "none"
-     collapses the layer to the flat ground. */
-  --background-image: url("/backgrounds/aurora.jpg");
-  /* The seam law: the layer fades IN from the top over 220px — the
-     frame band (its own webview, the same gray800 ground) and the
-     content webview's first rows agree at the seam by construction,
-     and the aurora emerges below the band like light rising. */
-  --background-fade: 220px;
-}
-
-/* -- LIGHT MODE (arix lightmode_* config, its own inverted ladder) ----
-   Switched by [data-mode="light"] on <html> — set before first paint
-   by the inline boot script and live by the studio. Surfaces stay
-   glass (translucent light grays) over the light ground. */
-:root[data-mode="light"] {
-  color-scheme: light;
-
-  --gray50: #141415;
-  --gray100: #27272c;
-  --gray200: #46464d;
-  --gray300: #626272;
-  --gray400: #757689;
-  --gray500: #a6a7bd;
-  --gray600: #c0c0d3;
-  --gray700: #e7e7ef;
-  --gray800: #f0f1f5;
-  --gray900: #ffffff;
-
-  /* text — the light ladder's darker rungs */
-  --text: var(--gray50);
-  --text-muted: var(--gray200);
-  --text-faint: var(--gray300);
-
-  /* semantics — the same hues at light-ground strength */
-  --success: #3d8f1f;
-  --warning: #a06a1a;
-  --danger: #c0392b;
-  --danger-strong: #a93226;
-  --state-running: #3d8f1f;
-  --state-starting: #a06a1a;
-  --state-stopping: #a06a1a;
-  --state-stopped: #626272;
-  --state-not-running: #757689;
-  --state-failed-preflight: #c0392b;
-  --state-crashed: #c0392b;
-  --state-adopting: #7c3aed;
-
-  /* elevation — light glass: the classic soft gray lift */
-  --shadow-s: 0 1px 2px rgba(20, 20, 21, 0.12);
-  --shadow-m: 0 1px 3px rgba(20, 20, 21, 0.16), 0 4px 10px rgba(20, 20, 21, 0.08);
-  --shadow-l: 0 2px 6px rgba(20, 20, 21, 0.2), 0 12px 32px rgba(20, 20, 21, 0.12);
-
-  --term-bg: #1a1b2e;
-
-  /* the band, light */
-  --frame-bg: var(--gray800);
-  --frame-surface: color-mix(in srgb, var(--gray700) var(--glass-alpha), var(--gray800));
-  --frame-field: var(--gray700);
-  --frame-field-hover: var(--gray600);
-  --frame-fg: var(--gray50);
-  --frame-fg-dim: var(--gray300);
-  --frame-hover: rgba(20, 20, 21, 0.05);
-  --frame-hover-strong: rgba(20, 20, 21, 0.1);
-  --strip-hover: color-mix(in srgb, var(--gray800) 40%, var(--gray700));
-  --strip-selected: color-mix(in srgb, var(--gray800) 75%, var(--gray700));
-  --frame-line: rgba(166, 167, 189, 0.5);
-  --popup-bg: color-mix(in srgb, var(--gray900) calc(var(--glass-alpha) + 8%), var(--gray700));
-  --popup-line: var(--gray500);
-
-  /* tab groups at light-ground strength */
-  --group-grey: #626272;
-  --group-blue: #1a56c4;
-  --group-red: #c0392b;
-  --group-yellow: #b8860b;
-  --group-green: #3d8f1f;
-  --group-pink: #c2186b;
-  --group-purple: #7c3aed;
-  --group-cyan: #0e7490;
-  --group-orange: #c05621;
-}
-
-/* -- GLASS OFF (the studio's backdrop switch, Arix's backdrop: false) -
-   The translucency floor goes opaque: every color-mix through
-   --glass-alpha lands solid, the blur class stands down, and the panel
-   reads as Arix with its glass disabled — the same law its config
-   flag flips. */
-:root[data-glass="off"] {
-  --glass-alpha: 100%;
 }
 
 /* -- Document reset (ADR-0033): the tab-content document owns the whole
-   webview. The ground is --boot-ground (set inline before first paint —
-   the saved theme's ground, so a webview's first pixel is the theme's
-   own, never a flash of the wrong ground). THE GROUND LAW: only HTML
-   carries the background — it propagates to the canvas, which paints
-   BELOW everything, including negative z-index layers; a background on
-   BODY TOO would paint the body box's own ground ABOVE those layers
-   (the stage vanished entirely until this law was probed into being).
-   BODY stays transparent so the stage layer behind the content shows
-   through the transparent page surfaces above it. */
-html {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  background: var(--boot-ground);
-  color: var(--text);
-  color-scheme: dark;
-}
-
+   webview. No UA margins, white from the first pixel, full-height root —
+   destination pages hang their own 100% geometry off this chain. */
+html,
 body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: transparent;
-}
-
-html[data-mode="light"] {
+  background: var(--bg);
+  color: var(--text);
   color-scheme: light;
 }
 
@@ -306,7 +193,10 @@ html[data-mode="light"] {
   height: 100%;
 }
 
-/* Reduced motion is a hard floor, not a preference token. */
+/* Reduced motion is a hard floor, not a preference token: durations go
+   to zero, loops run once, literals the tokens never reached are caught
+   by the global guard. Nothing moves forever; animations land on their
+   end state immediately. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --speed-fast: 0ms;

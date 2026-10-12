@@ -7,7 +7,7 @@
   overflow: hidden auto;
   padding: var(--space-6);
   box-sizing: border-box;
-  background: transparent;
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);

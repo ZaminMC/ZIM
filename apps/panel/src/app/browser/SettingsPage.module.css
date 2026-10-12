@@ -3,7 +3,7 @@
   overflow-y: auto;
   display: flex;
   justify-content: center;
-  background: transparent;
+  background: var(--bg);
 }
 
 .column {

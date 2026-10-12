@@ -103,6 +103,9 @@
 /* The current/allowed meters (§31): the head is the stat pair, the track
    is the allowance, the fill is the honest share of it. */
 .meter {
+  /* The Arix glass law: the stat cards compose the scope's blur class
+     (theme/arix.css). */
+  composes: backdrop from global;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);

@@ -252,7 +252,7 @@ export function AppearanceStudio() {
         />
       ) : null}
       <aside
-        className={`${styles.studio} ${open ? styles.studioOpen : ""}`}
+        className={`arix-scope ${styles.studio} ${open ? styles.studioOpen : ""}`}
         aria-label="Appearance studio"
         aria-hidden={!open}
         {...{ inert: open ? undefined : "" }}

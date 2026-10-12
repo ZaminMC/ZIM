@@ -1,191 +1,278 @@
-/* The Arix glass layer (the 2026-10-12 port): the stage and the
-   surfaces' shared physics. tokens.css mints the variables; this sheet
-   is the only place that turns them into backdrop-filter, background
-   layers, and the boot choreography. Every consumer imports it after
-   tokens.css — content documents from main.tsx, the frame's own glass
-   accents from frame.css where noted. */
+/* The Arix glass layer — SCOPED TO THE SERVER DASHBOARD (2026-10-12
+   correction). The first port re-valued the app's OWN token ladder and
+   the founder lost the tab strip to a splash whose retire rules lived
+   in a sheet the frame never imports, while every page, band, and
+   popup turned dark behind it. The correction's law: THE APP'S FACE IS
+   THE OFFICIAL WHITE THEME (tokens.css, untouched since); the Arix
+   dashboard is a SCOPE — one class on the server view's page band
+   re-values ZIM's token NAMES through Arix's design system
+   (config/arix.php's gray ladder, primary, radiusBox/radiusInput, the
+   glass law) inside that subtree only. Nothing outside the scope knows
+   the theme exists; the frame band, the new tab page, the fleet, the
+   popups, and the settings pages render exactly as they did before the
+   port. The customization studio rides the same scope (it edits this
+   material, so it wears it).
 
-/* -- The background layer (Arix's backgroundImage) ---------------------
-   Fixed behind everything in THIS document, cover-fit, fading in from
-   the top by --background-fade so the frame band's ground and the
-   content's first rows agree at the seam (the frame is its own webview
-   painting the same gray800; the aurora rises below it).
+   THE PLUMBING LAW: the Arix dialect variables (--primary, the gray
+   ladder, --glass-opacity/--glass-blur, --radius-box/--radius-input,
+   --background-image) live on :root HERE with Arix's defaults; the
+   theme store (state/theme.ts) overrides them live as inline styles on
+   <html>, which cascade INTO the scope because the scope never
+   redefines them — a change anywhere reaches every open dashboard in
+   the same beat (shell://theme broadcast). The scope re-values only
+   ZIM's consumer names (--bg, --surface, --text…), always THROUGH the
+   dialect variables, so a mode flip re-values the ladder once and
+   every scoped surface follows. */
 
-   THE STACKING LAW (found by probe, 2026-10-12): z-index -1 works ONLY
-   because the ground law above keeps BODY transparent — a body box
-   background would paint above this layer and swallow it whole. At
-   -1 the stage rides below all content, above the canvas ground. */
-.arix-bg {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: var(--bg);
+/* -- The Arix dialect (defaults; the store overrides these live) ----- */
+:root {
+  --primary: #4a35cf; /* arix primary — the studio's --primary */
+  --glass-opacity: 80%; /* arix backdropPercentage */
+  --glass-blur: 16px; /* arix's fixed blur */
+  --glass-alpha: var(--glass-opacity);
+  --radius-box: 10px; /* arix radiusBox */
+  --radius-input: 7px; /* arix radiusInput */
+
+  /* Arix's gray ladder (config/arix.php) — gray800 is the ground,
+     gray700 every card, gray600 hover, gray500 the hairline. THE GLASS
+     LAW (wrapper.blade.php): a surface is its gray color-mixed with
+     itself at --glass-opacity against transparent; --glass (the
+     studio's backdrop switch) sets the translucency's floor. */
+  --gray50: #f4f4f4;
+  --gray100: #d5d5db;
+  --gray200: #b2b2c1;
+  --gray300: #8282a4;
+  --gray400: #5e5e7f;
+  --gray500: #42425b;
+  --gray600: #2b2b40;
+  --gray700: #1d1d37;
+  --gray800: #0b0d2a;
+  --gray900: #040519;
+
+  --background-image: url("/backgrounds/aurora.jpg");
 }
 
-.arix-bg::after {
+/* -- LIGHT MODE (arix lightmode_* config, its own inverted ladder) ----
+   Flipped by [data-mode="light"] on <html> — set by the theme store at
+   boot and live by the studio. Only the ladder and the image flip
+   here; every scoped token below reads them and follows. */
+:root[data-mode="light"] {
+  --gray50: #141415;
+  --gray100: #27272c;
+  --gray200: #46464d;
+  --gray300: #626272;
+  --gray400: #757689;
+  --gray500: #a6a7bd;
+  --gray600: #c0c0d3;
+  --gray700: #e7e7ef;
+  --gray800: #f0f1f5;
+  --gray900: #ffffff;
+
+  --background-image: url("/backgrounds/aurora-light.jpg");
+}
+
+/* -- GLASS OFF (the studio's backdrop switch, arix backdrop: false) ---
+   The translucency floor goes opaque: every color-mix through
+   --glass-alpha lands solid and the blur class stands down. */
+:root[data-glass="off"] {
+  --glass-alpha: 100%;
+}
+
+/* -- THE SCOPE — ZIM's token names re-valued through Arix's system ----
+   Mounted on the server view's page band (App.tsx) and on the studio's
+   root (AppearanceStudio). Everything a dashboard sheet already asks
+   for — var(--surface), var(--text), var(--border)… — resolves to the
+   Arix value inside this subtree and to the official white theme
+   everywhere else. One layer, no per-sheet surgery, nothing cursed. */
+.arix-scope {
+  color-scheme: dark;
+  /* THE INHERITED-COLOR LAW: the document's reset sets html's color
+     ONCE (outside the scope, with the global white theme's dark text)
+     and that paint INHERITS down — a scope that only re-values the
+     variable changes nothing for every heading that merely inherits.
+     The scope therefore re-states the color itself, resolved against
+     its OWN --text: un-styled titles inside the dashboard read light
+     on the dark glass, the way every explicit var(--text) consumer
+     already does. */
+  color: var(--text);
+
+  /* surfaces — the glass law */
+  --bg: var(--gray800);
+  --surface: color-mix(in srgb, var(--gray700) var(--glass-alpha), transparent);
+  --surface-2: color-mix(in srgb, var(--gray600) var(--glass-alpha), transparent);
+  --surface-3: color-mix(in srgb, var(--gray500) var(--glass-alpha), transparent);
+  --surface-4: color-mix(in srgb, var(--gray500) calc(var(--glass-alpha) + 10%), transparent);
+  --surface-raised: var(--surface-2);
+  --border: var(--gray500);
+  --border-strong: var(--gray400);
+
+  /* text — Arix's own contrast pairs on the dark ground */
+  --text: var(--gray50);
+  --text-muted: var(--gray200);
+  --text-faint: var(--gray300);
+
+  /* brand + semantics — the primary ladder Arix derives */
+  --accent: var(--primary);
+  --accent-strong: color-mix(in srgb, var(--primary) 85%, black);
+  --accent-soft: color-mix(in srgb, var(--primary) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--primary) 45%, transparent);
+  --accent-contrast: #ffffff;
+  --accent-2: color-mix(in srgb, var(--primary) 60%, var(--gray200));
+  --accent-3: color-mix(in srgb, var(--primary) 30%, var(--gray200));
+  --success: #56aa2b;
+  --success-soft: color-mix(in srgb, #56aa2b 14%, transparent);
+  --success-border: color-mix(in srgb, #56aa2b 45%, transparent);
+  --warning: #d0a03a;
+  --warning-soft: color-mix(in srgb, #d0a03a 14%, transparent);
+  --warning-border: color-mix(in srgb, #d0a03a 45%, transparent);
+  --danger: #d9534f;
+  --danger-strong: #c53030;
+  --danger-soft: color-mix(in srgb, #d9534f 12%, transparent);
+  --danger-border: color-mix(in srgb, #d9534f 45%, transparent);
+
+  /* state colors (ADR-0005 lifecycle) — legible on the dark ground */
+  --state-running: #7ac943;
+  --state-starting: #d0a03a;
+  --state-stopping: #d0a03a;
+  --state-stopped: var(--gray200);
+  --state-not-running: var(--gray300);
+  --state-failed-preflight: #d9534f;
+  --state-crashed: #d9534f;
+  --state-adopting: #a78bfa;
+  --state-unknown: var(--gray300);
+
+  /* geometry — Arix's radius knobs (the studio's sliders) */
+  --radius-s: var(--radius-input);
+  --radius-m: var(--radius-input);
+  --radius-l: var(--radius-box);
+  --radius: var(--radius-m);
+
+  /* elevation — dark glass: depth reads as soft black lift, never glow */
+  --shadow-s: 0 1px 2px rgba(4, 5, 25, 0.4);
+  --shadow-m: 0 2px 6px rgba(4, 5, 25, 0.45), 0 8px 24px rgba(4, 5, 25, 0.3);
+  --shadow-l: 0 4px 12px rgba(4, 5, 25, 0.5), 0 16px 48px rgba(4, 5, 25, 0.35);
+
+  /* terminal (xterm surface) — the domain's own dark canvas */
+  --term-bg: #101225;
+}
+
+/* The scope's light literals (the ladder flips itself above; these are
+   the values that could not be derived) — Arix's lightmode set. */
+html[data-mode="light"] .arix-scope {
+  color-scheme: light;
+
+  --success: #3d8f1f;
+  --warning: #a06a1a;
+  --danger: #c0392b;
+  --danger-strong: #a93226;
+  --state-running: #3d8f1f;
+  --state-starting: #a06a1a;
+  --state-stopping: #a06a1a;
+  --state-stopped: #626272;
+  --state-not-running: #757689;
+  --state-failed-preflight: #c0392b;
+  --state-crashed: #c0392b;
+  --state-adopting: #7c3aed;
+
+  --shadow-s: 0 1px 2px rgba(20, 20, 21, 0.12);
+  --shadow-m: 0 1px 3px rgba(20, 20, 21, 0.16), 0 4px 10px rgba(20, 20, 21, 0.08);
+  --shadow-l: 0 2px 6px rgba(20, 20, 21, 0.2), 0 12px 32px rgba(20, 20, 21, 0.12);
+
+  --term-bg: #1a1b2e;
+}
+
+/* -- THE STAGE — the background layer, mounted with the scope on the
+   dashboard's page band only. The band paints the GROUND itself
+   (var(--bg), re-valued by the scope — the Flat preset and a failed
+   image load still hold the theme's own dark canvas, never the white
+   document behind); the pseudo-element rides a stacking context ABOVE
+   that ground and BELOW every child (Appendix E: negative z-index
+   children paint after the element's own background, before its
+   content) — the preset image the glass surfaces blur. z-index: 0 on
+   the positioned band is what makes the law hold: without it the -1
+   child escapes to an ancestor's context and vanishes under the
+   ground. */
+.arix-stage {
+  position: relative;
+  z-index: 0;
+  background-color: var(--bg);
+}
+
+.arix-stage::before {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image: var(--background-image);
   background-size: cover;
   background-position: center;
-  opacity: 0;
-  transition: opacity var(--speed-slow) var(--ease);
 }
 
-/* The image rides the fade: invisible in the seam band, fully present
-   below it — one gradient mask instead of two stacked layers fighting. */
-@supports (mask-image: linear-gradient(to bottom, transparent, black)) {
-  .arix-bg::after {
-    opacity: 1;
-    mask-image: linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent var(--background-fade),
-      black calc(var(--background-fade) + 240px)
-    );
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent var(--background-fade),
-      black calc(var(--background-fade) + 240px)
-    );
-  }
+/* The flat preset: the store writes --background-image: none; this
+   rule keeps a stale attribute from resurrecting the layer. */
+html[data-background="none"] .arix-stage::before {
+  display: none;
 }
 
-:root[data-background="none"] .arix-bg::after {
-  opacity: 0;
-}
-
-/* -- The glass surface (Arix's .backdrop law) ---------------------------
+/* -- The glass surface (Arix's .backdrop law) --------------------------
    Arix's rule verbatim in spirit: backdrop-filter blur(16px) behind a
-   translucent surface. ZIM's surfaces already carry the translucency
-   through the --surface token (color-mix at --glass-opacity), so this
-   class is ONLY the blur + a gentle saturation lift — borders stay the
-   modules' own. Glass off stands the blur down. */
-.backdrop {
+   translucent surface. The scoped surfaces already carry the
+   translucency through the --surface tokens; this class is ONLY the
+   blur + a gentle saturation lift. Dashboard sheets compose it onto
+   their major cards (`composes: backdrop from global`); the presets
+   are soft ambient washes, so the cards that skip it still read as
+   glass. Glass off stands the blur down. */
+.arix-scope .backdrop {
   backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
 }
 
-:root[data-glass="off"] .backdrop {
+html[data-glass="off"] .arix-scope .backdrop {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
-/* -- Scrollbars (Arix's quiet dark rails) ------------------------------- */
-::-webkit-scrollbar {
+/* -- Scrollbars (Arix's quiet rails) — inside the scope only --------- */
+.arix-scope ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-::-webkit-scrollbar-thumb {
+.arix-scope ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--gray400) 70%, transparent);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.arix-scope ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--gray300) 70%, transparent);
   background-clip: padding-box;
 }
 
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
+.arix-scope ::-webkit-scrollbar-track,
+.arix-scope ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* -- The boot splash (the premium first beat) ---------------------------
-   Static markup inside every document's html — painted by the inline
-   critical CSS the moment the document exists, replaced by the app's
-   first commit. main.tsx adds .boot-done; the splash fades, never pops. */
-.boot-splash {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  background: var(--boot-ground, #0b0d2a);
-  color: var(--text, #f4f4f4);
-  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-  transition:
-    opacity 320ms cubic-bezier(0.2, 0.6, 0.2, 1),
-    transform 320ms cubic-bezier(0.2, 0.6, 0.2, 1);
+/* -- Selection on the dark ground — inside the scope only ------------- */
+.arix-scope ::selection {
+  background: color-mix(in srgb, var(--primary) 40%, transparent);
+  color: var(--gray50);
 }
 
-.boot-splash.boot-done {
-  opacity: 0;
-  transform: scale(1.015);
-  pointer-events: none;
-}
-
-.boot-splash.boot-gone {
-  display: none;
-}
-
-.boot-splash svg {
-  width: 44px;
-  height: 44px;
-}
-
-.boot-splash .boot-word {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.42em;
-  text-indent: 0.42em; /* optical centering against the tracking */
-  color: var(--text-muted, #b2b2c1);
-  text-transform: uppercase;
-}
-
-.boot-splash .boot-line {
-  position: relative;
-  width: 148px;
-  height: 2px;
-  border-radius: 1px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--gray500, #42425b) 80%, transparent);
-}
-
-.boot-splash .boot-line::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 40%;
-  border-radius: 1px;
-  background: var(--primary, #4a35cf);
-  animation: boot-slide 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-@keyframes boot-slide {
-  0% {
-    transform: translateX(-110%);
-  }
-  100% {
-    transform: translateX(260%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .boot-splash .boot-line::after {
-    animation: none;
-    transform: translateX(-110%);
-  }
-
-  .boot-splash {
-    transition: opacity 1ms;
-  }
+html[data-mode="light"] .arix-scope ::selection {
+  color: var(--gray900);
 }
 
 /* -- The page entrance (the smooth load the founder asked for) ----------
    The destination band rises four pixels and fades in over the
    splash-adjacent beat — short enough to read as polish, long enough
    to feel. Paint holding stays intact: the animation starts from
-   opacity .01, so the first committed frame is present, never blank. */
+   opacity .01, so the first committed frame is present, never blank.
+   This is the one global rule the sheet keeps: it changes no color,
+   only the beat a page arrives on. */
 .page-enter {
   animation: page-rise var(--speed-slow, 280ms) var(--ease) both;
 }
@@ -205,14 +292,4 @@
   .page-enter {
     animation: none;
   }
-}
-
-/* -- Selection + focus ring on the dark ground ------------------------- */
-::selection {
-  background: color-mix(in srgb, var(--primary) 40%, transparent);
-  color: var(--gray50);
-}
-
-:root[data-mode="light"] ::selection {
-  color: var(--gray900);
 }

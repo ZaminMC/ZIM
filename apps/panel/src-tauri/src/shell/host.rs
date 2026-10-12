@@ -779,18 +779,17 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     // The active tab's webview is created lazily (WebContents born on
     // first focus — a restored session's inactive tabs stay cold).
-    // The webview's own background is the THEME GROUND (the Arix port's
-    // law, 2026-10-12): a booting page paints the theme's own dark
-    // ground — #0b0d2a, gray800 — never paper, never the window's raw
-    // surface. The inline boot script in index.html takes over from
-    // the first document paint; this color owns the beat before it,
-    // which is exactly the half-frame flash the founder filed.
+    // The webview's own background is WHITE (Chromium's blank paint —
+    // the first composited frame of a new tab): a booting page flashes
+    // paper, never the window's raw surface. (The Arix port was rolled
+    // back to the dashboard's own scope, 2026-10-12: the shell's chrome
+    // wears the official white theme again.)
     if let Some((id, destination, reload)) = create_tab {
         let label = tab_label(window_label, id);
         host_window
             .add_child(
                 tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into()))
-                    .background_color(tauri::utils::config::Color(11, 13, 42, 255)),
+                    .background_color(tauri::utils::config::Color(255, 255, 255, 255)),
                 content_pos,
                 content_bounds.size,
             )
@@ -2577,10 +2576,9 @@ fn spawn_tearoff_block(
     let window = tauri::window::WindowBuilder::new(app, &label)
         .decorations(false)
         .inner_size(1100.0, 720.0)
-        // The tear-off's raw surface is the THEME GROUND (the Arix
-        // port): a booting webview flashes the theme's own dark ground,
-        // never paper, never the void.
-        .background_color(tauri::utils::config::Color(11, 13, 42, 255))
+        // The tear-off's raw surface is the strip gray, not black —
+        // booting webviews flash paper and chrome, never the void.
+        .background_color(tauri::utils::config::Color(222, 225, 230, 255))
         .build()
         .map_err(|e| format!("tear-off window failed: {e}"))?;
     let _ = window.set_position(LogicalPosition::new(
@@ -2593,7 +2591,7 @@ fn spawn_tearoff_block(
                 frame_label(&label),
                 WebviewUrl::App("frame.html".into()),
             )
-            .background_color(tauri::utils::config::Color(11, 13, 42, 255)),
+            .background_color(tauri::utils::config::Color(222, 225, 230, 255)),
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(1100.0, 83.0),
         )

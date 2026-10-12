@@ -54,7 +54,7 @@
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
-  background: var(--surface);
+  background: var(--bg);
   overflow: auto;
   max-height: 40vh;
   font-family: var(--font-mono);

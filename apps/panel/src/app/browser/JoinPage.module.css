@@ -8,7 +8,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: var(--bg);
 }
 
 .card {
@@ -48,7 +48,7 @@
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
-  background: transparent;
+  background: var(--bg);
 }
 
 .facts dt {

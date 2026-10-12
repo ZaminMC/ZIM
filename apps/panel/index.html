@@ -4,61 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ZIM</title>
-    <!-- THE THEME BOOT (before first paint, no flash): the saved theme's
-         ground and its customization variables land on <html> the moment
-         this document exists, so a webview's first pixel is the theme's
-         own — never a beat of the wrong ground. applyTheme (state/theme)
-         re-states the same values when the app takes over; the inline
-         pass exists because React boots after paint. -->
-    <script>
-      (function () {
-        var d = document.documentElement;
-        try {
-          var raw = localStorage.getItem("zim.theme.v1");
-          var t = raw ? JSON.parse(raw) : {};
-          d.dataset.mode = t.mode === "light" ? "light" : "dark";
-          if (typeof t.glass === "boolean") d.dataset.glass = t.glass ? "on" : "off";
-          if (typeof t.background === "string") d.dataset.background = t.background;
-          if (typeof t.primary === "string" && /^#[0-9a-fA-F]{6}$/.test(t.primary))
-            d.style.setProperty("--primary", t.primary);
-          var num = function (v, min, max) {
-            var n = Number(v);
-            return isFinite(n) ? Math.min(max, Math.max(min, n)) : null;
-          };
-          var op = num(t.glassOpacity, 40, 100);
-          if (op !== null) d.style.setProperty("--glass-opacity", op + "%");
-          var bl = num(t.glassBlur, 0, 40);
-          if (bl !== null) d.style.setProperty("--glass-blur", bl + "px");
-          var rb = num(t.radiusBox, 0, 24);
-          if (rb !== null) d.style.setProperty("--radius-box", rb + "px");
-          var ri = num(t.radiusInput, 0, 16);
-          if (ri !== null) d.style.setProperty("--radius-input", ri + "px");
-          var base = {
-            aurora: "/backgrounds/aurora",
-            mesh: "/backgrounds/mesh",
-            ribbon: "/backgrounds/ribbon",
-          }[t.background];
-          d.style.setProperty(
-            "--background-image",
-            base
-              ? 'url("' + base + (t.mode === "light" ? "-light" : "") + '.jpg")'
-              : "none",
-          );
-        } catch (e) {
-          d.dataset.mode = "dark";
-        }
-        d.style.setProperty(
-          "--boot-ground",
-          d.dataset.mode === "light" ? "#f0f1f5" : "#0b0d2a",
-        );
-      })();
-    </script>
-    <!-- The splash's critical paint rides inline CSS (dev-mode CSS lands
-         via JS, too late for the first frame) — arix.css owns the rest. -->
+    <!-- White before the CSS lands (the official theme): a tab
+         webview's first paint is the page's canvas color, and a flash
+         of any other ground reads as a glitch. -->
+    <style>html { background: #ffffff; }</style>
+    <!-- THE SPLASH (the premium first beat the founder asked for): the
+         boot splash stands over the app's own WHITE ground until the
+         app's first commit, then cross-fades away. Every rule it needs
+         — including the fade classes main.tsx drives — lives HERE,
+         inline, in this document: a splash whose retirement depends on
+         a stylesheet that may never load is exactly how the frame band
+         was lost (2026-10-12), and that class of bug dies here. -->
     <style>
-      html {
-        background: var(--boot-ground, #0b0d2a);
-      }
       .boot-splash {
         position: fixed;
         inset: 0;
@@ -68,8 +25,8 @@
         align-items: center;
         justify-content: center;
         gap: 18px;
-        background: var(--boot-ground, #0b0d2a);
-        color: var(--text, #f4f4f4);
+        background: #ffffff;
+        color: #202124;
         font-family: "Inter", "Segoe UI", system-ui, sans-serif;
       }
       .boot-splash svg {
@@ -81,7 +38,7 @@
         font-weight: 600;
         letter-spacing: 0.42em;
         text-indent: 0.42em;
-        color: var(--text-muted, #b2b2c1);
+        color: #5f6368;
         text-transform: uppercase;
       }
       .boot-splash .boot-line {
@@ -90,7 +47,7 @@
         height: 2px;
         border-radius: 1px;
         overflow: hidden;
-        background: rgba(128, 130, 164, 0.4);
+        background: rgba(95, 99, 104, 0.25);
       }
       .boot-splash .boot-line::after {
         content: "";
@@ -98,7 +55,7 @@
         inset: 0;
         width: 40%;
         border-radius: 1px;
-        background: var(--primary, #4a35cf);
+        background: #1a73e8;
         animation: boot-slide 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
       }
       @keyframes boot-slide {
@@ -109,16 +66,30 @@
           transform: translateX(260%);
         }
       }
+      /* The retirement lanes (main.tsx adds the classes after the app's
+         first commit): a fade, never a pop — then the node leaves the
+         tree entirely. Both selectors are written so whichever element
+         carries the class, the law holds. */
+      .boot-splash.boot-done {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.32s ease;
+      }
+      #boot.boot-gone,
+      .boot-splash.boot-gone {
+        display: none;
+      }
       @media (prefers-reduced-motion: reduce) {
         .boot-splash .boot-line::after {
           animation: none;
+        }
+        .boot-splash.boot-done {
+          transition: none;
         }
       }
     </style>
   </head>
   <body>
-    <!-- The premium first beat: the theme-grounded splash stands until the
-         app's first commit, then fades (main.tsx drives the classes). -->
     <div id="boot" aria-hidden="true">
       <div class="boot-splash">
         <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -128,12 +99,12 @@
             width="38"
             height="38"
             rx="9"
-            stroke="rgba(178,178,193,0.35)"
+            stroke="rgba(32,33,36,0.22)"
             stroke-width="2"
           />
           <path
             d="M17.5 19h13l-13 10h13"
-            stroke="var(--primary, #4a35cf)"
+            stroke="#1a73e8"
             stroke-width="2.6"
             stroke-linecap="round"
             stroke-linejoin="round"

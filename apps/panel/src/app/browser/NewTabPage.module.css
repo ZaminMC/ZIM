@@ -3,10 +3,11 @@
   overflow-y: auto;
   display: flex;
   justify-content: center;
-  /* The Arix port: the NTP rides the stage — the page is transparent
-     so the background layer and the glass input carry the theme. */
-  background: transparent;
-  position: relative;
+  /* Flat white — Chrome's NTP ground. No glow, no wash: the page's
+     quietness IS the design. (The Arix port was rolled back to the
+     dashboard's own scope, 2026-10-12 — the NTP is the official white
+     theme again; only the studio trigger below remains.) */
+  background: var(--bg);
 }
 
 .center {
@@ -37,22 +38,13 @@
   padding: 0 var(--space-5);
   border: 1px solid var(--border);
   border-radius: 999px;
-  /* The Arix glass field: translucent surface over the stage, blurred
-     by the glass law (.backdrop from the theme layer). */
   background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 15px;
   outline: none;
   box-shadow: var(--shadow-s);
   transition: border-color var(--speed-fast) var(--ease), box-shadow var(--speed-fast) var(--ease);
-}
-
-:root[data-glass="off"] .input {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .input:focus {
@@ -167,13 +159,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
   background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-}
-
-:root[data-glass="off"] .machine {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 .machine[role="alert"] {
@@ -211,11 +196,13 @@
   color: var(--text-muted);
 }
 
-/* -- The Appearance Studio's trigger (the Arix theme port) ------------
-   The new tab's bottom-right icon — Arix's floating button law
-   (arix.css's .floating-button-2: rgba glass + blur(16px), sticky at
-   the corner), the door into the customization sidebar. It sits fixed
-   so it never scrolls away, quiet until hovered. */
+/* -- The Appearance Studio's trigger (the customization port) ---------
+   The new tab's bottom-right icon — the door into the customization
+   sidebar, the founder's explicit ask. SELF-CONTAINED BY LAW: the NTP
+   is the official white theme, so this button speaks only the app's
+   own tokens — no Arix dialect dependency, no glass-blur var — it is
+   a native floating action button (a quiet surface, the app's accent
+   on hover), fixed at the corner so it never scrolls away. */
 .studioTrigger {
   position: fixed;
   right: 20px;
@@ -227,10 +214,8 @@
   width: 40px;
   height: 40px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-box);
+  border-radius: 12px;
   background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
   color: var(--text-muted);
   cursor: pointer;
   box-shadow: var(--shadow-m);
@@ -249,11 +234,6 @@
 .studioTrigger:focus-visible {
   outline: 2px solid var(--accent-border);
   outline-offset: 3px;
-}
-
-:root[data-glass="off"] .studioTrigger {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
