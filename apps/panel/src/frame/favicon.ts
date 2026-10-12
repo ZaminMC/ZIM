@@ -35,12 +35,16 @@ export interface FaviconEntry {
   software: SoftwareKey;
   state: ServerState;
   severity: ConsoleSeverity;
-  /** The registry's display name and port (the summaries carry both) —
-   *  the projection the omnibox's suggestions read. A server registered
-   *  after the boot list arrives nameless and is named by its
-   *  server.get fetch. */
+  /** The registry's display name, port, and bind (the summaries carry
+   *  all three) — the projection the omnibox's suggestions AND the
+   *  commit door's port resolution read. A server registered after the
+   *  boot list arrives nameless and is named by its server.get fetch. */
   name?: string;
   port?: number;
+  /** server.properties' server-ip: "" / undefined = all interfaces; a
+   *  specific value must equal the typed host for the address to
+   *  resolve (resolveJoin's bind law, §13–§14). */
+  bind?: string;
 }
 
 interface FaviconState {
@@ -86,12 +90,14 @@ export function fleetBrief(state: FaviconState): Array<{
   display_name: string;
   state: string;
   port?: number;
+  bind_address?: string | null;
 }> {
   return Object.entries(state.servers).map(([serverId, entry]) => ({
     server_id: serverId,
     display_name: entry.name ?? serverId,
     state: entry.state,
     ...(entry.port != null ? { port: entry.port } : {}),
+    ...(entry.bind != null ? { bind_address: entry.bind } : {}),
   }));
 }
 
@@ -220,7 +226,7 @@ function foldState(
   serverId: string,
   state: ServerState,
   clientRef: ProtocolClient,
-  brief?: { name?: string; port?: number },
+  brief?: { name?: string; port?: number; bind?: string },
 ): void {
   useFavicons.setState((s) => {
     const existing = s.servers[serverId];
@@ -234,6 +240,7 @@ function foldState(
             ...existing,
             ...(brief?.name != null ? { name: brief.name } : {}),
             ...(brief?.port != null ? { port: brief.port } : {}),
+            ...(brief?.bind != null ? { bind: brief.bind } : {}),
           },
         },
       };
@@ -247,6 +254,7 @@ function foldState(
           severity: "none",
           ...(brief?.name != null ? { name: brief.name } : {}),
           ...(brief?.port != null ? { port: brief.port } : {}),
+          ...(brief?.bind != null ? { bind: brief.bind } : {}),
         },
       },
     };
@@ -259,6 +267,7 @@ function foldState(
         state: ServerState;
         displayName?: string;
         port?: number;
+        bindAddress?: string;
       }>("server.get", { serverId })
       .then((details) => {
         useFavicons.setState((s) => {
@@ -272,6 +281,7 @@ function foldState(
                 software: softwareKey(details.software),
                 ...(details.displayName != null ? { name: details.displayName } : {}),
                 ...(details.port != null ? { port: details.port } : {}),
+                ...(details.bindAddress != null ? { bind: details.bindAddress } : {}),
               },
             },
           };
@@ -320,12 +330,14 @@ export function startFaviconLane(): void {
           state: ServerState;
           displayName?: string;
           port?: number;
+          bindAddress?: string;
         }>;
       }>("server.list");
       for (const server of list.servers) {
         foldState(server.serverId, server.state, laneClient, {
           name: server.displayName,
           port: server.port,
+          bind: server.bindAddress,
         });
       }
     } catch (error: unknown) {

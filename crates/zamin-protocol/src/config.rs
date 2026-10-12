@@ -315,8 +315,11 @@ pub struct NetworkStatusResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port_available: Option<bool>,
     /// Other registered servers whose desired port equals this server's
-    /// desired port. Self never appears here.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// desired port. Self never appears here. Always serialized — an
+    /// EMPTY list is real state ("checked, none found"), and omitting it
+    /// made honest consumers crash on `conflicts.length` (the empty list
+    /// is never noise).
+    #[serde(default)]
     pub conflicts: Vec<String>,
 }
 

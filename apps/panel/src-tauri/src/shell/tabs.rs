@@ -28,6 +28,68 @@ use std::collections::{BTreeSet, HashMap};
 pub type TabId = u32;
 pub type GroupId = u32;
 
+/// The addressable pages of a server's dashboard — the Rust twin of
+/// state/destinations.ts's `SERVER_PAGES` (the closed set the sidebar
+/// speaks, §8–§12's URL model): `host:port/<page>` is the visible
+/// address of each; the dashboard root (`host:port`) carries none. The
+/// wire words are camelCase single words, identical on both sides of
+/// the seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerPage {
+    Console,
+    Metrics,
+    Logs,
+    Files,
+    Players,
+    Plugins,
+    Schedules,
+    Network,
+    Startup,
+    Settings,
+    Backups,
+}
+
+impl ServerPage {
+    /// The word a URL carries (`console`, `files`, …). The identity of
+    /// `serde`'s camelCase spelling, said once, in the place that owns
+    /// the law.
+    pub fn word(&self) -> &'static str {
+        match self {
+            ServerPage::Console => "console",
+            ServerPage::Metrics => "metrics",
+            ServerPage::Logs => "logs",
+            ServerPage::Files => "files",
+            ServerPage::Players => "players",
+            ServerPage::Plugins => "plugins",
+            ServerPage::Schedules => "schedules",
+            ServerPage::Network => "network",
+            ServerPage::Startup => "startup",
+            ServerPage::Settings => "settings",
+            ServerPage::Backups => "backups",
+        }
+    }
+
+    /// The inverse: a URL's page word, or `None` when it names no page
+    /// (the caller answers honestly — never a silent dashboard).
+    pub fn from_word(word: &str) -> Option<ServerPage> {
+        Some(match word {
+            "console" => ServerPage::Console,
+            "metrics" => ServerPage::Metrics,
+            "logs" => ServerPage::Logs,
+            "files" => ServerPage::Files,
+            "players" => ServerPage::Players,
+            "plugins" => ServerPage::Plugins,
+            "schedules" => ServerPage::Schedules,
+            "network" => ServerPage::Network,
+            "startup" => ServerPage::Startup,
+            "settings" => ServerPage::Settings,
+            "backups" => ServerPage::Backups,
+            _ => return None,
+        })
+    }
+}
+
 /// The closed set of places a tab can show (§58) — the Rust twin of
 /// state/destinations.ts. `zim://` URLs canonicalize through
 /// [`Destination::url`] / [`Destination::parse`].
@@ -54,6 +116,22 @@ pub enum Destination {
     Server {
         #[serde(rename = "serverId", alias = "server_id")]
         server_id: String,
+        /// The URL-addressed page (`host:port/<page>`, §8–§12): `None` =
+        /// the dashboard root. Pages are HISTORY — one tab per server
+        /// (§61), the page rides the history stack, not the identity.
+        /// Skipped when absent: the seam's older spellings (sessions,
+        /// bookmarks, the TS optional fields) never see a null key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        page: Option<ServerPage>,
+        /// The files page's addressed path (`host:port/files/eula.txt`)
+        /// — server-root-relative. Only meaningful with the Files page.
+        #[serde(
+            rename = "filePath",
+            alias = "file_path",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        file_path: Option<String>,
     },
     Console {
         #[serde(rename = "serverId", alias = "server_id")]
@@ -93,7 +171,28 @@ impl Destination {
             Destination::Feedback => "zim://feedback/".into(),
             Destination::Extensions => "zim://extensions/".into(),
             Destination::Downloads => "zim://downloads/".into(),
-            Destination::Server { server_id } => format!("zim://server/{server_id}"),
+            Destination::Server {
+                server_id,
+                page,
+                file_path,
+            } => {
+                let mut url = format!("zim://server/{server_id}");
+                if let Some(page) = page {
+                    url.push('/');
+                    url.push_str(page.word());
+                    if *page == ServerPage::Files {
+                        if let Some(path) = file_path {
+                            let clean: Vec<&str> =
+                                path.split('/').filter(|seg| !seg.is_empty()).collect();
+                            if !clean.is_empty() {
+                                url.push('/');
+                                url.push_str(&clean.join("/"));
+                            }
+                        }
+                    }
+                }
+                url
+            }
             Destination::Console { server_id } => format!("zim://console/{server_id}"),
             Destination::Join { host, port } => {
                 format!("zim://join/{}:{port}", host.clone().unwrap_or_default())
@@ -126,9 +225,45 @@ impl Destination {
             "feedback" => Destination::Feedback,
             "extensions" => Destination::Extensions,
             "downloads" => Destination::Downloads,
-            "server" if !arg.is_empty() => Destination::Server {
-                server_id: arg.into(),
-            },
+            "server" if !arg.is_empty() => {
+                // zim://server/{id}[/{page}[/{file…}]] — the internal
+                // spelling of the server-page model. The id is the first
+                // segment; the rest is the page dialect the visible
+                // addresses carry. A page word outside the vocabulary
+                // falls to the honest Missing, never a silent dashboard.
+                let segments: Vec<&str> = arg.split('/').filter(|seg| !seg.is_empty()).collect();
+                let Some((first, rest)) = segments.split_first() else {
+                    return Destination::Missing {
+                        url: text.to_owned(),
+                    };
+                };
+                let server_id = (*first).to_owned();
+                if rest.is_empty() {
+                    return Destination::Server {
+                        server_id,
+                        page: None,
+                        file_path: None,
+                    };
+                }
+                let page_word = rest[0];
+                match ServerPage::from_word(page_word) {
+                    Some(ServerPage::Files) if rest.len() > 1 => Destination::Server {
+                        server_id,
+                        page: Some(ServerPage::Files),
+                        file_path: Some(rest[1..].join("/")),
+                    },
+                    Some(page) if rest.len() == 1 => Destination::Server {
+                        server_id,
+                        page: Some(page),
+                        file_path: None,
+                    },
+                    // A file path under a non-files page, or a trailing
+                    // tail the model does not spell: not this URL.
+                    _ => Destination::Missing {
+                        url: text.to_owned(),
+                    },
+                }
+            }
             "console" if !arg.is_empty() => Destination::Console {
                 server_id: arg.into(),
             },
@@ -165,7 +300,17 @@ impl Destination {
             Destination::New => "New tab".into(),
             Destination::DevTools => "Developer tools".into(),
             Destination::Servers => "Fleet".into(),
-            Destination::Server { server_id } => format!("Server {server_id}"),
+            Destination::Server {
+                server_id,
+                page,
+                file_path: _,
+            } => match page {
+                // The page rides the label the way a browser tab carries
+                // its page title: the server stays the identity, the page
+                // says where in the workspace the tab rests.
+                Some(page) => format!("Server {server_id} — {}", page.word()),
+                None => format!("Server {server_id}"),
+            },
             Destination::Console { server_id } => format!("Console {server_id}"),
             Destination::Join { host, port } => match host {
                 Some(host) => format!("Join {host}:{port}"),
@@ -1252,6 +1397,8 @@ mod tests {
     fn the_wire_spells_fields_camelcase_matching_the_ts_types() {
         let server = Destination::Server {
             server_id: "survival".into(),
+            page: None,
+            file_path: None,
         };
         assert_eq!(
             serde_json::to_string(&server).unwrap(),
@@ -1283,7 +1430,9 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Destination>(ts_shape).unwrap(),
             Destination::Server {
-                server_id: "survival".into()
+                server_id: "survival".into(),
+                page: None,
+                file_path: None,
             }
         );
         let ts_console = r#"{"kind":"console","serverId":"hub"}"#;
@@ -1303,7 +1452,9 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Destination>(old_shape).unwrap(),
             Destination::Server {
-                server_id: "survival".into()
+                server_id: "survival".into(),
+                page: None,
+                file_path: None,
             }
         );
     }
@@ -1537,6 +1688,8 @@ mod tests {
         let a = strip.append(
             Destination::Server {
                 server_id: "s1".into(),
+                page: None,
+                file_path: None,
             },
             true,
         );
@@ -1868,6 +2021,8 @@ mod tests {
     fn url_roundtrip() {
         let d = Destination::Server {
             server_id: "abc".into(),
+            page: None,
+            file_path: None,
         };
         assert_eq!(Destination::parse(&d.url()), d);
         assert_eq!(
@@ -1893,6 +2048,97 @@ mod tests {
             Destination::Console {
                 server_id: "s1".into()
             }
+        );
+    }
+
+    #[test]
+    fn server_page_urls_round_trip_with_their_paths() {
+        // §8–§12's internal spelling: the page under the server, the
+        // files path under the page — url() → parse() must be the
+        // identity for every destination the model can hold.
+        for (d, url) in [
+            (
+                Destination::Server {
+                    server_id: "tes".into(),
+                    page: Some(ServerPage::Console),
+                    file_path: None,
+                },
+                "zim://server/tes/console",
+            ),
+            (
+                Destination::Server {
+                    server_id: "tes".into(),
+                    page: Some(ServerPage::Files),
+                    file_path: Some("eula.txt".into()),
+                },
+                "zim://server/tes/files/eula.txt",
+            ),
+            (
+                Destination::Server {
+                    server_id: "tes".into(),
+                    page: Some(ServerPage::Backups),
+                    file_path: None,
+                },
+                "zim://server/tes/backups",
+            ),
+        ] {
+            assert_eq!(d.url(), url);
+            assert_eq!(Destination::parse(url), d, "round trip of {url}");
+        }
+        // A file path only rides the Files page; anything else is an
+        // honest miss, never a silently reinterpreted address.
+        assert_eq!(
+            Destination::parse("zim://server/tes/console/eula.txt"),
+            Destination::Missing {
+                url: "zim://server/tes/console/eula.txt".into()
+            }
+        );
+        // A page word outside the vocabulary is not a page.
+        assert_eq!(
+            Destination::parse("zim://server/tes/nonsense"),
+            Destination::Missing {
+                url: "zim://server/tes/nonsense".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_seam_spells_server_pages_camelcase_and_absent_when_unset() {
+        // The wire shape: absent when unset (the older spellings never
+        // see a null key), camelCase words when present — pinned so the
+        // TS seam (page?: ServerPage) can never drift from the Rust one.
+        let plain = Destination::Server {
+            server_id: "survival".into(),
+            page: None,
+            file_path: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&plain).unwrap(),
+            r#"{"kind":"server","serverId":"survival"}"#
+        );
+        let paged = Destination::Server {
+            server_id: "survival".into(),
+            page: Some(ServerPage::Console),
+            file_path: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&paged).unwrap(),
+            r#"{"kind":"server","serverId":"survival","page":"console"}"#
+        );
+        let filed = Destination::Server {
+            server_id: "survival".into(),
+            page: Some(ServerPage::Files),
+            file_path: Some("plugins/config.yml".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&filed).unwrap(),
+            r#"{"kind":"server","serverId":"survival","page":"files","filePath":"plugins/config.yml"}"#
+        );
+        // The old TS-built payloads (no page fields) still deserialize.
+        assert_eq!(
+            serde_json::from_str::<Destination>(r#"{"kind":"server","serverId":"survival"}"#)
+                .unwrap(),
+            plain
         );
     }
 

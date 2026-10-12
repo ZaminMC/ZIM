@@ -467,7 +467,9 @@ describe("<PopupApp /> the app menu", () => {
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Zoom in" }).disabled).toBe(true);
   });
 
-  it("Developer tools navigates the active tab, then closes", async () => {
+  it("Developer tools opens a NEW tab, then closes", async () => {
+    // The page-verb disposition (§13): a browser-level page action opens
+    // a tab, it never replaces the page the operator is reading.
     await renderAppMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: /Developer tools/ }));
     await waitFor(() => {
@@ -475,7 +477,7 @@ describe("<PopupApp /> the app menu", () => {
     });
     const command = invoked.find((c) => c.cmd === "shell_command");
     expect(command?.args).toEqual({
-      id: CMD.NAVIGATE_ACTIVE,
+      id: CMD.OPEN_IN_NEW_TAB,
       arg: { destination: { kind: "devtools" } },
     });
   });

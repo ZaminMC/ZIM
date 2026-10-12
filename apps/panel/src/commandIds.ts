@@ -55,6 +55,9 @@ export const CMD = {
   UNGROUP_GROUP: 50041,
   NEW_TAB_IN_GROUP: 50042,
   ADD_TAB_TO_EXISTING_GROUP: 50043,
+  // The page-verb disposition (the ⋮ menu's Settings and the console's
+  // own-tab affordance): open a fresh foreground tab, never replace.
+  OPEN_IN_NEW_TAB: 50044,
   // The multi-selection gestures (Tab::OnMousePressed's modifier
   // branches, tab.cc:726-764) and the tab menu's selection-scoped close
   // (GetIndicesForCommand's law).

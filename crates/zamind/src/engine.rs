@@ -422,6 +422,32 @@ impl Engine {
         }
     }
 
+    /// The software family a server's own root names — the identity
+    /// evidence for hand-registered servers (no creation record):
+    /// classify the jar FILES the directory carries, the same law
+    /// discovery walks with (`classify_jar`). The configured jar's name
+    /// wins when it names a family; otherwise the alphabetically-first
+    /// classified jar (deterministic, and a root rarely carries two
+    /// server-family jars). `server.jar` — the fixed name creation
+    /// installs under — names no family: `None`, honestly.
+    fn classify_root_software(root: &Path, configured_jar: Option<&str>) -> Option<String> {
+        if let Some(name) = configured_jar {
+            if let Some(family) = zamin_core::discovery::classify_jar(name) {
+                return Some(family.to_owned());
+            }
+        }
+        let mut classified: Vec<String> = std::fs::read_dir(root)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                zamin_core::discovery::classify_jar(&name).map(|f| f.to_owned())
+            })
+            .collect();
+        classified.sort();
+        classified.into_iter().next()
+    }
+
     /// `server.properties` is Minecraft's file (ADR-0007): the daemon
     /// reads the boot authority (`server-port`) and the bind address
     /// (`server-ip`) and never writes them behind the server's back.
@@ -520,19 +546,44 @@ impl Engine {
     }
 
     pub async fn get_server(&self, server_id: &ServerId) -> Result<ServerDetails, EngineError> {
-        let display_name = self
+        let entry = self
             .registry_lock()
             .get(server_id)
-            .map(|e| e.display_name.clone())
+            .map(|e| (e.display_name.clone(), e.root.clone()))
             .ok_or_else(|| not_found(server_id))?;
-        Ok(ServerDetails {
-            server_id: server_id.to_string(),
-            display_name,
-            state: self.describe_state(server_id).await,
-            software: None,
-            version: None,
-            port: None,
+        let (display_name, root) = entry;
+        let state = self.describe_state(server_id).await;
+        let server_id = server_id.to_string();
+        let data_dir = self.inner.data_dir.clone();
+        // The details' evidence is three small reads (two config files,
+        // one properties file, one root listing) — off the async runtime,
+        // the same discipline list_servers applies to its address half.
+        let details = tokio::task::spawn_blocking(move || {
+            let global =
+                zamin_core::config::load_global(&data_dir.join("config.toml")).unwrap_or_default();
+            let per = zamin_core::config::load_server(
+                &data_dir
+                    .join("servers")
+                    .join(server_id.as_str())
+                    .join("config.toml"),
+            )
+            .unwrap_or_default();
+            let effective = zamin_core::config::layer(&global.defaults, &per.settings);
+            let (properties_port, _) = Self::read_properties_address(&root);
+            ServerDetails {
+                server_id,
+                display_name,
+                state,
+                software: per
+                    .software
+                    .or_else(|| Self::classify_root_software(&root, per.jar.as_deref())),
+                version: effective.mc_version,
+                port: effective.port.or(properties_port),
+            }
         })
+        .await
+        .map_err(|e| internal(&format!("details task failed: {e}")))?;
+        Ok(details)
     }
 
     // --- §64 server discovery (ADR-0027) -----------------------------------
@@ -2532,7 +2583,7 @@ impl Engine {
                         return Err(JobFailure::Error(to_protocol(&e)));
                     }
                     if let Some(port) = params.port {
-                        patch_stamped_port(&root, port);
+                        zamin_core::server::properties::patch_server_port(&root, port);
                     }
                     // The operator's explicit per-creation EULA acceptance
                     // (server.create's `autoEula`): the stamped eula.txt
@@ -2675,6 +2726,13 @@ impl Engine {
                         schema_version: zamin_core::config::CONFIG_SCHEMA_VERSION,
                         display_name: Some(display_name.clone()),
                         jar: Some("server.jar".to_owned()),
+                        // The operator's own catalog choice — the family is
+                        // the strongest software identity evidence (the jar
+                        // installs under the fixed, family-less name
+                        // "server.jar"). server.get reads it back; the
+                        // favicon's brand glyph and the omnibox's marks key
+                        // off exactly this field.
+                        software: Some(params.project.clone()),
                         settings: zamin_core::config::ServerSettingsDefaults {
                             mc_version: Some(params.version.clone()),
                             java_major_required: java_major,
@@ -4262,34 +4320,6 @@ const ACCEPTED_EULA_TXT: &str = "\
 # This is the operator's explicit choice, never a default.
 eula=true
 ";
-
-/// Point the stamped `server.properties` at the requested port. The file
-/// was written seconds ago by the template stamp; a missing line means a
-/// template drift and is left alone (the layered setting stays the
-/// authoritative desired value).
-fn patch_stamped_port(root: &Path, port: u16) {
-    let path = root.join("server.properties");
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        let patched = {
-            let mut found = false;
-            let mut out = String::new();
-            for line in content.lines() {
-                if line.trim_start().starts_with("server-port=") {
-                    out.push_str(&format!("server-port={port}\n"));
-                    found = true;
-                } else {
-                    out.push_str(line);
-                    out.push('\n');
-                }
-            }
-            if !found {
-                out.push_str(&format!("server-port={port}\n"));
-            }
-            out
-        };
-        let _ = zamin_core::fsops::atomic_write(&path, patched.as_bytes());
-    }
-}
 
 /// Sync ranged read of `logs/latest.log` under the server root, through
 /// the rooted filesystem's containment checks. Runs inside `spawn_blocking`.

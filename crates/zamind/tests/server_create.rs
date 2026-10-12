@@ -150,6 +150,23 @@ async fn create_downloads_verifies_and_registers() {
         config.contains("displayName = \"Created Server\""),
         "{config}"
     );
+    // The operator's catalog choice is recorded: the software family is
+    // the identity evidence server.get reads back (the favicon's brand
+    // glyph and the details header key off it — the jar itself installs
+    // under the family-less fixed name "server.jar").
+    assert!(config.contains("software = \"paper\""), "{config}");
+
+    // server.get answers the fleet's identity truth: the family the
+    // operator chose, the version the catalog named, the port the
+    // template stamped. These were structural None's before — the
+    // favicon could never learn the software.
+    let details = client
+        .request(methods::SERVER_GET, json!({ "serverId": "created" }))
+        .await
+        .expect("server.get");
+    assert_eq!(details["software"], "paper", "the recorded family");
+    assert_eq!(details["version"], "1.21.11", "the catalog's version");
+    assert_eq!(details["port"], 25565, "the stamped template port");
 
     // No staging leftovers in the instance dir.
     let leftovers: Vec<String> = std::fs::read_dir(&root)

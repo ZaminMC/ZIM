@@ -12,6 +12,30 @@
 
 import type { ServerEntry } from "./servers";
 
+/** The addressable pages of a server's dashboard (§8–§12's URL model):
+ *  `host:port/<page>` is the visible address of each; the dashboard
+ *  root (`host:port`) carries no page word. The set is the sidebar's own
+ *  closed list — a URL naming anything else is an honest Missing, never
+ *  a silent dashboard. */
+export const SERVER_PAGES = [
+  "console",
+  "metrics",
+  "logs",
+  "files",
+  "players",
+  "plugins",
+  "schedules",
+  "network",
+  "startup",
+  "settings",
+  "backups",
+] as const;
+
+export type ServerPage = (typeof SERVER_PAGES)[number];
+
+export const isServerPage = (word: string): word is ServerPage =>
+  (SERVER_PAGES as readonly string[]).includes(word);
+
 export interface ServersDestination {
   kind: "servers";
 }
@@ -21,6 +45,14 @@ export interface NewTabDestination {
 export interface ServerDestination {
   kind: "server";
   serverId: string;
+  /** The dashboard page this tab addresses (`host:port/<page>`);
+   *  `undefined` = the dashboard root. Pages are history — one tab per
+   *  server (§61), the page rides the history stack, not the identity. */
+  page?: ServerPage;
+  /** The files page's addressed path (`host:port/files/eula.txt`) —
+   *  server-root-relative, `/`-joined. Only meaningful with
+   *  `page === "files"`. */
+  filePath?: string;
 }
 /** §27's dedicated console tab: one per server (§61 identity), the console
  *  optimized for large output — full height, same engine, its own tab. */
@@ -157,7 +189,10 @@ export function tabKey(destination: Destination): TabKey {
   }
 }
 
-/** The canonical internal URL a destination is addressed by (§58). */
+/** The canonical internal URL a destination is addressed by (§58). The
+ *  INTERNAL spelling carries the server id; the ADDRESS BAR shows the
+ *  operator's own words for the same place (restingAddress/visibleAddress)
+ *  — identity and address stay two disciplines (§61). */
 export function destinationUrl(destination: Destination): string {
   switch (destination.kind) {
     case "devtools":
@@ -181,7 +216,7 @@ export function destinationUrl(destination: Destination): string {
     case "downloads":
       return "zim://downloads/";
     case "server":
-      return `zim://server/${destination.serverId}`;
+      return serverUrl(destination.serverId, destination.page, destination.filePath);
     case "console":
       return `zim://console/${destination.serverId}`;
     case "join":
@@ -191,10 +226,26 @@ export function destinationUrl(destination: Destination): string {
   }
 }
 
-/** What the address bar shows when the tab rests. A server shows its join
- *  address when the port is known (§7) and its internal URL when it is
- *  not — an address the server cannot answer is not shown as if it could.
- *  The new tab rests empty (§6.2). */
+/** The internal URL of a server page — the round-trip target the bar's
+ *  VISIBLE address re-commits to (parseAddressInput's join dialect with
+ *  a path resolves back to exactly this). */
+export function serverUrl(
+  serverId: string,
+  page?: ServerPage,
+  filePath?: string,
+): string {
+  let url = `zim://server/${serverId}`;
+  if (page) url += `/${page}`;
+  if (page === "files" && filePath) url += `/${filePath.split("/").filter(Boolean).join("/")}`;
+  return url;
+}
+
+/** What the address bar shows when the tab rests. A SERVER tab rests at
+ *  the operator's own words for it (§8–§12's URL model): the join
+ *  address, plus the page path, plus the files path under it —
+ *  `localhost:25552/console`, `localhost:25552/files/eula.txt`. When the
+ *  port is unknown the internal URL shows instead — an address the
+ *  server cannot answer is not shown as if it could (§7's own law). */
 export function restingAddress(
   destination: Destination,
   entries: ServerEntry[],
@@ -218,8 +269,11 @@ export function restingAddress(
     return destinationUrl(destination);
   }
   if (destination.kind === "console") {
-    // The console tab rests at its internal URL: it is a ZIM page,
-    // not the server's join address (that stays the server tab's rest).
+    // The dedicated console tab rests at the operator's words for it too:
+    // `host:port/console` (§9) — the same URL semantics every server
+    // page carries. No port yet: the internal URL, honestly.
+    const entry = entries.find((e) => e.serverId === destination.serverId);
+    if (entry?.port) return `${joinAddress(entry, host)}/console`;
     return destinationUrl(destination);
   }
   if (destination.kind === "join") {
@@ -230,8 +284,21 @@ export function restingAddress(
     return destinationUrl(destination);
   }
   const entry = entries.find((e) => e.serverId === destination.serverId);
-  if (entry?.port) return joinAddress(entry, host);
+  if (entry?.port) {
+    return `${joinAddress(entry, host)}${serverPath(destination.page, destination.filePath)}`;
+  }
   return destinationUrl(destination);
+}
+
+/** The visible path suffix of a server page: `""`, `"/console"`,
+ *  `/files/eula.txt` — the part after `host:port`. */
+export function serverPath(page?: ServerPage, filePath?: string): string {
+  if (!page) return "";
+  if (page === "files" && filePath) {
+    const clean = filePath.split("/").filter(Boolean).join("/");
+    return clean === "" ? "/files" : `/files/${clean}`;
+  }
+  return `/${page}`;
 }
 
 /** The join address of a managed server. The daemon owns the port; the
@@ -254,6 +321,47 @@ export function displayAddress(url: string): string {
   return url.startsWith(prefix) ? url.slice(prefix.length) : url;
 }
 
+/** The address bar's visible text for a RESTING URL in the server-address
+ *  model (§8–§12): a server tab's internal URL translates to the join
+ *  address + page path — `localhost:25552/console`, with the files path
+ *  under it — and the dedicated console tab to `host:port/console` (§9).
+ *  The fleet carries the ports (the favicon lane's projection); a server
+ *  the lane has not learned yet, or one with no port, keeps its internal
+ *  URL — an address it cannot answer is not shown as if it could. This
+ *  is display-only: the same text re-commits through parseAddressInput's
+ *  join dialect back to the same destination. */
+export function visibleAddress(
+  url: string,
+  fleet: Record<string, { port?: number }> | undefined,
+  host: string,
+): string {
+  const server = /^zim:\/\/server\/([^/?#]+)(?:\/([^/?#]+)(?:\/(.*))?)?$/.exec(url);
+  if (server) {
+    const id = decodeURIComponent(server[1] ?? "");
+    const page = server[2];
+    const rest = server[3];
+    const port = fleet?.[id]?.port;
+    if (port != null) {
+      const suffix =
+        page === undefined
+          ? ""
+          : rest === undefined
+            ? `/${page}`
+            : `/${page}/${rest.split("/").filter(Boolean).join("/")}`;
+      return `${host}:${port}${suffix}`;
+    }
+    return url;
+  }
+  const console = /^zim:\/\/console\/([^/?#]+)$/.exec(url);
+  if (console) {
+    const id = decodeURIComponent(console[1] ?? "");
+    const port = fleet?.[id]?.port;
+    if (port != null) return `${host}:${port}/console`;
+    return url;
+  }
+  return displayAddress(url);
+}
+
 /** Where this window reaches a managed server's host part, from the
  *  active connection: local → localhost; remote → the agent's host. */
 export function hostHint(connection: { local: boolean; remoteAddr?: string }): string {
@@ -266,16 +374,27 @@ export function hostHint(connection: { local: boolean; remoteAddr?: string }): s
   return host || addr;
 }
 
-// --- the address bar's dialects (§7) -----------------------------------------
+// --- the address bar's dialects (§7, §8–§12) -----------------------------------------
 
 export type AddressRequest =
   | { kind: "internal"; destination: Destination }
-  | { kind: "join"; host?: string; port: number }
+  | { kind: "join"; host?: string; port: number; page?: ServerPage; filePath?: string }
   | { kind: "query"; text: string };
 
-const INTERNAL_URL = /^zim:\/\/([^/?#]+)\/?(?:([^/?#]+))?$/;
-/** `host:port`, `:port`, or a bare port — the join dialect. A host may be
- *  an IPv4, a hostname, or a bracketed IPv6; the port is 1-65535. */
+const INTERNAL_URL = /^zim:\/\/([^/?#]+)\/?([^/?#]*)(?:\/?([^/?#]*)(?:\/(.*))?)?$/;
+/** `host:port`, `:port`, or a bare port — the join dialect's authority
+ *  half. A host may be an IPv4, a hostname, or a bracketed IPv6; the
+ *  port is 1-65535. */
+
+/** Split a typed line into its authority half and its path half on the
+ *  FIRST `/` (a join address never contains one — IPv6 brackets carry
+ *  colons, never slashes). `localhost:25552/console` answers
+ *  `["localhost:25552", ["console"]]`; a pathless line answers `[]`. */
+function splitJoinPath(text: string): [string, string[]] {
+  const at = text.indexOf("/");
+  if (at === -1) return [text, []];
+  return [text.slice(0, at), text.slice(at + 1).split("/").filter(Boolean)];
+}
 const JOIN = /^(?:\[?([a-zA-Z0-9._-]+|\[[0-9a-fA-F:]+\])\]?)?:(\d{1,5})$|^\[?([a-zA-Z0-9._-]+)\]?$/;
 
 /** Whether the word parses as an IPv6 literal — the exact twin of the
@@ -334,7 +453,29 @@ export function parseJoinTail(tail: string): JoinDestination | null {
   return host === "" ? { kind: "join", port } : { kind: "join", host, port };
 }
 
-/** Parse what the operator typed, before any store is consulted. */
+/** The typed line's path half, resolved against the page vocabulary:
+ *  `["console"]` → page "console"; `["files", "eula.txt"]` → page
+ *  "files" + filePath "eula.txt"; `["files", "tmp"]` → page "files" +
+ *  "tmp". An EMPTY path list answers all-absent (the dashboard root). A
+ *  first segment outside the vocabulary answers `null` — the line is
+ *  not a server URL, and the caller owes the operator the honest
+ *  "no page" answer, never a silent dashboard. */
+function parseServerPath(segments: string[]): { page?: ServerPage; filePath?: string } | null {
+  if (segments.length === 0) return {};
+  const [first, ...rest] = segments;
+  if (!first || !isServerPage(first)) return null;
+  if (first === "files" && rest.length > 0) {
+    return { page: "files", filePath: rest.join("/") };
+  }
+  return { page: first };
+}
+
+/** Parse what the operator typed, before any store is consulted. The
+ *  join dialect now carries the server-page path (§8–§12): the authority
+ *  half (`host:port`) resolves the registry's port, the path half names
+ *  the page under it — `0.0.0.0:25552/console`, `0.0.0.0:25552/files/
+ *  eula.txt`. A path whose first word is not a page is not this dialect
+ *  (the caller answers honestly); a page-less line is the root join. */
 export function parseAddressInput(text: string): AddressRequest {
   const trimmed = text.trim();
   const internal = INTERNAL_URL.exec(trimmed);
@@ -350,7 +491,25 @@ export function parseAddressInput(text: string): AddressRequest {
     if (page === "extensions") return { kind: "internal", destination: { kind: "extensions" } };
     if (page === "downloads") return { kind: "internal", destination: { kind: "downloads" } };
     if (page === "server" && internal[2]) {
-      return { kind: "internal", destination: { kind: "server", serverId: internal[2] } };
+      // zim://server/{id}/{page}/{file...} — the internal spelling of the
+      // server-page model. The id is the first segment; the rest is the
+      // same page dialect the visible addresses carry.
+      const segments = trimmed.slice(`zim://server/`.length).split("/").filter(Boolean);
+      const id = segments[0];
+      const rest = segments.slice(1);
+      if (id && rest.length === 0) {
+        return { kind: "internal", destination: { kind: "server", serverId: id } };
+      }
+      const path = parseServerPath(rest);
+      if (id && path) {
+        return {
+          kind: "internal",
+          destination: path.page
+            ? { kind: "server", serverId: id, ...path }
+            : { kind: "server", serverId: id },
+        };
+      }
+      return { kind: "internal", destination: { kind: "missing", url: trimmed } };
     }
     if (page === "console" && internal[2]) {
       return { kind: "internal", destination: { kind: "console", serverId: internal[2] } };
@@ -370,7 +529,9 @@ export function parseAddressInput(text: string): AddressRequest {
   // The IPv6 literal law (Chrome's fixup): the brackets are input sugar
   // — "::1" and "[::1]" both join. Runs before the dialect so a bare
   // address is never mistaken for host:port words; the dialect's own
-  // spellings never parse as addresses, so nothing else moves.
+  // spellings never parse as addresses, so nothing else moves. An IPv6
+  // literal never carries a path (no `/` can appear inside one that
+  // survives the bracket law), so the whole line is the address.
   const unbracketed = trimmed.startsWith("[")
     ? trimmed.endsWith("]")
       ? trimmed.slice(1, -1)
@@ -379,18 +540,42 @@ export function parseAddressInput(text: string): AddressRequest {
   if (isIpv6Shaped(unbracketed)) {
     return { kind: "join", host: normalizeHost(trimmed), port: 0 };
   }
-  const join = JOIN.exec(trimmed);
+  // The path dialect: split the authority half off first, then run the
+  // join dialect on it — `0.0.0.0:25552/console` is a join WITH a path,
+  // never a query. Only a page-shaped path qualifies; anything else
+  // falls through to the honest dialects below (a word with a slash is
+  // a search, the same as before).
+  const [authority, pathSegments] = splitJoinPath(trimmed);
+  const join = JOIN.exec(authority);
   if (join) {
     if (join[2]) {
       const port = Number(join[2]);
       if (port >= 1 && port <= 65_535) {
+        const path = parseServerPath(pathSegments);
+        if (path) {
+          return { kind: "join", host: normalizeHost(join[1]), port, ...path };
+        }
+        if (pathSegments.length > 0) {
+          // A path was typed but it names no page: an honest miss, never
+          // a silent dashboard or a masked search.
+          return { kind: "internal", destination: { kind: "missing", url: trimmed } };
+        }
         return { kind: "join", host: normalizeHost(join[1]), port };
       }
     } else if (join[3]) {
       // A bare word could be a port ("25565") — only digits qualify.
       if (/^\d{1,5}$/.test(join[3])) {
         const port = Number(join[3]);
-        if (port >= 1 && port <= 65_535) return { kind: "join", port };
+        if (port >= 1 && port <= 65_535) {
+          const path = parseServerPath(pathSegments);
+          if (path && pathSegments.length > 0) {
+            return { kind: "join", port, ...path };
+          }
+          if (pathSegments.length > 0) {
+            return { kind: "internal", destination: { kind: "missing", url: trimmed } };
+          }
+          return { kind: "join", port };
+        }
       } else if (
         join[3].includes(".") ||
         join[3].toLowerCase() === "localhost"
@@ -401,7 +586,13 @@ export function parseAddressInput(text: string): AddressRequest {
         // the most common join of all). A plain word is a discovery
         // search: "paper" must never join a host called "paper". The
         // word carries no port — 0, and the Join page speaks the
-        // verdict (§7: nothing is invented).
+        // verdict (§7: nothing is invented). A PATH on a portless
+        // host names no server page (the page model resolves by port):
+        // the line reads as a URL and lands as an honest miss, never a
+        // silent join that drops the operator's words.
+        if (pathSegments.length > 0) {
+          return { kind: "internal", destination: { kind: "missing", url: trimmed } };
+        }
         return { kind: "join", host: normalizeHost(join[3]), port: 0 };
       }
     }
@@ -482,7 +673,12 @@ export function destinationLabel(destination: Destination, entries: ServerEntry[
     entries.find((entry) => entry.serverId === serverId)?.displayName ?? serverId;
   switch (destination.kind) {
     case "server":
-      return name(destination.serverId);
+      // The page rides the label the way a browser tab carries its page
+      // title: the server stays the identity, the page says where in the
+      // workspace the tab rests.
+      return destination.page
+        ? `${name(destination.serverId)} — ${destination.page}`
+        : name(destination.serverId);
     case "console":
       return `${name(destination.serverId)} console`;
     case "join":

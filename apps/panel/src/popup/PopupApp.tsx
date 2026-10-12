@@ -704,7 +704,7 @@ export function PopupApp() {
             glyph={<IconDevTools />}
             label="Developer tools"
             onClick={() =>
-              void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "devtools" } })
+              void run(CMD.OPEN_IN_NEW_TAB, { destination: { kind: "devtools" } })
             }
           />
           <MenuItem
@@ -717,33 +717,33 @@ export function PopupApp() {
             glyph={<IconDownload />}
             label="Downloads"
             onClick={() =>
-              void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "downloads" } })
+              void run(CMD.OPEN_IN_NEW_TAB, { destination: { kind: "downloads" } })
             }
           />
           <MenuItem
             glyph={<IconApps />}
             label="Extensions"
             onClick={() =>
-              void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "extensions" } })
+              void run(CMD.OPEN_IN_NEW_TAB, { destination: { kind: "extensions" } })
             }
           />
           <MenuItem
             glyph={<IconClock />}
             label="Jobs"
-            onClick={() => void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "jobs" } })}
+            onClick={() => void run(CMD.OPEN_IN_NEW_TAB, { destination: { kind: "jobs" } })}
           />
           <MenuItem
             glyph={<IconGear />}
             label="Settings"
             onClick={() =>
-              void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "settings" } })
+              void run(CMD.OPEN_IN_NEW_TAB, { destination: { kind: "settings" } })
             }
           />
           <div className="menu-sep" />
           <MenuItem
             glyph={<IconInfo />}
             label="About ZIM"
-            onClick={() => void run(CMD.NAVIGATE_ACTIVE, { destination: { kind: "about" } })}
+            onClick={() => void run(CMD.OPEN_IN_NEW_TAB, { destination: { kind: "about" } })}
           />
         </div>
       )}

@@ -124,6 +124,15 @@ pub struct ServerConfigFile {
     pub display_name: Option<String>,
     /// Server-root-relative jar path, e.g. `server.jar`.
     pub jar: Option<String>,
+    /// The server software family this server runs (`catalog.list` id —
+    /// "paper", "fabric", …). Written at creation from the operator's
+    /// own catalog choice; the family is the strongest identity evidence
+    /// there is (the jar is installed under the fixed name `server.jar`,
+    /// which carries no family in its filename). Absent for
+    /// hand-registered servers — `server.get` then falls back to
+    /// classifying the root's jar filenames.
+    #[serde(default)]
+    pub software: Option<String>,
     pub settings: ServerSettingsDefaults,
 }
 

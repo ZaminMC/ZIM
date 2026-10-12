@@ -82,6 +82,14 @@ pub const UNGROUP_GROUP: u32 = 50041;
 pub const NEW_TAB_IN_GROUP: u32 = 50042;
 /// ⓩ Local: the tab menu's "Add to existing group" item, one per group.
 pub const ADD_TAB_TO_EXISTING_GROUP: u32 = 50043;
+/// ⓩ Local: open an explicit destination in a NEW FOREGROUND TAB —
+/// the ⋮ menu's page verbs (Settings, Downloads, …) and the console's
+/// "open in its own tab" affordance. Chromium's own posture: a
+/// browser-level page action opens a tab, it does not replace the page
+/// the operator is reading (upstream routes through OpenURL with
+/// WindowOpenDisposition::NEW_FOREGROUND_TAB; no single IDC carries a
+/// destination, so the local block numbers it).
+pub const OPEN_IN_NEW_TAB: u32 = 50044;
 
 /// ⓩ Local: the multi-selection gestures (Tab::OnMousePressed's
 /// modifier branches — tab.cc:726-764 — routed through the command lane

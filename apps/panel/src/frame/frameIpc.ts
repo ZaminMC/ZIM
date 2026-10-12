@@ -97,9 +97,32 @@ export type AddressRequest =
   | { Join: { host: string | null; port: number } }
   | { Query: string };
 
-export const omniboxCommit = (text: string, newTab = false): Promise<CommitOutcome> =>
+/** The commit door's fleet — the frame's favicon-lane projection, the
+ *  same shape the suggest lane passes. The host's ONE commit door
+ *  resolves `host:port[/path]` against these ports (§8–§12): the
+ *  address the operator typed names a managed server, and the path
+ *  under it names its page. */
+export type CommitFleet = Array<{
+  server_id: string;
+  display_name: string;
+  state: string;
+  port?: number;
+  bind_address?: string | null;
+}>;
+
+export const omniboxCommit = (
+  text: string,
+  newTab = false,
+  servers: CommitFleet = [],
+  host = "localhost",
+): Promise<CommitOutcome> =>
   isTauri()
-    ? invokeHost<CommitOutcome>("shell_omnibox_commit", { text, new_tab: newTab })
+    ? invokeHost<CommitOutcome>("shell_omnibox_commit", {
+        text,
+        new_tab: newTab,
+        servers,
+        host,
+      })
     : Promise.resolve({ kind: "query", text });
 
 export const omniboxClassify = (text: string): Promise<AddressRequest | null> =>

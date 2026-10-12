@@ -133,3 +133,16 @@ describe("NetworkView", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
   });
 });
+
+  // The founder's crash: an older daemon OMITS `conflicts` when the list
+  // is empty (skip_serializing_if), and the view read `.length` bare —
+  // "Cannot read properties of undefined (reading 'length')" took the
+  // tab down. The boundary now normalizes: absent reads as an empty
+  // list, the page renders "None."
+  it("survives a wire payload that omits the empty conflicts list", async () => {
+    const { conflicts: _omitted, ...bare } = statusOf({ portAvailable: true });
+    getNetworkStatusMock.mockReset().mockResolvedValue(bare as NetworkStatusResult);
+    render(<NetworkView serverId="alpha" />);
+    await waitFor(() => expect(screen.getByText(/available right now/)).toBeTruthy());
+    expect(screen.getByText("None.")).toBeTruthy();
+  });

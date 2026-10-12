@@ -112,3 +112,44 @@ async fn full_lifecycle_over_the_wire() {
         .unwrap();
     assert_eq!(status["servers"], 1);
 }
+
+/// `server.get`'s identity law for HAND-REGISTERED servers: no creation
+/// record exists, so the software family comes from classifying the
+/// root's own jar filenames — the same evidence discovery walks with.
+/// A `paper-x.y.z.jar` names "paper"; the fixed family-less name
+/// `server.jar` (what creation installs under) names nothing, honestly.
+#[tokio::test]
+async fn server_get_classifies_a_registered_servers_jar() {
+    let data_dir = scoped_dir("data-get-details");
+    let server_root = make_server_root("get-details");
+    // The family evidence: a jar whose filename names its family.
+    std::fs::copy(
+        server_root.join("server.jar"),
+        server_root.join("paper-1.21.4-236.jar"),
+    )
+    .unwrap();
+    write_server_config(&data_dir, "papered", "");
+
+    let endpoint = zamin_ipc::Endpoint::unique_for_test("e2e-get-details");
+    let _daemon = spawn_daemon(&data_dir, &endpoint);
+    let mut client = connect_daemon(&endpoint).await;
+
+    register_server(&mut client, "papered", &server_root).await;
+
+    let details = client
+        .request(methods::SERVER_GET, json!({ "serverId": "papered" }))
+        .await
+        .expect("server.get");
+    assert_eq!(
+        details["software"], "paper",
+        "the jar's filename names the family"
+    );
+    assert_eq!(
+        details["displayName"], "papered display",
+        "the registry's display name"
+    );
+    assert!(
+        details["version"].is_null(),
+        "no creation record, no config version — none invented"
+    );
+}

@@ -463,6 +463,24 @@ pub fn process() -> &'static dyn ProcessOps {
     imp::process()
 }
 
+/// The working directory the server's JVM receives at spawn.
+///
+/// The registry canonicalizes server roots (Windows yields the
+/// long-path-safe verbatim form `\\?\C:\...` — the RIGHT shape for ZIM's
+/// own file operations, and kept everywhere else), but the JVM's Windows
+/// path parser rejects the `?` in verbatim prefixes: `user.dir` arrives
+/// as `\\?\C:\Users\...\instances\tes` and Java dies before main with
+/// `InvalidPathException`. Simplify at THIS boundary — the one place a
+/// path crosses from ZIM's filesystem vocabulary into Java's — so the
+/// process receives the plain form whenever the path is representable
+/// without the prefix (`dunce` keeps verbatim only for paths that
+/// genuinely need long-path form; those stay honest — Java cannot
+/// consume them either way, and pretending otherwise would be worse).
+/// On non-Windows platforms this is the identity function.
+pub fn java_working_dir(root: &Path) -> PathBuf {
+    dunce::simplified(root).to_path_buf()
+}
+
 /// The sandbox container identity a server would run under, or `None` on
 /// platforms where the daemon provides no OS process boundary (the
 /// inspector displays exactly this honesty).
@@ -492,6 +510,42 @@ pub fn sandbox_remove(server_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn java_working_dir_is_the_identity_on_unix() {
+        // The Unix registry keeps canonical roots as-is; the JVM boundary
+        // must not rewrite them (the no-op is the law, not an accident).
+        #[cfg(unix)]
+        {
+            let root = std::path::Path::new("/srv/zim/instances/tes");
+            assert_eq!(java_working_dir(root), root.to_path_buf());
+        }
+    }
+
+    #[test]
+    fn java_working_dir_strips_the_verbatim_prefix_java_rejects() {
+        // The founder's crash: registry canonicalization handed the JVM
+        // `\\?\C:\Users\...\instances\tes` and Java died before main
+        // (`InvalidPathException` on the `?`). The JVM boundary must hand
+        // Java the plain form whenever the path is representable without
+        // the prefix. Only Windows canonicalizes into verbatim form, so
+        // only Windows can prove the strip against a real root.
+        #[cfg(windows)]
+        {
+            let tmp = std::env::temp_dir().join("zim-java-cwd-law");
+            std::fs::create_dir_all(&tmp).ok();
+            if let Ok(verbatim) = std::fs::canonicalize(&tmp) {
+                let plain = java_working_dir(&verbatim);
+                assert!(
+                    !plain.to_string_lossy().starts_with(r"\\?\"),
+                    "the JVM must receive the plain form, got {plain:?}"
+                );
+                // Same place, different vocabulary: the simplified form
+                // must still canonicalize back onto the verbatim root.
+                assert_eq!(std::fs::canonicalize(&plain).ok(), Some(verbatim.clone()));
+            }
+        }
+    }
 
     #[test]
     fn sampling_self_reports_counters() {

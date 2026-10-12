@@ -24,6 +24,12 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 sha2 = "0.10"
 bytes = { workspace = true }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Windows verbatim-path surgery for the JVM boundary: dunce strips the
+# `\\?\` prefix when a path is representable without it (the registry's
+# canonicalized roots need that form to reach Java's working directory —
+# the JVM's Windows parser rejects verbatim paths) and keeps the prefix
+# only when the path genuinely needs long-path form.
+dunce = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

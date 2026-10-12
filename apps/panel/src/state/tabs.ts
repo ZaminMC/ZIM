@@ -16,10 +16,10 @@
 // exists so content views keep one honest way to say "navigate me".
 
 import { create } from "zustand";
-import { navigateHost } from "./shellLane";
+import { navigateHost, openHostTab } from "./shellLane";
 import { invokeHost } from "../integration/tauri";
 import type { Destination } from "./destinations";
-import { tabKey, type TabKey } from "./destinations";
+import { destinationUrl, tabKey, type TabKey } from "./destinations";
 
 export type TabId = string;
 export type GroupId = string;
@@ -192,6 +192,28 @@ export const useTabs = create<TabsState>()((set) => ({
       const key = tabKey(destination);
       const resting = s.tabs.find((t) => tabKeyOf(t) === key);
       if (resting) {
+        // The singleton law's own exception: when the resting tab IS the
+        // calling tab and the destination is a DEEPER place (a server
+        // page walk — same identity, new address), the history stack
+        // captures the walk. Activating yourself without moving would
+        // read as "the sidebar does nothing" on the dev bridge; the host
+        // strip pushes history for exactly this case.
+        const samePlace =
+          destinationUrl(tabDestination(resting)) === destinationUrl(destination);
+        if (resting.id === s.activeId && !samePlace) {
+          return {
+            tabs: s.tabs.map((t) =>
+              t.id === resting.id
+                ? {
+                    ...t,
+                    history: [...t.history.slice(0, t.historyIndex + 1), destination],
+                    historyIndex: t.historyIndex + 1,
+                  }
+                : t,
+            ),
+            discoveryQuery: null,
+          };
+        }
         return { activeId: resting.id, discoveryQuery: null };
       }
       return {
@@ -227,6 +249,12 @@ export const useTabs = create<TabsState>()((set) => ({
   },
 
   openInNewTab: (destination) => {
+    // On the host, the Rust strip owns the truth: a fresh FOREGROUND
+    // tab takes the destination and the calling tab stays put. The
+    // local mirror below is the dev bridge's honest follow.
+    if (onHost()) {
+      void openHostTab(destination);
+    }
     const tab = freshTab(destination);
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },

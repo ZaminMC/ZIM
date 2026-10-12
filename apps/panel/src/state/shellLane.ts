@@ -44,3 +44,21 @@ export async function tabActionHost(action: "back" | "forward" | "reload"): Prom
     // as above
   }
 }
+
+/** Open a destination in a NEW foreground tab (the console's own-tab
+ *  affordance and the page verbs that must not replace the tab under
+ *  the operator's hand). Returns true when the host opened it; the dev
+ *  bridge has no shell model, so it reports false and the caller falls
+ *  back to its local lane. */
+export async function openHostTab(destination: Destination): Promise<boolean> {
+  if (!("__TAURI_INTERNALS__" in window)) return false; // dev bridge: no host
+  try {
+    await invokeHost("shell_tab_open", { destination });
+    return true;
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("ZIM open-in-new-tab failed", { error });
+    }
+    return false;
+  }
+}

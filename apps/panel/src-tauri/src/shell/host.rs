@@ -1007,6 +1007,34 @@ pub async fn shell_tab_navigate(
     sync(&app, &state, &window_name)
 }
 
+/// A content webview asks for a NEW tab (the console's "open in its own
+/// tab" affordance, §27): the page lands on a fresh foreground tab that
+/// inherits the calling tab as its opener — the calling tab itself stays
+/// exactly where it is. The content lane's twin of the frame lane's
+/// OPEN_IN_NEW_TAB command.
+#[tauri::command]
+pub async fn shell_tab_open(
+    window: tauri::Webview,
+    destination: Destination,
+    state: State<'_, ShellState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let window_name = window_label_of(&window);
+    // Only a tab's content webview may ask (the dev bridge has no model).
+    if parse_tab_label(window.label()).is_none() {
+        return Err("no shell model in this context (dev bridge?)".into());
+    }
+    {
+        let mut inner = state.lock();
+        let strip = inner.strip(&window_name);
+        strip.append(destination, true);
+        // The mutation saves — not the sync that follows it.
+        inner.save();
+    }
+    emit_tab_state(&app, &state, &window_name);
+    sync(&app, &state, &window_name)
+}
+
 /// Tab-local verbs the content layer drives: back / forward / reload.
 #[tauri::command]
 pub async fn shell_tab_action(
@@ -1388,6 +1416,23 @@ pub async fn shell_command(
                             strip.navigate(active, destination);
                         }
                     }
+                    cmd::OPEN_IN_NEW_TAB => {
+                        let Some(destination) = arg_destination else {
+                            return Err("OPEN_IN_NEW_TAB needs a destination".into());
+                        };
+                        let Ok(destination) = serde_json::from_value::<Destination>(destination)
+                        else {
+                            return Err("OPEN_IN_NEW_TAB: bad destination".into());
+                        };
+                        // The page-verb disposition (the ⋮ menu's Settings
+                        // and the console's own-tab affordance): a fresh
+                        // foreground tab takes the page, inheriting the
+                        // current active as its opener — the tab under the
+                        // operator's hand stays exactly where it is.
+                        // Chromium's law for browser-level page actions:
+                        // open, never replace.
+                        strip.append(destination, true);
+                    }
                     cmd::RELOAD | cmd::RELOAD_BYPASSING_CACHE => {
                         let target = arg_id.or(strip.active);
                         if let Some(t) =
@@ -1593,6 +1638,8 @@ pub async fn shell_omnibox_commit(
     window: tauri::Webview,
     text: String,
     new_tab: Option<bool>,
+    servers: Option<Vec<crate::shell::omnibox::FleetServer>>,
+    host: Option<String>,
     state: State<'_, ShellState>,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
@@ -1601,10 +1648,19 @@ pub async fn shell_omnibox_commit(
     // An omnibox commit is an interaction: any open popup yields.
     dismiss_popup(&app, &state, &window_name);
     let request = crate::shell::omnibox::classify(&text);
+    // The frame's fleet projection rides the commit (the same shape the
+    // suggest lane passes per keystroke): the join dialect resolves
+    // `host:port[/path]` against the registry's ports HERE — the ONE
+    // commit door, one resolution law (§8–§12). The host keeps no
+    // server list of its own; the frame's projection is the truth it is
+    // given, the same trust the suggest rows already ride.
+    let fleet = servers.unwrap_or_default();
+    let host_hint = host.unwrap_or_else(|| "localhost".into());
     let (outcome, query) = {
         let mut inner = state.lock();
         let strip = inner.strip(&window_name);
-        let Some(landing) = land(strip, request, new_tab.unwrap_or(false)) else {
+        let Some(landing) = land(strip, request, new_tab.unwrap_or(false), &fleet, &host_hint)
+        else {
             return Err("no active tab".into());
         };
         let outcome = match &landing {

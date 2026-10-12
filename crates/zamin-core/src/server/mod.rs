@@ -1,6 +1,7 @@
 //! Server identity and the registry (ADR-0004).
 
 pub mod marker;
+pub mod properties;
 pub mod registry;
 
 use std::fmt;

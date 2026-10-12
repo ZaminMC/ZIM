@@ -129,6 +129,12 @@ export function SchedulesView({ serverId }: { serverId: string }) {
         setNotice("Schedule added — it runs on its next tick.");
         setAdding(false);
         setName("");
+        // The operation SUCCEEDED — the daemon's answer is the authority,
+        // so the rows re-read now, not at the next poll: the UI must not
+        // sit "eventually consistent" for seconds after a committed
+        // change (the founder's "adding a schedule appears to do
+        // nothing" report was exactly this gap).
+        refresh();
       })
       .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
@@ -139,13 +145,16 @@ export function SchedulesView({ serverId }: { serverId: string }) {
     setNotice(null);
     setBusy(true);
     void updateSchedule(serverId, schedule.id, { enabled: !schedule.enabled })
-      .then((result) =>
+      .then((result) => {
         setNotice(
           result.schedule.enabled
             ? "Schedule resumed — the clock fires it when due."
             : "Schedule paused — nothing fires until you resume it.",
-        ),
-      )
+        );
+        // Same law as create: the response is the truth; the rows follow
+        // immediately, not at the next poll.
+        refresh();
+      })
       .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };
@@ -156,7 +165,12 @@ export function SchedulesView({ serverId }: { serverId: string }) {
     setConfirming(null);
     setBusy(true);
     void deleteSchedule(serverId, scheduleId)
-      .then(() => setNotice("Schedule removed."))
+      .then(() => {
+        setNotice("Schedule removed.");
+        // Same law as create: the removal is committed — the row leaves
+        // now, not at the next poll.
+        refresh();
+      })
       .catch((cause: unknown) => setError(describeError(cause)))
       .finally(() => setBusy(false));
   };

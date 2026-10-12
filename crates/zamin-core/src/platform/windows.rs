@@ -24,7 +24,7 @@ use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_ME
 use windows_sys::Win32::System::SystemInformation::GetSystemInfo;
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, TerminateProcess, IO_COUNTERS, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_TERMINATE,
+    PROCESS_TERMINATE, PROCESS_VM_READ,
 };
 
 use crate::error::PlatformError;
@@ -566,7 +566,20 @@ impl ProcessOps for WindowsProcessOps {
 
     fn sample_process(&self, pid: u32) -> Option<ProcessSample> {
         unsafe {
-            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            // GetProcessMemoryInfo's documented contract (k32GetProcessMemoryInfo):
+            // the handle needs PROCESS_QUERY_INFORMATION or
+            // PROCESS_QUERY_LIMITED_INFORMATION **and PROCESS_VM_READ**. The
+            // LIMITED-only open made every memory read fail against a
+            // sandboxed java.exe — the metrics card answered a phantom
+            // tiny/absent RSS. Ask for both up front; if VM_READ is refused
+            // (a hardened target), fall back to the LIMITED-only handle so
+            // CPU time and uptime stay honest while RSS says "unavailable"
+            // — never a fabricated number.
+            let mut process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid);
+            if process.is_null() {
+                process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            }
             if process.is_null() {
                 return None;
             }

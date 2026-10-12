@@ -79,7 +79,7 @@ import {
 import { HoverCard } from "../ui/chromium/hoverCardView";
 import { seedFaviconsForDemo, startFaviconLane, useFavicons, fleetBrief, fleetHost } from "./favicon";
 import { FAVICON_DOT_COLORS, SOFTWARE_GLYPHS, faviconDot } from "./faviconLaw";
-import { displayAddress } from "../state/destinations";
+import { visibleAddress } from "../state/destinations";
 import { softwareMark } from "./softwareMarks";
 import { useFaviconDots } from "../state/faviconPrefs";
 import {
@@ -199,6 +199,12 @@ function Glyph({ url }: { url: string }) {
 
 export function FrameApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  // The fleet projection the address bar's REST display reads (the
+  // server-address model, §8–§12): the favicon lane's ports turn
+  // `zim://server/{id}/{page}` into the operator's own `host:port/page`.
+  // The selector returns the STORED record (a stable reference until the
+  // lane writes it — zustand v5's snapshot law).
+  const fleetServers = useFavicons((s) => s.servers);
   // The snapshot's synchronous mirror: the drag session's threshold
   // decision reads the FRESHEST selection the host pushed — a render
   // tick behind is a drag behind (the state's own update waits for the
@@ -1219,7 +1225,7 @@ export function FrameApp() {
     // The disposition rides the key: plain Enter navigates the tab the
     // hand is in; Alt-Enter opens the classified request in a NEW
     // FOREGROUND tab (OpenURL's law — the host lands it either way).
-    await omniboxCommit(omniboxText, newTab);
+    await omniboxCommit(omniboxText, newTab, fleetBrief(useFavicons.getState()), fleetHost());
     setOmniboxText(null);
     setJoinNote(null);
     closeSuggests();
@@ -1804,7 +1810,9 @@ export function FrameApp() {
             <input
               ref={omniboxRef}
               className="omnibox"
-              value={omniboxText ?? displayAddress(snap.address)}
+              value={
+                omniboxText ?? visibleAddress(snap.address, fleetServers, fleetHost())
+              }
               spellCheck={false}
               placeholder="Search servers, or type an address"
               onChange={(e) => {
@@ -1924,7 +1932,7 @@ export function FrameApp() {
                       onClick={() => {
                         closeSuggests();
                         typedRef.current = "";
-                        void omniboxCommit(row.text, false);
+                        void omniboxCommit(row.text, false, fleetBrief(useFavicons.getState()), fleetHost());
                         setOmniboxText(null);
                         setJoinNote(null);
                         omniboxRef.current?.blur();
@@ -1976,7 +1984,7 @@ export function FrameApp() {
                       // Paste and go: the clipboard text commits
                       // straight through the classifier (kCurrentTab) —
                       // the field never edits, the landing page speaks.
-                      void omniboxCommit(text, false);
+                      void omniboxCommit(text, false, fleetBrief(useFavicons.getState()), fleetHost());
                       setOmniboxText(null);
                       setJoinNote(null);
                     });

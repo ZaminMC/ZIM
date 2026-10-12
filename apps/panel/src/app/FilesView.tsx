@@ -105,7 +105,21 @@ function looksLikeText(bytes: Uint8Array): boolean {
   return true;
 }
 
-export function FilesView({ serverId }: { serverId: string }) {
+export function FilesView({
+  serverId,
+  initialPath,
+  onPathChange,
+}: {
+  serverId: string;
+  /** The URL-addressed path (`host:port/files/eula.txt`, §10): applied
+   *  once per value — a directory lists itself, a file opens in the
+   *  editor. Absent = the root listing, the view's own default. */
+  initialPath?: string;
+  /** The URL follows the workspace's own navigation (a directory walk,
+   *  a file open): the caller navigates the destination so the address
+   *  bar, history, and bookmarks speak the operator's real place. */
+  onPathChange?: (path: string) => void;
+}) {
   const [dir, setDir] = useState("");
   const [listing, setListing] = useState<FilesListResult | null>(null);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
@@ -133,6 +147,11 @@ export function FilesView({ serverId }: { serverId: string }) {
   const [searching, setSearching] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
 
+  /** The last initial path THIS view applied: the URL round-trip's loop
+   *  guard (navigate → prop change → apply → onPathChange would run
+   *  forever without it). */
+  const appliedInitial = useRef<string | null>(null);
+
   // The application's own question dialogs (never window.prompt/confirm):
   // one slot holds the verb currently asking, the dialog below renders it.
   // Each verb carries its own honest refusal.
@@ -156,9 +175,62 @@ export function FilesView({ serverId }: { serverId: string }) {
     [serverId],
   );
 
+  // The root listing on mount — skipped when the URL addresses a path
+  // (the initial-path effect below owns the landing).
   useEffect(() => {
-    refresh("");
+    if (initialPath === undefined || initialPath === "") refresh("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh]);
+
+  // The URL's addressed path (§10: `host:port/files/eula.txt` must land
+  // the operator ON the file): applied once per value — a directory
+  // lists itself, a file opens in the editor, an absent path shows its
+  // parent's listing with the honest "not found" note. Resolved through
+  // the parent listing because the entry's KIND is the evidence (the
+  // files wire refuses to list a file as a directory).
+  useEffect(() => {
+    const clean = (initialPath ?? "").split("/").filter(Boolean).join("/");
+    if (appliedInitial.current === clean) return;
+    // Navigating BACK to the bare files page (`host:port/files`) from an
+    // addressed path: the root listing is that address's own truth.
+    if (clean === "") {
+      if (appliedInitial.current !== null) {
+        appliedInitial.current = null;
+        setOpenPath(null);
+        refresh("");
+      }
+      return;
+    }
+    appliedInitial.current = clean;
+    setLoading(true);
+    void listFiles({ serverId, path: parentOf(clean), offset: 0, limit: 2000 })
+      .then((result) => {
+        const name = clean.split("/").filter(Boolean).pop() ?? "";
+        const entry = result.entries.find((e) => e.name === name);
+        if (!entry) {
+          // The address names something the server does not carry: the
+          // parent's listing lands with the miss stated, never a blank.
+          setListing(result);
+          setDir(parentOf(clean));
+          setError({ message: `${clean} is not in this server's files.` });
+          return;
+        }
+        if (entry.kind === "directory") {
+          setOpenPath(null);
+          refresh(clean);
+        } else {
+          openFile(clean, entry.sizeBytes);
+        }
+      })
+      .catch((cause: unknown) => {
+        const described = describeError(cause);
+        setError({ message: described.title, code: described.code });
+      })
+      .finally(() => setLoading(false));
+    // openFile/refresh are stable over serverId; the applied-value guard
+    // above is what makes re-runs inert, not the dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPath, serverId]);
 
   // The search box debounces before the walk: typing one keystroke per
   // letter must not walk the whole root per letter.
@@ -196,6 +268,10 @@ export function FilesView({ serverId }: { serverId: string }) {
 
   const openFile = useCallback(
     (path: string, size?: number) => {
+      // The URL follows the operator's real place (§10): opening a file
+      // addresses it. Loop-safe — the applied-path guard in the initial
+      // effect makes the round-trip inert.
+      onPathChange?.(path);
       if (size !== undefined && size > EDIT_LIMIT_BYTES) {
         setError({
           message: `${path} is ${formatSize(size)} — the editor covers text files up to 1 MiB.`,
@@ -221,7 +297,7 @@ export function FilesView({ serverId }: { serverId: string }) {
         })
         .finally(() => setBusy(false));
     },
-    [serverId],
+    [serverId, onPathChange],
   );
 
   const save = useCallback(() => {
@@ -255,11 +331,12 @@ export function FilesView({ serverId }: { serverId: string }) {
       if (entry.kind === "directory") {
         setOpenPath(null);
         refresh(path);
+        onPathChange?.(path);
       } else {
         openFile(path, entry.sizeBytes);
       }
     },
-    [dir, refresh, openFile],
+    [dir, refresh, openFile, onPathChange],
   );
 
   const crumbs = useMemo(() => {
@@ -511,7 +588,7 @@ export function FilesView({ serverId }: { serverId: string }) {
   return (
     <section className={styles.files} aria-label="Server files">
       <nav className={styles.crumbs} aria-label="Path">
-        <button className={styles.crumb} onClick={() => leaveEditor(() => { setOpenPath(null); refresh(""); })}>
+        <button className={styles.crumb} onClick={() => leaveEditor(() => { setOpenPath(null); refresh(""); onPathChange?.(""); })}>
           root
         </button>
         {crumbs.map((crumb) => (
@@ -519,7 +596,7 @@ export function FilesView({ serverId }: { serverId: string }) {
             <span className={styles.separator}>/</span>
             <button
               className={styles.crumb}
-              onClick={() => leaveEditor(() => { setOpenPath(null); refresh(crumb.path); })}
+              onClick={() => leaveEditor(() => { setOpenPath(null); refresh(crumb.path); onPathChange?.(crumb.path); })}
             >
               {crumb.name}
             </button>
@@ -671,7 +748,7 @@ export function FilesView({ serverId }: { serverId: string }) {
           <div className={styles.toolbar}>
             <Button
               disabled={busy || dir === "" || dir === "."}
-              onClick={() => { setOpenPath(null); refresh(parentOf(dir)); }}
+              onClick={() => { setOpenPath(null); refresh(parentOf(dir)); onPathChange?.(parentOf(dir)); }}
             >
               Up
             </Button>

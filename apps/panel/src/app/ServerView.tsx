@@ -5,6 +5,7 @@
 // resulting state.
 
 import { lazy, Suspense, useEffect, useState } from "react";
+import type { ServerPage } from "../state/destinations";
 import { getServer, killServer, restartServer, startServer, stopServer, writeWholeFile } from "../state/actions";
 import { describeError } from "../state/errors";
 import type { LifecycleVerb } from "../state/errors";
@@ -137,16 +138,41 @@ function MetricsChips({ serverId, live }: { serverId: string; live: boolean }) {
   );
 }
 
-export function ServerView({ serverId }: { serverId: string }) {
+export function ServerView({
+  serverId,
+  page,
+  filePath,
+}: {
+  serverId: string;
+  /** The URL-addressed page (`host:port/<page>`, §8–§12): when present it
+   *  IS the workspace's view — the address is the authority and the
+   *  sidebar's own state follows it (a navigation, with history). */
+  page?: ServerPage;
+  /** The files page's addressed path (`host:port/files/eula.txt`). */
+  filePath?: string;
+}) {
   const server = useServers((s) => s.servers[serverId]);
   const upsert = useServers((s) => s.upsert);
   const pendingVerb = useUi((s) => s.pending[serverId]);
   const setPending = useUi((s) => s.setPending);
   const actionError = useUi((s) => s.actionErrors[serverId]);
   const setActionError = useUi((s) => s.setActionError);
-  // Which lower surface the tab shows: the interactive console, the paged
-  // log viewer, or the file browser. Panel-local, not persisted.
-  const [lowerView, setLowerView] = useState<LowerView>("console");
+  // The page-local fallback for a page-less destination (the dashboard
+  // root `host:port`): the workspace keeps its own last-viewed surface,
+  // the way a root document keeps its own scroll. An ADDRESSED page
+  // overrides it — `page` is the URL's truth, `localView` is only the
+  // root's own memory. Panel-local either way, never persisted.
+  const [localView, setLocalView] = useState<LowerView>("console");
+  const lowerView: LowerView = page ?? localView;
+  const setLowerView = (view: LowerView) => {
+    if (view === lowerView) return;
+    // An in-workspace view switch is a NAVIGATION under the URL model
+    // (§8–§12): the sidebar's verbs address `host:port/<page>`, history
+    // captures the walk, and the address bar follows. The root's own
+    // memory rides along for when the operator comes back to it.
+    setLocalView(view);
+    void useTabs.getState().navigate({ kind: "server", serverId, page: view });
+  };
   // The §24 publish affordance lives in the header's toolbar; the state
   // belongs to the whole server page, so it is declared with the page's
   // other hooks — before the unknown-server early return.
@@ -373,7 +399,10 @@ export function ServerView({ serverId }: { serverId: string }) {
             <ConsoleView
               serverId={serverId}
               onOpenInNewTab={() =>
-                useTabs.getState().navigate({ kind: "console", serverId })
+                // §27's dedicated console tab: a NEW tab (the tab under
+                // the operator's hand keeps its page); the host strip
+                // owns the append.
+                useTabs.getState().openInNewTab({ kind: "console", serverId })
               }
             />
           ) : lowerView === "metrics" ? (
@@ -381,7 +410,18 @@ export function ServerView({ serverId }: { serverId: string }) {
           ) : lowerView === "logs" ? (
             <LogViewer serverId={serverId} />
           ) : lowerView === "files" ? (
-            <FilesView serverId={serverId} />
+            <FilesView
+              serverId={serverId}
+              initialPath={filePath}
+              onPathChange={(path) => {
+                // The files workspace's own walks address the URL
+                // (§10): `host:port/files/<path>` is where the operator
+                // is, and history + the bar should say so.
+                void useTabs
+                  .getState()
+                  .navigate({ kind: "server", serverId, page: "files", filePath: path || undefined });
+              }}
+            />
           ) : lowerView === "players" ? (
             <PlayersView serverId={serverId} running={server.state === "running"} />
           ) : lowerView === "plugins" ? (

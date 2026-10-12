@@ -295,6 +295,12 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* The document-like views (Startup, Settings, Schedules, Network,
+     Players, Backups) grow past the viewport — the panel is their scroll
+     container. The self-managing views (console, files, logs, metrics)
+     fill the panel exactly, so this overflow never fires for them: no
+     double scrollbar, no clipped forms. */
+  overflow-y: auto;
 }
 
 /* §75's "sidebar transitions", in ADR-0030's entrance language: a

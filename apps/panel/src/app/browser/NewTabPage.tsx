@@ -39,7 +39,15 @@ function commitAddress(text: string, entries: ServerEntry[], host: string) {
       const hit = resolveJoin(request, entries, host);
       if (!hit)
         return { kind: "join-miss", port: request.port, host: request.host } as const;
-      const lane = useTabs.getState().navigate({ kind: "server", serverId: hit.serverId });
+      // The typed path (§8–§12) rides the resolved server: the root
+      // (`host:port`) lands the dashboard, `host:port/console` the
+      // console page, `host:port/files/eula.txt` the file itself.
+      const lane = useTabs.getState().navigate({
+        kind: "server",
+        serverId: hit.serverId,
+        ...(request.page ? { page: request.page } : {}),
+        ...(request.page ? { filePath: request.filePath } : {}),
+      });
       return { kind: "navigated", lane } as const;
     }
     case "query":

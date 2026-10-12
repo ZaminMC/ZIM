@@ -789,18 +789,22 @@ export type SelectionRule =
   | { kind: "glob"; pattern: string };
 
 export interface PublishSelection {
-  includes: SelectionRule[];
-  excludes: SelectionRule[];
+  /** Optional on the wire: an older daemon may omit empty lists — the
+   * views normalize to `[]` at the boundary instead of crashing. */
+  includes?: SelectionRule[];
+  excludes?: SelectionRule[];
 }
 
 export interface PublishConfig {
   selection: PublishSelection;
   providerId: string;
-  providerSettings: Record<string, string>;
-  title: string;
-  description: string;
-  version: string;
-  changelog: string;
+  /** Optional on the wire (an older daemon omits `{}`); guarded at the
+   * boundary — `providerSettings?.outDir` — never indexed bare. */
+  providerSettings?: Record<string, string>;
+  title?: string;
+  description?: string;
+  version?: string;
+  changelog?: string;
 }
 
 export type FileDiffStatus = "added" | "modified" | "removed" | "unchanged";
@@ -996,6 +1000,8 @@ export interface NetworkStatusResult {
   bindAddress?: string;
   /** Bind-test of the effective port at answer time; null = no port. */
   portAvailable?: boolean;
-  /** Other managed servers claiming the same desired port. */
-  conflicts: string[];
+  /** Other managed servers claiming the same desired port. Optional on
+   *  the wire (an older daemon omits the empty list) — consumers read it
+   *  through `conflicts ?? []`, never `.length` bare. */
+  conflicts?: string[];
 }

@@ -483,6 +483,7 @@ fn main() {
             shell::host::shell_tab_hello,
             shell::host::shell_open_claim,
             shell::host::shell_tab_navigate,
+            shell::host::shell_tab_open,
             shell::host::shell_tab_action,
             shell::host::shell_command,
             shell::host::shell_omnibox_classify,

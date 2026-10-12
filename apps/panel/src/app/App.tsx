@@ -12,7 +12,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { invokeHost, listenHost, type Unlisten } from "../integration/tauri";
 import type { Destination } from "../state/destinations";
-import { parseJoinTail } from "../state/destinations";
+import { parseAddressInput, parseJoinTail, tabKey } from "../state/destinations";
 import { navigateHost } from "../state/shellLane";
 import { handleBrowserKey, type BrowserKeyApi } from "../state/browserKeys";
 import { useUi } from "../state/ui";
@@ -79,7 +79,16 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "settings":
       return <SettingsPage />;
     case "server":
-      return <ServerView serverId={destination.serverId} />;
+      // The URL model rides the props: the addressed page (and the files
+      // path under it) is the destination's own truth — the workspace
+      // follows the address, the way a browser's viewport follows a URL.
+      return (
+        <ServerView
+          serverId={destination.serverId}
+          page={destination.page}
+          filePath={destination.filePath}
+        />
+      );
     case "console":
       return <ConsoleView serverId={destination.serverId} variant="dedicated" />;
     case "join":
@@ -119,8 +128,14 @@ function destinationFromQuery(): Destination | null {
     case "extensions": return { kind: "extensions" };
     case "downloads": return { kind: "downloads" };
     case "server": {
-      const serverId = url.split("/")[3] ?? url.split("/")[2];
-      return serverId ? { kind: "server", serverId } : null;
+      // The server model's own spelling: zim://server/{id}[/{page}[/{file}]]
+      // — parsed by the ONE address law (parseAddressInput), never a
+      // second slice: the page dialect must stay identical on both lanes.
+      const request = parseAddressInput(url);
+      if (request.kind === "internal" && request.destination.kind === "server") {
+        return request.destination;
+      }
+      return { kind: "missing", url };
     }
     case "console": {
       const serverId = url.split("/")[3] ?? url.split("/")[2];
@@ -333,17 +348,23 @@ export function App() {
       ) : null}
       <TabBoundary>
         <Suspense fallback={<div className={styles.lazyFallback} />}>
-          {/* The page band: one destination at a time, keyed by
-              destination AND reload token. The key is §60's law — the
-              reload verb rebuilds the view on EVERY page (the evidence
-              and settings pages used to ignore the token, so ⟳ did
-              nothing there), while a destination change remounts by
-              construction anyway. The swap is Chromium's paint holding
-              (App.module.css): one atomic commit, no blank beat — the
-              old page's paint stands until the new page's lands. */}
+          {/* The page band: one destination at a time, keyed by the
+              destination's TAB IDENTITY and the reload token. The key is
+              §60's law — the reload verb rebuilds the view on EVERY
+              page (the evidence and settings pages used to ignore the
+              token, so ⟳ did nothing there). The identity — not the
+              full destination — keys the band because the URL model
+              (§8–§12) walks a server's PAGES through history: the
+              tab is the same document family, so the walk must UPDATE
+              in place (state, scroll, subscriptions preserved), never
+              remount per page; a different destination (another server,
+              an evidence page) is a different identity and remounts.
+              The swap is Chromium's paint holding (App.module.css): one
+              atomic commit, no blank beat — the old page's paint stands
+              until the new page's lands. */}
           <div
             className={styles.page}
-            key={`${JSON.stringify(destination)}:${reloadToken}`}
+            key={`${tabKey(destination)}:${reloadToken}`}
           >
             <DestinationView destination={destination} />
           </div>

@@ -104,6 +104,8 @@ mod tests {
         let mut marks = Bookmarks::default();
         let d = Destination::Server {
             server_id: "s1".into(),
+            page: None,
+            file_path: None,
         };
         assert!(!marks.is_bookmarked(&d));
         marks.toggle(d.clone(), "Server s1".into());

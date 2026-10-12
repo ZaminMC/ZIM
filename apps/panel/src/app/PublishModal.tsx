@@ -64,6 +64,38 @@ function findingWhere(finding: SecretFinding): string {
   return finding.line > 0 ? `${finding.file}:${finding.line}` : finding.file;
 }
 
+/** The wire shape (whose empty containers an older daemon omits)
+ * normalized to the present-tense shape this view reads — the boundary
+ * type that makes `providerSettings["outDir"]` and `selection.includes`
+ * total, never `undefined` (the Publish crash was exactly this gap). */
+export type PresentPublishConfig = PublishConfig & {
+  selection: { includes: SelectionRule[]; excludes: SelectionRule[] };
+  providerSettings: Record<string, string>;
+  title: string;
+  version: string;
+  description: string;
+  changelog: string;
+};
+
+/** The wire boundary: an older daemon omits empty containers
+ * (`providerSettings: {}`, `includes: []`, empty strings), and this view
+ * reads them as present-tense state. Normalized once where each payload
+ * enters — every read below is then the honest shape, never undefined. */
+function normalizeConfig(raw: PublishConfig): PresentPublishConfig {
+  return {
+    ...raw,
+    selection: {
+      includes: raw.selection?.includes ?? [],
+      excludes: raw.selection?.excludes ?? [],
+    },
+    providerSettings: raw.providerSettings ?? {},
+    title: raw.title ?? "",
+    version: raw.version ?? "",
+    description: raw.description ?? "",
+    changelog: raw.changelog ?? "",
+  };
+}
+
 export function PublishModal({
   serverId,
   serverName,
@@ -74,7 +106,7 @@ export function PublishModal({
   onClose: () => void;
 }) {
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
-  const [config, setConfig] = useState<PublishConfig | null>(null);
+  const [config, setConfig] = useState<PresentPublishConfig | null>(null);
   const [preview, setPreview] = useState<PublishPreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -99,7 +131,7 @@ export function PublishModal({
     void previewPublish(serverId)
       .then((result) => {
         setPreview(result);
-        setConfig(result.config);
+        setConfig(normalizeConfig(result.config));
         setError(null);
       })
       .catch((cause: unknown) => setError(describeError(cause).title));
@@ -129,11 +161,11 @@ export function PublishModal({
   const provider = providers?.find((p) => p.id === config.providerId) ?? null;
   const outDir = config.providerSettings["outDir"] ?? "";
 
-  const save = async (next: PublishConfig) => {
+  const save = async (next: PresentPublishConfig) => {
     setBusy(true);
     try {
       const saved = await setPublishConfig(serverId, next);
-      setConfig(saved);
+      setConfig(normalizeConfig(saved));
       setNotice("Configuration saved.");
       refresh();
     } catch (cause: unknown) {
@@ -143,8 +175,10 @@ export function PublishModal({
     }
   };
 
-  const patch = (part: Partial<PublishConfig>) => {
-    const next = { ...config, ...part };
+  const patch = (part: Partial<PresentPublishConfig>) => {
+    // Callers pass defined values by construction; the spread keeps the
+    // present-tense shape the reads below rely on.
+    const next = { ...config, ...part } as PresentPublishConfig;
     setConfig(next);
     void save(next);
   };

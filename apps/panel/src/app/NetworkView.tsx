@@ -167,11 +167,11 @@ export function NetworkView({ serverId }: { serverId: string }) {
 
       <div>
         <p className={styles.note}>Conflicts — other managed servers desiring the same port:</p>
-        {status.conflicts.length === 0 ? (
+        {(status.conflicts ?? []).length === 0 ? (
           <p className={styles.note}>None.</p>
         ) : (
           <ul className={styles.conflicts}>
-            {status.conflicts.map((other) => (
+            {(status.conflicts ?? []).map((other) => (
               <li key={other}>⚠ {other}</li>
             ))}
           </ul>

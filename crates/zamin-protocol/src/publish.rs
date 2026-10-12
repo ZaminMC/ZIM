@@ -46,9 +46,11 @@ pub enum SelectionRule {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishSelection {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Always serialized: an empty list is real state ("nothing included
+    /// yet") — the omission made consumers crash on `includes.length`.
+    #[serde(default)]
     pub includes: Vec<SelectionRule>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub excludes: Vec<SelectionRule>,
 }
 
@@ -64,15 +66,18 @@ pub struct PublishConfig {
     #[serde(default)]
     pub selection: PublishSelection,
     pub provider_id: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// Always serialized: `{}` is real state ("this provider takes no
+    /// settings yet") — the omission made the panel crash on
+    /// `providerSettings["outDir"]` for every fresh server.
+    #[serde(default)]
     pub provider_settings: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub title: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub description: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub version: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub changelog: String,
 }
 

@@ -280,8 +280,12 @@ async fn network_status_probe_properties_and_conflicts() {
         .expect("network.status held");
     assert_eq!(status["portAvailable"], false, "25581 is really held");
     assert!(
-        status["conflicts"].is_null(),
-        "no other server desires 25581 (empty lists serialize absent)"
+        status["conflicts"]
+            .as_array()
+            .map(Vec::is_empty)
+            .unwrap_or(false),
+        "no other server desires 25581 (empty serializes as an empty list — \
+         an omitted field crashed the panel's `conflicts.length` read)"
     );
 
     drop(listener);

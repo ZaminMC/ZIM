@@ -20,7 +20,9 @@ import {
   restingAddress,
   searchServers,
   serverTab,
+  serverUrl,
   tabKey,
+  visibleAddress,
   type Destination,
 } from "./destinations";
 import type { ServerEntry } from "./servers";
@@ -465,5 +467,149 @@ describe("displayAddress", () => {
       host: "localhost",
       port: 25565,
     });
+  });
+});
+
+
+// --- the server-address URL model (§8–§12) ---------------------------------
+
+describe("the server-page URL model", () => {
+  it("names server pages and file paths with internal URLs that round-trip", () => {
+    expect(serverUrl("tes")).toBe("zim://server/tes");
+    expect(serverUrl("tes", "console")).toBe("zim://server/tes/console");
+    expect(serverUrl("tes", "files", "eula.txt")).toBe("zim://server/tes/files/eula.txt");
+    expect(destinationUrl({ kind: "server", serverId: "tes", page: "metrics" })).toBe(
+      "zim://server/tes/metrics",
+    );
+    expect(destinationUrl({ kind: "server", serverId: "tes", page: "files", filePath: "tmp" })).toBe(
+      "zim://server/tes/files/tmp",
+    );
+    // The closed loop: the internal URL re-parses to the same destination.
+    expect(parseAddressInput("zim://server/tes/files/eula.txt")).toEqual({
+      kind: "internal",
+      destination: { kind: "server", serverId: "tes", page: "files", filePath: "eula.txt" },
+    });
+    expect(parseAddressInput("zim://server/tes/backups")).toEqual({
+      kind: "internal",
+      destination: { kind: "server", serverId: "tes", page: "backups" },
+    });
+    expect(parseAddressInput("zim://server/tes")).toEqual({
+      kind: "internal",
+      destination: { kind: "server", serverId: "tes" },
+    });
+  });
+
+  it("parses the typed server addresses: root, pages, and direct file paths (§10)", () => {
+    expect(parseAddressInput("0.0.0.0:25552")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25552,
+    });
+    expect(parseAddressInput("0.0.0.0:25552/console")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25552,
+      page: "console",
+    });
+    expect(parseAddressInput("0.0.0.0:25552/files/eula.txt")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25552,
+      page: "files",
+      filePath: "eula.txt",
+    });
+    expect(parseAddressInput("0.0.0.0:25552/files/tmp")).toEqual({
+      kind: "join",
+      host: "localhost",
+      port: 25552,
+      page: "files",
+      filePath: "tmp",
+    });
+    for (const page of [
+      "metrics",
+      "logs",
+      "players",
+      "plugins",
+      "schedules",
+      "network",
+      "startup",
+      "settings",
+      "backups",
+    ]) {
+      expect(parseAddressInput(`localhost:25552/${page}`)).toEqual({
+        kind: "join",
+        host: "localhost",
+        port: 25552,
+        page,
+      });
+    }
+  });
+
+  it("answers a path that names no page as an honest miss, never a silent dashboard", () => {
+    expect(parseAddressInput("localhost:25552/nonsense")).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "localhost:25552/nonsense" },
+    });
+    // A search phrase with a slash is still a search.
+    expect(parseAddressInput("config world/foo")).toEqual({
+      kind: "query",
+      text: "config world/foo",
+    });
+    // A path on a portless host names no page.
+    expect(parseAddressInput("localhost/console")).toEqual({
+      kind: "internal",
+      destination: { kind: "missing", url: "localhost/console" },
+    });
+  });
+
+  it("rests a server tab at the operator's own words: address + page path (§8/§11)", () => {
+    const entries = [entry("tes", { displayName: "Tes", port: 25552 })];
+    expect(restingAddress({ kind: "server", serverId: "tes" }, entries, "localhost")).toBe(
+      "localhost:25552",
+    );
+    expect(
+      restingAddress({ kind: "server", serverId: "tes", page: "console" }, entries, "localhost"),
+    ).toBe("localhost:25552/console");
+    expect(
+      restingAddress(
+        { kind: "server", serverId: "tes", page: "files", filePath: "eula.txt" },
+        entries,
+        "localhost",
+      ),
+    ).toBe("localhost:25552/files/eula.txt");
+    // The dedicated console tab rests at its own page address (§9).
+    expect(restingAddress({ kind: "console", serverId: "tes" }, entries, "localhost")).toBe(
+      "localhost:25552/console",
+    );
+    // No port yet: the internal URL, honestly.
+    expect(
+      restingAddress({ kind: "server", serverId: "tes", page: "console" }, [], "localhost"),
+    ).toBe("zim://server/tes/console");
+  });
+
+  it("translates a resting internal URL into the visible server address (the frame's law)", () => {
+    const fleet: Record<string, { port?: number }> = { tes: { port: 25552 } };
+    expect(visibleAddress("zim://server/tes", fleet, "localhost")).toBe("localhost:25552");
+    expect(visibleAddress("zim://server/tes/console", fleet, "localhost")).toBe(
+      "localhost:25552/console",
+    );
+    expect(visibleAddress("zim://server/tes/files/eula.txt", fleet, "localhost")).toBe(
+      "localhost:25552/files/eula.txt",
+    );
+    expect(visibleAddress("zim://console/tes", fleet, "localhost")).toBe("localhost:25552/console");
+    // The fleet has not learned the server yet (or it has no port): the
+    // internal URL shows, never an invented address.
+    expect(visibleAddress("zim://server/tes/console", {}, "localhost")).toBe(
+      "zim://server/tes/console",
+    );
+    // Non-server URLs keep the display law (join elision, zim:// as-is).
+    expect(visibleAddress("zim://join/localhost:25565", fleet, "localhost")).toBe(
+      "localhost:25565",
+    );
+    expect(visibleAddress("zim://settings/", fleet, "localhost")).toBe("zim://settings/");
+    // The round-trip: the VISIBLE text re-commits to the same destination.
+    expect(parseAddressInput(visibleAddress("zim://server/tes/console", fleet, "localhost"))).toEqual(
+      { kind: "join", host: "localhost", port: 25552, page: "console" },
+    );
   });
 });

@@ -332,6 +332,18 @@ impl Actor {
             Ok(settings) => settings,
             Err(error) => return Err(self.preflight_failure(error)),
         };
+        // The boot stamp (§37 / ADR-0007): the layered config's desired
+        // port is re-pointed into server.properties BEFORE the JVM
+        // launches, so the process binds the port the panel shows. Until
+        // this stamp, a Network-tab port edit only changed the config
+        // model — the server kept binding whatever its properties file
+        // carried from creation day, and the bar's address lied. The
+        // write is atomic and skips absent files (a hand-registered
+        // server without properties keeps its gap; preflight owns that
+        // honesty, never a fabricated file).
+        if let Some(port) = settings.port {
+            zamin_core::server::properties::patch_server_port(&self.root, port);
+        }
         if let Err(error) = self.preflight(&settings).await {
             return Err(self.preflight_failure(error));
         }
@@ -459,7 +471,13 @@ impl Actor {
         let spec = zamin_core::platform::SpawnSpec {
             program: java,
             args,
-            working_dir: self.root.clone(),
+            // The JVM boundary: the registry's canonical root (verbatim
+            // `\\?\` on Windows) is the right form for ZIM's own file
+            // operations, but Java's Windows path parser rejects the
+            // prefix — the working directory crosses into Java's
+            // vocabulary here, simplified to the form it can consume
+            // (platform::java_working_dir owns the law and its tests).
+            working_dir: zamin_core::platform::java_working_dir(&self.root),
             limits,
             sandbox,
         };
