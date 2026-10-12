@@ -26,3 +26,4 @@ Thumbs.db
 .vscode/
 *.swp
 apps/panel/src-tauri/Cargo.lock
+apps/panel/bun.lock

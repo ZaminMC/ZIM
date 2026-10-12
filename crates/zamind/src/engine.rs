@@ -157,6 +157,48 @@ fn server_dir(data_dir: &Path, id: &str) -> PathBuf {
     data_dir.join("servers").join(id)
 }
 
+/// The marker reconcile (ADR-0004): every directory under `instances/`
+/// carrying a valid `.zamin/server.json` marker is registered into the
+/// registry when its id is missing. A dir without a readable marker is
+/// NOT ours to guess — a torn creation (no marker yet) or a hand-placed
+/// tree; the create path owns the torn case (quarantine-and-proceed).
+/// Idempotent by construction: existing ids are skipped, nothing is
+/// deleted, and every heal speaks in the log.
+fn reconcile_markers(registry: &mut Registry, instances: &Path) {
+    let Ok(entries) = std::fs::read_dir(instances) else {
+        return; // no instances dir yet: nothing to reconcile
+    };
+    for entry in entries.flatten() {
+        let root = entry.path();
+        if !root.is_dir() {
+            continue;
+        }
+        let Ok(Some(server_id)) = marker::read_marker(&root) else {
+            continue; // not a managed instance; not ours to guess
+        };
+        if registry.get(&server_id).is_some() {
+            continue; // the registry already knows it
+        }
+        let display = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| server_id.to_string());
+        match registry.register(server_id.clone(), display, &root) {
+            Ok(_) => tracing::info!(
+                "reconciled registry entry for server {server_id} from {root:?} (the marker \
+                 outranks the missing row)"
+            ),
+            // A duplicate id/root cannot happen against a checked id
+            // above; anything else (root now held by another id — two
+            // dirs claiming one id) is logged, and the first wins.
+            // Nothing is deleted.
+            Err(e) => tracing::error!(
+                "instance dir {root:?} carries marker {server_id} but could not register: {e}"
+            ),
+        }
+    }
+}
+
 /// A provenance slot from the core's fixed-order array → the wire view.
 fn field_prov(p: zamin_core::config::Provenance) -> zamin_protocol::config::FieldProvenance {
     match p {
@@ -241,43 +283,25 @@ impl Engine {
                     tracing::error!("could not quarantine the corrupt registry: {e}");
                 }
                 let mut registry = Registry::empty(&path);
-                let instances = data_dir.join("instances");
-                let Ok(entries) = std::fs::read_dir(&instances) else {
-                    tracing::warn!(
-                        "no instances dir at {:?}; starting with an empty registry",
-                        instances
-                    );
-                    return registry;
-                };
-                for entry in entries.flatten() {
-                    let root = entry.path();
-                    if !root.is_dir() {
-                        continue;
-                    }
-                    let Ok(Some(server_id)) = marker::read_marker(&root) else {
-                        continue; // not a managed instance; not ours to guess
-                    };
-                    let display = root
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| server_id.to_string());
-                    match registry.register(server_id.clone(), display, &root) {
-                        Ok(_) => tracing::info!(
-                            "self-healed registry entry for server {server_id} from {:?}",
-                            root
-                        ),
-                        // A duplicate id/root cannot happen against a fresh
-                        // registry unless two dirs claim one id — the first
-                        // wins, the loser is logged, nothing is deleted.
-                        Err(e) => tracing::error!(
-                            "instance dir {:?} carries marker {server_id} but could not register: {e}",
-                            root
-                        ),
-                    }
-                }
+                reconcile_markers(&mut registry, &data_dir.join("instances"));
                 registry
             }
         }
+    }
+
+    /// The every-boot reconcile (ADR-0004): a directory under `instances/`
+    /// carrying a valid `.zamin/server.json` marker IS that server, even
+    /// when a HEALTHY registry lacks the row (a create job's registering
+    /// step killed between the registry write and the marker write — or a
+    /// registry quarantine that ran while the directory was mid-copy).
+    /// The resilient load above runs this same scan on the rebuilt
+    /// registry; the healthy boot runs it too, because the marker — not
+    /// the registry row — is the ownership deed. Idempotent: registered
+    /// ids are skipped, nothing is ever deleted.
+    pub fn reconcile_instance_markers(&self) {
+        let instances = self.instances_dir();
+        let mut registry = self.registry_lock();
+        reconcile_markers(&mut registry, &instances);
     }
 
     pub fn hub(&self) -> &HubHandle {
@@ -1414,6 +1438,27 @@ impl Engine {
             .remove(server_id)
             .map_err(|e| to_protocol(&e))?;
         let _ = std::fs::remove_dir_all(server_dir(&self.inner.data_dir, server_id.as_str()));
+        // Revoke the deed (ADR-0004): the marker is what makes a directory
+        // a MANAGED server — boot reconcile and the create-path heal both
+        // obey it. A removal that left the marker behind would resurrect
+        // the server at the next boot and keep the id un-creatable
+        // ("the directory exists but is not registered"). The world files
+        // stay (removal is not destruction — the tree remains plain data,
+        // discoverable and re-registrable by hand); only the ownership
+        // deed goes. Best-effort: the fleet row is already gone either way.
+        let instance_root = self.instances_dir().join(server_id.as_str());
+        let marker_file = instance_root.join(marker::MARKER_FILE);
+        match std::fs::remove_file(&marker_file) {
+            Ok(()) => tracing::info!(
+                "server {server_id}: ownership marker revoked ({marker_file:?}); the instance \
+                 tree remains as plain data"
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!(
+                "server {server_id}: could not revoke the marker at {marker_file:?}: {e} — a \
+                 later boot may re-register this directory"
+            ),
+        }
         // The sandbox boundary goes with the server (Windows: AppContainer
         // profile + loopback exemption). Best-effort: a leftover profile
         // is inert (nothing can spawn into it), logged if removal fails.
@@ -2446,13 +2491,97 @@ impl Engine {
         }
         let instance_root = self.instances_dir().join(server_id.as_str());
         if instance_root.exists() {
-            return Err(ProtocolError::new(
-                ErrorCode::ServerIdExists,
-                format!(
-                    "A directory for server {server_id} already exists at {instance_root:?} but it is not registered; remove it or register it instead."
-                ),
-            )
-            .into());
+            match marker::read_marker(&instance_root) {
+                // A VALID marker outranks the missing registry entry
+                // (ADR-0004): this directory IS the server — its registry
+                // row was lost (a registry quarantine that ran while the
+                // dir was away, a hand-copied tree) and the marker says
+                // so. The old answer — "remove it or register it instead"
+                // — handed the operator a shovel; the heal re-registers
+                // the server HERE and says where it went. The create is
+                // still refused (the id is taken again), but the fleet
+                // now shows the server and every verb works on it.
+                Ok(Some(_)) => {
+                    let display = instance_root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| server_id.to_string());
+                    match self
+                        .register_server(server_id.clone(), display, instance_root.clone())
+                        .await
+                    {
+                        Ok(_) => {
+                            tracing::warn!(
+                                "server.create: directory {instance_root:?} carries a valid \
+                                 marker for {server_id} but was unregistered; re-registered it \
+                                 (the fleet shows it again)"
+                            );
+                            return Err(ProtocolError::new(
+                                ErrorCode::ServerIdExists,
+                                format!(
+                                    "A directory for server {server_id} already exists and ZIM \
+                                     has re-registered it — open it from the fleet or the \
+                                     discovery page; remove it there if you meant to start over."
+                                ),
+                            )
+                            .into());
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "server.create: could not re-register the marked directory \
+                                 {instance_root:?}: {e}"
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
+                // NO marker (or an unreadable one): under the daemon's own
+                // instances dir this is a TORN CREATION — a job killed
+                // mid-flight (hard kill, power loss, installer battle)
+                // between `create_dir_all` and the registering step, which
+                // is where cleanup lives. The old law refused every future
+                // create of this id until the operator hand-deleted the
+                // directory ("after clearing lock files, I was able to
+                // freely create servers"). The heal: QUARANTINE, never
+                // destroy — the whole tree is renamed beside itself and
+                // the creation proceeds. Evidence is preserved, nothing is
+                // overwritten, and the audit trail (server.create) plus
+                // this log line say exactly what moved where.
+                marker_read => {
+                    let quarantine = instance_root.with_file_name(format!(
+                        "{}.torn-{}",
+                        server_id.as_str(),
+                        now_ms_unix()
+                    ));
+                    match std::fs::rename(&instance_root, &quarantine) {
+                        Ok(()) => {
+                            tracing::warn!(
+                                "server.create: unregistered directory {instance_root:?} \
+                                 (marker: {:?}) quarantined to {quarantine:?}; the creation \
+                                 proceeds — the old tree is preserved, not deleted",
+                                marker_read.map(|m| m.is_some()),
+                            );
+                        }
+                        Err(e) => {
+                            // The rename lost (a file inside is held open
+                            // by a still-running process, permissions).
+                            // Refusing IS the honest answer now: inventing
+                            // a different id would surprise, deleting
+                            // would destroy. The words say what holds it.
+                            return Err(ProtocolError::new(
+                                ErrorCode::ServerIdExists,
+                                format!(
+                                    "A directory for server {server_id} already exists at \
+                                     {instance_root:?} and could not be set aside ({e}); close \
+                                     anything using it — the server it belonged to was never \
+                                     registered."
+                                ),
+                            )
+                            .into());
+                        }
+                    }
+                }
+            }
         }
 
         // Resolve the download (and the version's Java requirement) up

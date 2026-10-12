@@ -222,6 +222,14 @@ async fn run(config: DaemonConfig) {
     // (ADR-0005). No process is ever killed here.
     engine.adopt_existing_servers().await;
 
+    // The marker reconcile (ADR-0004): instance dirs carrying a valid
+    // ownership marker register themselves even when the registry file
+    // loaded FINE — the marker outranks a missing row. This is the
+    // healthy-boot sibling of the resilient load's rebuild scan; without
+    // it a create job killed between the registry write and the marker
+    // write would leave a server the fleet cannot see.
+    engine.reconcile_instance_markers();
+
     // The clock starts with the daemon (ADR-0014): schedules fire only
     // while it runs, intervals re-anchor at this instant, and nothing
     // missed while it was down is replayed.
