@@ -3,9 +3,10 @@
   overflow-y: auto;
   display: flex;
   justify-content: center;
-  /* Flat white — Chrome's NTP ground. No glow, no wash: the page's
-     quietness IS the design. */
-  background: var(--bg);
+  /* The Arix port: the NTP rides the stage — the page is transparent
+     so the background layer and the glass input carry the theme. */
+  background: transparent;
+  position: relative;
 }
 
 .center {
@@ -36,13 +37,22 @@
   padding: 0 var(--space-5);
   border: 1px solid var(--border);
   border-radius: 999px;
+  /* The Arix glass field: translucent surface over the stage, blurred
+     by the glass law (.backdrop from the theme layer). */
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 15px;
   outline: none;
   box-shadow: var(--shadow-s);
   transition: border-color var(--speed-fast) var(--ease), box-shadow var(--speed-fast) var(--ease);
+}
+
+:root[data-glass="off"] .input {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .input:focus {
@@ -157,6 +167,13 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+}
+
+:root[data-glass="off"] .machine {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .machine[role="alert"] {
@@ -192,4 +209,55 @@
 
 .kindChip[data-kind="jar"] {
   color: var(--text-muted);
+}
+
+/* -- The Appearance Studio's trigger (the Arix theme port) ------------
+   The new tab's bottom-right icon — Arix's floating button law
+   (arix.css's .floating-button-2: rgba glass + blur(16px), sticky at
+   the corner), the door into the customization sidebar. It sits fixed
+   so it never scrolls away, quiet until hovered. */
+.studioTrigger {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 58;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-box);
+  background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: var(--shadow-m);
+  transition:
+    color var(--speed-fast) var(--ease),
+    border-color var(--speed-fast) var(--ease),
+    transform var(--speed-fast) var(--ease);
+}
+
+.studioTrigger:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  transform: translateY(-1px);
+}
+
+.studioTrigger:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 3px;
+}
+
+:root[data-glass="off"] .studioTrigger {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studioTrigger:hover {
+    transform: none;
+  }
 }

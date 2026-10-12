@@ -12,11 +12,19 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* The Arix port: the content root is TRANSPARENT — the stage layer
+     (below) owns the ground + the preset image, and every translucent
+     surface above it becomes the glass the theme promises. The theme's
+     text contract rides the tokens as always. */
+  background: transparent;
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-m);
 }
+
+/* The stage class lives in the global glass layer (theme/arix.css's
+   .arix-bg — the module layer stays token-only); the JSX mounts it
+   directly as a global class name. */
 
 /* Every destination view fills the band it is given; pages with inner
    scroll regions (the console, log viewers) hang their flex:1 off
@@ -51,10 +59,11 @@
   min-height: 0;
 }
 
-/* The beat before a lazy evidence page lands — quiet, not a spinner. */
+/* The beat before a lazy evidence page lands — quiet, not a spinner.
+   Transparent so the stage keeps showing through the wait. */
 .lazyFallback {
   flex: 1;
-  background: var(--bg);
+  background: transparent;
 }
 
 /* The wire banner: the honest strip between the shell and a working

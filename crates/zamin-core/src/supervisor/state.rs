@@ -105,6 +105,9 @@ impl StateMachine {
                     phase: zamin_protocol::server::CrashPhase::from(CrashPhase::Startup),
                     exit_code: Some(*exit_code),
                     evidence: None,
+                    // The evidence (and with it the diagnosis) is
+                    // attached by the actor, which owns the log tail.
+                    diagnosis: None,
                 }))
             }
             (S::Starting, Cmd::PreflightFailed { .. }) => Some(Transition::To(S::FailedPreflight)),
@@ -120,6 +123,7 @@ impl StateMachine {
                     phase: zamin_protocol::server::CrashPhase::from(CrashPhase::Runtime),
                     exit_code: Some(*exit_code),
                     evidence: None,
+                    diagnosis: None,
                 }))
             }
 
@@ -130,6 +134,7 @@ impl StateMachine {
                     phase: zamin_protocol::server::CrashPhase::from(CrashPhase::Shutdown),
                     exit_code: Some(*exit_code),
                     evidence: None,
+                    diagnosis: None,
                 }))
             }
 

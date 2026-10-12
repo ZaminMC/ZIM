@@ -41,6 +41,50 @@ pub struct CrashClassification {
     /// Evidence excerpt (last log activity) — display data, not for parsing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// The pattern-matched failure family (zamin-core's crash table,
+    /// 2026-10-12): present only when the evidence names a known cause —
+    /// a vanilla-jar DNS failure, a port conflict, a heap shortfall —
+    /// and always derived from the real process output, never guessed.
+    /// Older daemons omit it; the card's raw-excerpt fallback covers
+    /// that era unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnosis: Option<CrashDiagnosis>,
+}
+
+/// One diagnosed failure family: a stable kind (the wire's kebab-case
+/// id), a human title, and remediation steps the operator can walk.
+/// Defined HERE because it is wire data (the crash card's payload);
+/// the pattern table that produces it lives in the engine
+/// (zamin-core's `crash` module) and may evolve independently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashDiagnosis {
+    /// The family's stable id — the wire contract for UI styling.
+    pub kind: CrashDiagnosisKind,
+    /// The one sentence the crash card leads with.
+    pub title: String,
+    /// Ordered, actionable steps (each its own line in the card).
+    pub remediation: Vec<String>,
+}
+
+/// The failure families the engine's pattern table knows. Kebab-case
+/// on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CrashDiagnosisKind {
+    /// DNS resolution failed during a download the server itself
+    /// performs (Paperclip's vanilla jar, plugin fetches, Mojang APIs).
+    NetworkDns,
+    /// A connection timed out or was refused mid-download.
+    NetworkTimeout,
+    /// The server's port was already taken (BindException).
+    PortInUse,
+    /// The JVM could not get the memory it asked for.
+    Memory,
+    /// The configured Java is too old for the server software.
+    JavaVersion,
+    /// The jar itself is corrupt or not a server jar.
+    CorruptJar,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

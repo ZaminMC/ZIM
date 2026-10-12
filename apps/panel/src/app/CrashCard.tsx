@@ -88,7 +88,24 @@ export function CrashCard({
         {crash.error?.code ? <span className={styles.chip}>{crash.error.code}</span> : null}
       </div>
 
-      {reason ? (
+      {/* The diagnosis lane (2026-10-12): the daemon's pattern table
+          matched the evidence to a failure family — the card leads with
+          the named cause and its remediation steps, the evidence excerpt
+          it was derived from stays below. The founder's own case reads
+          "this machine could not resolve launcher.mojang.com" instead
+          of a bare exit code and a stack trace. */}
+      {crash.diagnosis ? (
+        <div className={styles.diagnosis} data-kind={crash.diagnosis.kind}>
+          <p className={styles.diagnosisTitle}>{crash.diagnosis.title}</p>
+          {crash.diagnosis.remediation.length > 0 ? (
+            <ul className={styles.remediation}>
+              {crash.diagnosis.remediation.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : reason ? (
         <p className={styles.reason}>
           <strong>Reason:</strong> {reason}
         </p>

@@ -91,6 +91,44 @@ describe("<PopupApp /> boot", () => {
     expect(container.querySelector(".menu")).toBeNull();
   });
 
+  it("the persistent overlay re-boots on shell://popup-boot — a later show re-renders fresh", async () => {
+    // THE PERSISTENT OVERLAY LAW: the webview outlives every menu it
+    // serves; the host's popup-boot event is the re-boot signal. Here a
+    // booted tab menu for tab 7 receives the event for an APP MENU —
+    // the overlay must re-read the world and render the app menu's
+    // items, never the stale tab menu's.
+    await renderBooted();
+    expect(screen.getByRole("menuitem", { name: /Pin tab/ })).toBeTruthy();
+    bootContext({ kind: "app-menu", bar_visible: true, zoom: 1 });
+    fireShellEvent("shell://popup-boot");
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: /New window/ })).toBeTruthy();
+    });
+    // The stale tab menu's verbs are gone — the re-boot reset the world.
+    expect(screen.queryByRole("menuitem", { name: /Pin tab/ })).toBeNull();
+    // The re-boot also re-applied the focus law (one rAF after the
+    // context lands, the menu asks for the focus again).
+    await waitFor(() => {
+      expect(invoked.some((call) => call.cmd === "shell_popup_focus")).toBe(true);
+    });
+  });
+
+  it("a re-boot after the naming form resets the form's half-typed state", async () => {
+    // The transient postures the previous popup left behind — the
+    // naming form's half-typed name above all — must not leak into the
+    // next menu a persistent overlay serves.
+    await renderBooted();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Add to new group/ }));
+    const field = await screen.findByPlaceholderText(/group name/i);
+    fireEvent.change(field, { target: { value: "half-typed" } });
+    bootContext(TAURI_CONTEXT);
+    fireShellEvent("shell://popup-boot");
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: /Pin tab/ })).toBeTruthy();
+    });
+    expect(screen.queryByPlaceholderText(/group name/i)).toBeNull();
+  });
+
   it("the demo lane reads its kind from the query, no host involved", async () => {
     history.replaceState(null, "", "/popup.html?demo&kind=app-menu");
     const { container } = render(<PopupApp />);
@@ -613,6 +651,19 @@ vi.mock("@tauri-apps/api/event", () => ({
     eventListeners.push({ event, handler });
     return Promise.resolve(() => {});
   },
+}));
+
+// The persistent-overlay era listens through the CURRENT WEBVIEW's
+// scoped lane (PopupApp's scoping law): the mock stands in for
+// getCurrentWebview().listen with the same recorder, so the tests fire
+// the same payloads shell_popup_update / shell_popup_fade carry.
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    listen: (event: string, handler: (e: { payload: unknown }) => void) => {
+      eventListeners.push({ event, handler });
+      return Promise.resolve(() => {});
+    },
+  }),
 }));
 
 const fireShellEvent = (event: string, payload?: unknown): void => {

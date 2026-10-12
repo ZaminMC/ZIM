@@ -193,6 +193,7 @@ async function wireEvents(): Promise<void> {
           phase: event.crash.phase,
           exitCode: event.crash.exitCode,
           evidence: event.crash.evidence,
+          diagnosis: event.crash.diagnosis,
           error: event.error,
           resolved: false,
         });

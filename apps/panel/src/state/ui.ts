@@ -20,6 +20,10 @@ interface UiState {
   newServerPort: string | null;
   paletteOpen: boolean;
   connectionsOpen: boolean;
+  /** The Appearance Studio (the Arix theme port): the new tab's
+   *  bottom-right icon opens it; it renders at the app root so it
+   *  survives navigation while open. */
+  studioOpen: boolean;
   /** Verb currently in flight per server ("start" | "stop" | …). */
   pending: Record<string, string>;
   /** Last failed dispatch per server. */
@@ -28,6 +32,7 @@ interface UiState {
   setNewServerPort: (port: string | null) => void;
   setPaletteOpen: (open: boolean) => void;
   setConnectionsOpen: (open: boolean) => void;
+  setStudioOpen: (open: boolean) => void;
   setPending: (serverId: string, verb: string | null) => void;
   setActionError: (serverId: string, error: ActionError | null) => void;
 }
@@ -37,6 +42,7 @@ export const useUi = create<UiState>()((set) => ({
   newServerPort: null,
   paletteOpen: false,
   connectionsOpen: false,
+  studioOpen: false,
   pending: {},
   actionErrors: {},
 
@@ -44,6 +50,7 @@ export const useUi = create<UiState>()((set) => ({
   setNewServerPort: (port) => set({ newServerPort: port }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setConnectionsOpen: (open) => set({ connectionsOpen: open }),
+  setStudioOpen: (open) => set({ studioOpen: open }),
   setPending: (serverId, verb) =>
     set((state) => {
       const pending = { ...state.pending };

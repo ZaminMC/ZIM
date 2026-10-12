@@ -1184,6 +1184,18 @@ impl Actor {
                         report.evidence = Some(excerpt.join("\n"));
                     }
                 }
+                // The diagnosis lane (2026-10-12): the evidence the card
+                // already carries is pattern-matched against the failure
+                // families the engine knows — the founder's own case (a
+                // vanilla-jar download dying on a DNS failure inside
+                // Paperclip) reads as "server crashed, exit 1" no more.
+                // The honesty law is the table's: no pattern, no diagnosis,
+                // and the raw excerpt stays the whole story.
+                if report.diagnosis.is_none() {
+                    if let Some(evidence) = report.evidence.as_deref() {
+                        report.diagnosis = zamin_core::crash::diagnose_evidence(evidence);
+                    }
+                }
                 self.publish_crash(report);
             }
             Ok(_) => {

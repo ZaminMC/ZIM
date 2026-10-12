@@ -43,10 +43,26 @@ export type ServerState =
 
 export type CrashPhase = "startup" | "runtime" | "shutdown";
 
+/** The failure family the daemon's pattern table matched (kebab-case
+ *  kind + words the operator can act on). Absent = the evidence named
+ *  no known cause — the card's raw-excerpt fallback. */
+export interface CrashDiagnosis {
+  kind:
+    | "network-dns"
+    | "network-timeout"
+    | "port-in-use"
+    | "memory"
+    | "java-version"
+    | "corrupt-jar";
+  title: string;
+  remediation: string[];
+}
+
 export interface CrashClassification {
   phase: CrashPhase;
   exitCode?: number;
   evidence?: string;
+  diagnosis?: CrashDiagnosis;
 }
 
 export interface ServerSummary {

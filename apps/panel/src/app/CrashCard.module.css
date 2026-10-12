@@ -106,6 +106,33 @@
   color: var(--text, var(--text));
 }
 
+/* The diagnosis lane (2026-10-12): the named cause leads — a soft
+   danger-tinted panel with the family's title and its steps. The
+   data-kind hook lets a family carry its own accent later without
+   touching this sheet again. */
+.diagnosis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--danger-border);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}
+
+.diagnosisTitle {
+  margin: 0;
+  font-size: var(--text-m);
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.diagnosis .remediation {
+  margin: 0;
+}
+
 .actions button:disabled {
   opacity: 0.45;
   cursor: default;

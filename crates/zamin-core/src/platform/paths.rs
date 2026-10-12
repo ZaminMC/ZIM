@@ -1,12 +1,28 @@
 //! Platform application directories (ADR-0008). Pure functions take the
 //! environment as input so tests never mutate process state.
+//!
+//! THE INSTALLATION-DIRECTORY LAW (the founder's demand, 2026-10-12):
+//! ZIM is a PORTABLE-CITIZEN install — its servers, caches, JDKs, logs,
+//! the whole data bulk live under the INSTALLATION directory (the
+//! folder the executables run from), not scattered through the OS's
+//! per-user trees. The panel and the daemon are siblings of one
+//! another in that directory, so `current_exe().parent()` is the one
+//! root both resolve identically. The platform's per-user tree
+//! survives only as the FALLBACK for an unwritable install location
+//! (a per-machine `C:\Program Files` install without elevation), and
+//! the operator's redirect file remains the loudest authority of all.
 
 use std::path::{Path, PathBuf};
 
-/// Daemon-owned state: registry, per-server state, logs of the daemon
-/// itself (ADR-0004). Windows: `%LOCALAPPDATA%\ZIM`. Linux:
-/// `$XDG_DATA_HOME/zim`, default `~/.local/share/zim`.
+/// The data root: the INSTALLATION directory's `data` subtree when the
+/// install location is writable, else the platform per-user tree.
+/// Windows: `<install>\data`, fallback `%LOCALAPPDATA%\ZIM`. Linux:
+/// `<install>/data`, fallback `$XDG_DATA_HOME/zim`, default
+/// `~/.local/share/zim`.
 pub fn data_dir() -> PathBuf {
+    if let Some(root) = install_data_root() {
+        return root;
+    }
     #[cfg(windows)]
     {
         let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
@@ -22,12 +38,51 @@ pub fn data_dir() -> PathBuf {
     }
 }
 
-/// Human-edited configuration (ADR-0007). Windows: same tree as data.
-/// Linux: `$XDG_CONFIG_HOME/zim`, default `~/.config/zim`.
+/// The installation directory's own data root, when it can actually
+/// hold files: `<exe_dir>/data`. The probe WRITES and removes one
+/// probe file — an existence check says nothing about ACLs, and a
+/// per-machine install in `Program Files` would otherwise pass a
+/// read-only check and then fail on the first server create. A dev
+/// tree (`target/debug`) is writable, so development data lands beside
+/// the binaries exactly as the law intends.
+fn install_data_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let root = dir.join("data");
+    if std::fs::create_dir_all(&root).is_err() {
+        return None;
+    }
+    let probe = root.join(".write-probe");
+    let writable = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    if writable {
+        Some(root)
+    } else {
+        None
+    }
+}
+
+/// Human-edited configuration (ADR-0007): the installation directory's
+/// `config` subtree when writable (same law as the data root — a
+/// portable install keeps its whole state together), else the platform
+/// per-user tree. The storage redirect pointer deliberately does NOT
+/// live here — see [`storage_redirect_file`].
 pub fn config_dir() -> PathBuf {
+    let exe = std::env::current_exe().ok();
+    if let Some(dir) = exe.as_deref().and_then(Path::parent) {
+        let root = dir.join("config");
+        if std::fs::create_dir_all(&root).is_ok() {
+            let probe = root.join(".write-probe");
+            let writable = std::fs::write(&probe, b"").is_ok();
+            let _ = std::fs::remove_file(&probe);
+            if writable {
+                return root;
+            }
+        }
+    }
     #[cfg(windows)]
     {
-        data_dir()
+        data_dir_windows_fallback()
     }
     #[cfg(unix)]
     {
@@ -37,6 +92,14 @@ pub fn config_dir() -> PathBuf {
         let home = std::env::var("HOME").ok().filter(|s| !s.is_empty());
         config_dir_unix(xdg.as_deref(), home.as_deref().map(PathBuf::from))
     }
+}
+
+/// The Windows fallback tree for config when the install dir refuses
+/// writes: the per-user data tree (its own law below).
+#[cfg(windows)]
+fn data_dir_windows_fallback() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    data_dir_windows(&base)
 }
 
 /// Runtime artifacts (sockets, lock-free pid files). Linux:
@@ -100,14 +163,15 @@ fn config_dir_unix(xdg_config_home: Option<&str>, home: Option<PathBuf>) -> Path
 // --- the storage redirect (user-controlled data root) ------------------
 //
 // The data bulk — server instances, the artifact cache, fetched JDKs —
-// lands under one root the OPERATOR chooses, because the OS's default
-// drive is not always the right one (a small C: SSD and a large D: is
-// the classic machine). The pointer must live at an address findable
-// WITHOUT knowing the data dir, so it rides the platform's own config
-// location: one line, one absolute path, written atomically. The daemon
-// resolves it exactly once, at startup.
+// lands under one root the OPERATOR chooses, because the install
+// directory's drive is not always the right one (a small C: SSD and a
+// large D: is the classic machine). The pointer must live at an address
+// findable WITHOUT knowing the data dir, so it rides the installation
+// config location (the platform per-user tree only when the install
+// dir refuses writes): one line, one absolute path, written atomically.
+// The daemon resolves it exactly once, at startup.
 
-/// The redirect pointer file's fixed address (inside the platform config
+/// The redirect pointer file's fixed address (inside the install config
 /// dir — deliberately NOT inside the data dir, or moving the data would
 /// move the pointer that says where the data is).
 pub fn storage_redirect_file() -> PathBuf {
@@ -199,6 +263,36 @@ mod tests {
         assert_eq!(dir, PathBuf::from(r"C:\Users\u\AppData\Local\ZIM"));
         let fallback = data_dir_windows("");
         assert!(!fallback.as_os_str().is_empty());
+    }
+
+    // -- the installation-directory law (2026-10-12) ---------------------
+
+    #[test]
+    fn the_install_dir_owns_the_data_when_writable() {
+        // A test binary runs from a WRITABLE directory (target/debug or
+        // its deps) — the law's main case: the data root is the exe's
+        // own sibling `data`, keeping the install self-contained.
+        if let Some(root) = install_data_root() {
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf));
+            assert_eq!(root.file_name(), Some(std::ffi::OsStr::new("data")));
+            assert_eq!(exe_dir.as_deref(), root.parent());
+        }
+        // The unwritable case (Program Files without elevation) cannot
+        // be staged portably in a test; its law is the fallback tree's
+        // own tests above, and the probe's write-and-remove check is the
+        // only honest way to ask the filesystem anyway.
+    }
+
+    #[test]
+    fn data_dir_names_the_install_data_subtree() {
+        // The public resolver: with a writable install dir the root IS
+        // the install subtree (file_name "data"), never the per-user
+        // tree's "zim"/"ZIM" leaf.
+        if install_data_root().is_some() {
+            assert_eq!(data_dir().file_name(), Some(std::ffi::OsStr::new("data")));
+        }
     }
 
     // -- the storage redirect's resolution laws --------------------------

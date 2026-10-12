@@ -25,7 +25,6 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 
 use tauri::{
@@ -518,10 +517,14 @@ fn window_label_of(webview: &tauri::Webview) -> String {
         return window.to_owned();
     }
     // The popup overlay (menus, the group form) belongs to its window:
-    // its verbs land on that window's strip. Generation labels split at
-    // the last dash (popup-{window}-{gen}); the bare suffix law stays
-    // below only as a tolerant fallback for a label the counter never
-    // minted.
+    // its verbs land on that window's strip. The persistent overlay's
+    // label is the whole remainder after the prefix (a window name may
+    // carry dashes of its own); the legacy generation labels and the
+    // bare suffix law below stay only as tolerant fallbacks for labels
+    // the current law never mints.
+    if let Some(window) = parse_overlay_label(label) {
+        return window;
+    }
     if let Some(window) = parse_popup_label(label) {
         return window;
     }
@@ -531,35 +534,44 @@ fn window_label_of(webview: &tauri::Webview) -> String {
     label.to_owned()
 }
 
-/// True when this webview IS a popup overlay.
+/// True when this webview IS a popup overlay (the persistent overlay
+/// of its window, or a legacy generation label from the pre-law era).
 fn is_popup(webview: &tauri::Webview) -> bool {
-    webview.label().starts_with("popup-")
+    webview.label().starts_with("overlay-") || webview.label().starts_with("popup-")
 }
 
-// THE GENERATION LAW (the right-click crash's fourth defense): a popup's
-// label is `popup-{window}-{gen}`, gen from a process-wide counter, so
-// EVERY popup webview is born with a label no popup ever held. The old
-// fixed label (`popup-{window}`) made the create race the previous
-// popup's teardown: WebView2's controller Close is asynchronous and can
-// take longer than any fixed beat, and a create that lands while the
-// manager still holds the old registration is refused
-// (WebviewLabelAlreadyExists) — the founder's right-click opens NOTHING.
-// With unique labels the create cannot collide; dismissal closes by the
-// STORED label and the create path sweeps any prefix strays (an orphan
-// whose PopupState died mid-flight), so one window still holds at most
-// one live popup.
-static POPUP_GEN: AtomicU64 = AtomicU64::new(1);
-
-fn next_popup_label(window: &str) -> String {
-    format!(
-        "popup-{window}-{}",
-        POPUP_GEN.fetch_add(1, Ordering::Relaxed)
-    )
+// THE PERSISTENT OVERLAY LAW (the right-click crash's final answer,
+// 2026-10-12): one popup webview per window, born once, NEVER destroyed
+// until its window dies. The four earlier defenses (generation labels,
+// boot order, the destroy/create beat, the focus law) each narrowed a
+// crash window that rapid WebView2 controller create/close cycles kept
+// reopening — the founder's right-click STILL crashed because the crash
+// class lives in the cycle itself: on Windows, a controller Close is an
+// asynchronous operation on the parent HWND, and a Create landing while
+// the manager still holds a torn-down controller is a native fault. The
+// persistent overlay deletes the cycle by construction: open = show an
+// existing webview, close = hide it. There is no teardown to race, no
+// label to mint, no stray to sweep — Chromium's own menu widgets are
+// exactly this (built once per widget host, shown and hidden, never
+// reborn per invocation). The focus law stays (born unfocused; the menu
+// asks for focus from its own first painted frame) and the boot order
+// law stays (state lands before the first show; every later show rides
+// the `shell://popup-boot` event so the overlay re-renders fresh).
+fn overlay_label(window: &str) -> String {
+    format!("overlay-{window}")
 }
 
-/// Which window does this popup label belong to? The generation holds no
-/// dash, the window may: split at the LAST dash and require the suffix
-/// to be numeric. `popup-main-7` → `main`; `popup-zim-2-13` → `zim-2`.
+/// Which window does this overlay label belong to? The whole remainder
+/// after the prefix IS the window name — no generation suffix to split.
+fn parse_overlay_label(label: &str) -> Option<String> {
+    label.strip_prefix("overlay-").map(str::to_owned)
+}
+
+/// The legacy generation labels (popup-{window}-{gen}) of the pre-law
+/// era: still recognized for window attribution so an upgrade's stale
+/// webview — if the process ever carried one across a live swap — never
+/// orphans its verbs. The sweep died with the create/close cycle; this
+/// only keeps attribution honest.
 fn parse_popup_label(label: &str) -> Option<String> {
     let rest = label.strip_prefix("popup-")?;
     let (window, gen) = rest.rsplit_once('-')?;
@@ -767,15 +779,18 @@ pub fn sync(app: &AppHandle, state: &ShellState, window_label: &str) -> Result<(
 
     // The active tab's webview is created lazily (WebContents born on
     // first focus — a restored session's inactive tabs stay cold).
-    // The webview's own background is WHITE (Chromium's blank paint —
-    // the first composited frame of a new tab): a booting page flashes
-    // paper, never the window's raw surface.
+    // The webview's own background is the THEME GROUND (the Arix port's
+    // law, 2026-10-12): a booting page paints the theme's own dark
+    // ground — #0b0d2a, gray800 — never paper, never the window's raw
+    // surface. The inline boot script in index.html takes over from
+    // the first document paint; this color owns the beat before it,
+    // which is exactly the half-frame flash the founder filed.
     if let Some((id, destination, reload)) = create_tab {
         let label = tab_label(window_label, id);
         host_window
             .add_child(
                 tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("index.html".into()))
-                    .background_color(tauri::utils::config::Color(255, 255, 255, 255)),
+                    .background_color(tauri::utils::config::Color(11, 13, 42, 255)),
                 content_pos,
                 content_bounds.size,
             )
@@ -838,15 +853,22 @@ pub fn relayout_window(app: &AppHandle, state: &ShellState, window_label: &str) 
     }
 }
 
-/// Close a window's popup overlay, if one is open. Every other
+/// Hide a window's popup overlay, if one is open. Every other
 /// interaction of the window routes through here first: a click, a drag,
 /// an omnibox commit — the menu yields to whatever the operator did next
 /// (the dismiss-then-act order also makes the anchor button's own
 /// pointerdown toggle the menu, as upstream's does).
+///
+/// THE PERSISTENT OVERLAY LAW: hiding, never closing. The overlay
+/// webview of a window is born once and outlives every menu it serves;
+/// dismissal is a visibility flip, so the WebView2 controller
+/// create/close cycle — the native fault class the founder's right-click
+/// crash lived in — is never entered at all. The webview's JS state is
+/// the OVERLAY's own concern: `shell://popup-boot` re-renders it fresh
+/// on every show (PopupApp's re-boot listener).
 pub fn dismiss_popup(app: &AppHandle, state: &ShellState, window_label: &str) {
-    // Close by the STORED label (the generation law): the popup that was
-    // created is the popup that closes, regardless of what any other
-    // generation is doing.
+    // Hide by the STORED label: the overlay that was shown is the
+    // overlay that hides, regardless of what any other path is doing.
     let label = state
         .lock()
         .popups
@@ -855,24 +877,8 @@ pub fn dismiss_popup(app: &AppHandle, state: &ShellState, window_label: &str) {
     let Some(label) = label else {
         return;
     };
-    // The webview closes itself — tauri 2.12's child-webview removal is
-    // Webview::close (the manager unregisters it with the window).
     if let Some(webview) = app.get_webview(&label) {
-        let _ = webview.close();
-    }
-}
-
-/// Sweep any popup webviews of this window that the registry no longer
-/// knows (an orphan whose PopupState died mid-flight, or a dismissal
-/// whose close is still in flight). Called on the create path — the one
-/// moment a stray would corrupt the one-popup-per-window law. The match
-/// is EXACT (parse the generation label, compare the window): a prefix
-/// match would let window `main` sweep `main-2`'s popups too.
-fn sweep_popup_strays(app: &AppHandle, window_label: &str) {
-    for (label, webview) in app.webview_windows() {
-        if parse_popup_label(&label).as_deref() == Some(window_label) {
-            let _ = webview.close();
-        }
+        let _ = webview.hide();
     }
 }
 
@@ -1835,31 +1841,18 @@ pub async fn shell_popup(
     } else {
         popup_rect((size.width, size.height), &kind, x, y)
     };
-    // Whether this open REPLACES a live popup — the destroy/create beat
-    // law below waits out the replaced widget's teardown. The OLD
-    // generation's label is captured first: the poll addresses the
-    // webview that is dying, not the one about to be born.
-    let old_label: Option<String> = state
-        .lock()
-        .popups
-        .get(&window_name)
-        .map(|popup| popup.label.clone());
-    dismiss_popup(&app, &state, &window_name);
-    // THE GENERATION LAW's sweep: any popup webview of this window the
-    // registry lost (an orphaned card, a dismissal whose close is still
-    // landing) dies HERE — before the new generation is minted, so the
-    // one-popup-per-window law survives even a crashed teardown.
-    sweep_popup_strays(&app, &window_name);
-    let label = next_popup_label(&window_name);
-    // THE BOOT ORDER LAW (the audit's P0): the state lands FIRST, the
-    // webview second. `shell_popup_boot` reads `popups[window]` from the
-    // popup's own load path — a webview created before its PopupState
-    // existed could boot into kind="unknown" whenever its page loaded
-    // fast enough to win the race against the insert. With the state
-    // established before `add_child`, no boot can arrive early; if the
-    // webview itself fails to open, the state is rolled back so the
-    // registry never holds a popup with no widget behind it.
+    // THE PERSISTENT OVERLAY LAW: the state lands FIRST, then the
+    // overlay's visibility. The one webview per window is born once
+    // (hidden), so this open is either its FIRST (create it — the state
+    // already stands, so its load-path boot cannot race the registry) or
+    // a LATER one (show the existing webview and re-boot it through the
+    // `shell://popup-boot` event — PopupApp's re-boot listener resets
+    // its own transient state and re-reads the full context through
+    // `shell_popup_boot`). A replaced popup (the menu-over-card path)
+    // is only HIDDEN here — no controller teardown exists to race, the
+    // crash class's whole habitat is gone.
     let is_card = kind == "hover-card";
+    let label = overlay_label(&window_name);
     state.lock().popups.insert(
         window_name.clone(),
         PopupState {
@@ -1871,50 +1864,44 @@ pub async fn shell_popup(
             label: label.clone(),
         },
     );
-    // THE DESTROY/CREATE BEAT LAW: a popup that was just dismissed in this
-    // same command must not share its pump turn with the popup that
-    // replaces it — on Windows the WebView2 controller's teardown and the
-    // next controller's creation are both async operations on the same
-    // parent HWND, and overlapping them is a native crash class (the
-    // right-click-on-a-hovered-tab path: the hover card closes, the menu
-    // opens, 100% of the time). The yield stays OFF the event loop (the
-    // re-entrancy law) and the teardown is given a bounded moment to
-    // actually finish — the manager is polled until the old generation's
-    // webview is gone (WebView2's Close is asynchronous; a blind one-beat
-    // sleep can still race the controller's final cleanup), capped at
-    // 24ms so a wedged teardown delays the new popup by nothing that
-    // matters. With unique labels even a polled-through cap cannot
-    // collide — the beat only narrows the HWND overlap window.
-    if let Some(old) = old_label {
-        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        for _ in 0..6 {
-            if app.get_webview(&old).is_none() {
-                break;
+    match app.get_webview(&label) {
+        Some(overlay) => {
+            // The overlay already exists: re-bound it to this popup's
+            // rect and show it. set_bounds before show keeps the reveal
+            // atomic — the menu never paints at a stale anchor.
+            let _ = overlay.set_bounds(Rect {
+                position: position.into(),
+                size: popup_size.into(),
+            });
+            let _ = overlay.show();
+        }
+        None => {
+            // First popup of the window's life: birth the persistent
+            // overlay — hidden-until-configured, unfocused (THE FOCUS
+            // LAW: the builder's default MoveFocus inside the creation
+            // completion is the crash window the menus never enter; the
+            // menu asks for the focus from its own first painted frame,
+            // one rAF after boot). Async context per the re-entrancy
+            // law; the state already stands, and a failed birth rolls
+            // the registry back so it never holds a popup with no
+            // widget behind it.
+            if let Err(e) = host_window.add_child(
+                tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
+                    .transparent(true)
+                    .focused(false),
+                position,
+                popup_size,
+            ) {
+                state.lock().popups.remove(&window_name);
+                return Err(format!("could not open the popup: {e}"));
             }
-            tokio::time::sleep(std::time::Duration::from_millis(4)).await;
         }
     }
-    if let Err(e) = host_window.add_child(
-        tauri::webview::WebviewBuilder::new(&label, WebviewUrl::App("popup.html".into()))
-            .transparent(true)
-            // THE FOCUS LAW (the founder's 100% right-click crash): the
-            // builder's default is a native MoveFocus INSIDE the creation
-            // completion — and the menu's own focus demand must never race
-            // the controller's first composition on the WebView2s this
-            // crash has been observed on. Every popup is therefore born
-            // UNfocused (the hover card's SetCanActivate(false) law,
-            // applied to all four shapes), and the menu takes the focus
-            // FROM ITS OWN FIRST PAINT — PopupApp calls `shell_popup_focus`
-            // one rAF after its boot lands, the safest moment a focus
-            // request can exist at. Chromium's menu keeps the keyboard
-            // contract; the crash window is never entered.
-            .focused(false),
-        position,
-        popup_size,
-    ) {
-        state.lock().popups.remove(&window_name);
-        return Err(format!("could not open the popup: {e}"));
-    }
+    // The re-boot signal: the overlay's document (already alive, or just
+    // born) re-reads the world through `shell_popup_boot` — on the first
+    // birth this races the document's own load, which is exactly why the
+    // COMMAND exists as the document's own boot path; on every later
+    // show this event is what re-renders a persistent overlay fresh.
     let _ = app.emit_to(
         &label,
         "shell://popup-boot",
@@ -2142,6 +2129,20 @@ pub fn shell_popup_dismiss(
     let window_name = window_label_of(&window);
     dismiss_popup(&app, &state, &window_name);
     Ok(())
+}
+
+/// The theme broadcast (the Arix port, 2026-10-12): one webview changed
+/// the panel's appearance — the host re-tells EVERY webview in the
+/// process so the frame band, every tab, and every open overlay re-theme
+/// in the same beat. The shape is the theme store's own (state/theme.ts
+/// normalizes on arrival, so a stale field degrades to its default,
+/// never to a broken sheet); persistence is the webviews' own
+/// localStorage (one origin, already written before this is called).
+/// The host is deliberately stateless here — it is a loudspeaker, not a
+/// theme authority.
+#[tauri::command]
+pub fn shell_theme_broadcast(theme: serde_json::Value, app: AppHandle) -> Result<(), String> {
+    app.emit("shell://theme", theme).map_err(|e| e.to_string())
 }
 
 /// The drag session — frame pointer events in, model decisions out.
@@ -2576,9 +2577,10 @@ fn spawn_tearoff_block(
     let window = tauri::window::WindowBuilder::new(app, &label)
         .decorations(false)
         .inner_size(1100.0, 720.0)
-        // The tear-off's raw surface is the strip gray, not black —
-        // booting webviews flash paper and chrome, never the void.
-        .background_color(tauri::utils::config::Color(222, 225, 230, 255))
+        // The tear-off's raw surface is the THEME GROUND (the Arix
+        // port): a booting webview flashes the theme's own dark ground,
+        // never paper, never the void.
+        .background_color(tauri::utils::config::Color(11, 13, 42, 255))
         .build()
         .map_err(|e| format!("tear-off window failed: {e}"))?;
     let _ = window.set_position(LogicalPosition::new(
@@ -2591,7 +2593,7 @@ fn spawn_tearoff_block(
                 frame_label(&label),
                 WebviewUrl::App("frame.html".into()),
             )
-            .background_color(tauri::utils::config::Color(222, 225, 230, 255)),
+            .background_color(tauri::utils::config::Color(11, 13, 42, 255)),
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(1100.0, 83.0),
         )
@@ -2642,37 +2644,62 @@ pub async fn shell_window_resized(
 mod popup_label_tests {
     use super::*;
 
-    // The generation law: every minted label is unique and parses back
-    // to its window — the right-click crash's fourth defense.
+    // The persistent overlay law: one label per window, the whole
+    // remainder after the prefix IS the window, and attribution never
+    // mistakes a neighbor window's overlay. (The legacy generation
+    // parser below keeps the pre-law era's labels attributable.)
 
     #[test]
-    fn minted_labels_parse_back_to_their_window() {
+    fn overlay_labels_parse_back_to_their_window() {
         for window in ["main", "zim-2", "tear-off-window-3"] {
-            let label = next_popup_label(window);
-            assert_eq!(parse_popup_label(&label).as_deref(), Some(window));
+            let label = overlay_label(window);
+            assert_eq!(parse_overlay_label(&label).as_deref(), Some(window));
         }
     }
 
     #[test]
-    fn two_mints_never_share_a_label() {
-        let a = next_popup_label("main");
-        let b = next_popup_label("main");
-        assert_ne!(a, b, "a reused label races the old popup's teardown");
+    fn one_window_one_overlay_one_label() {
+        // The persistence law's own shape: the label is a pure function
+        // of the window — no counter, no generation, nothing to race.
+        assert_eq!(overlay_label("main"), overlay_label("main"));
     }
 
     #[test]
     fn window_names_with_dashes_survive_the_roundtrip() {
-        // rsplit_once at the LAST dash: the generation is the numeric tail,
-        // everything before it is the window — dashes included.
+        assert_eq!(
+            parse_overlay_label("overlay-zim-2").as_deref(),
+            Some("zim-2")
+        );
+        assert_eq!(parse_overlay_label("overlay-main").as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn non_overlay_labels_refuse_to_parse() {
+        assert_eq!(parse_overlay_label("main-frame"), None);
+        assert_eq!(parse_overlay_label("tab-main-3"), None);
+        assert_eq!(parse_overlay_label("popup-main-1"), None);
+    }
+
+    #[test]
+    fn attribution_never_crosses_neighbor_windows() {
+        // window `main` must never claim `main-2`'s overlay: the parse is
+        // exact per window, never a prefix.
+        assert_ne!(
+            parse_overlay_label("overlay-main-2").as_deref(),
+            Some("main"),
+            "prefix attribution would claim the neighbor window's overlay"
+        );
+    }
+
+    #[test]
+    fn legacy_generation_labels_stay_attributable() {
+        // The pre-law era's labels (popup-{window}-{gen}) still name
+        // their window through the legacy parser.
         assert_eq!(
             parse_popup_label("popup-zim-2-13").as_deref(),
             Some("zim-2")
         );
         assert_eq!(parse_popup_label("popup-main-1").as_deref(), Some("main"));
-    }
-
-    #[test]
-    fn non_popup_and_malformed_labels_refuse_to_parse() {
         assert_eq!(parse_popup_label("main-frame"), None);
         assert_eq!(parse_popup_label("tab-main-3"), None);
         assert_eq!(parse_popup_label("popup-main"), None, "no generation");
@@ -2680,20 +2707,6 @@ mod popup_label_tests {
             parse_popup_label("popup-main-not-a-number"),
             None,
             "the tail must be numeric"
-        );
-    }
-
-    #[test]
-    fn the_sweep_match_is_exact_per_window() {
-        // window `main` must NOT sweep `main-2`'s popups: the match goes
-        // through parse_popup_label (exact), never a prefix.
-        let foreign = next_popup_label("main-2");
-        let own = next_popup_label("main");
-        assert_eq!(parse_popup_label(&own).as_deref(), Some("main"));
-        assert_ne!(
-            parse_popup_label(&foreign).as_deref(),
-            Some("main"),
-            "prefix matching would kill the neighbor window's popup"
         );
     }
 }

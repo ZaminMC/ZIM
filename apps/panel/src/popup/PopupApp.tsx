@@ -183,6 +183,46 @@ export function PopupApp() {
   const [cardSliding, setCardSliding] = useState(false);
   const [cardFading, setCardFading] = useState(false);
 
+  // THE RE-BOOT (the persistent overlay law, 2026-10-12): the overlay's
+  // webview is born once per window and outlives every menu it serves,
+  // so a SHOW is not a mount — the host's `shell://popup-boot` event is
+  // the re-boot signal, and this function is the ONE boot path both the
+  // document's first load and every later show walk: re-read the world
+  // through `shell_popup_boot`, reset every transient posture the
+  // previous popup left behind (the naming form's half-typed name, the
+  // card's slide/fade posture, the roving focus), and re-apply THE
+  // FOCUS LAW — the menu asks for focus one rAF after the context
+  // lands, never from inside a creation completion.
+  const reboot = useCallback(async () => {
+    if (!isTauri()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    try {
+      const context = await invoke<PopupContext>("shell_popup_boot");
+      setCtx(context);
+      setGroupKind(false);
+      setGroupName("");
+      setFormColor(null);
+      setGroupError(null);
+      setCardSliding(false);
+      setCardFading(false);
+      // THE FOCUS LAW (the founder's 100% right-click crash): the host
+      // births every popup UNfocused and the overlay takes the focus
+      // FROM ITS OWN FIRST PAINTED FRAME — one rAF after the boot
+      // lands, the composition is a real, painted surface and the
+      // request cannot race creation. The hover card never asks —
+      // upstream's SetCanActivate(false): the card only paints, it
+      // never holds the focus, so no key ever reaches it.
+      if (context.kind !== "hover-card") {
+        requestAnimationFrame(() => {
+          void invoke("shell_popup_focus").catch(() => {});
+        });
+      }
+    } catch {
+      // The popup died before its boot answered; the host hides the
+      // overlay, nothing to render.
+    }
+  }, []);
+
   // Boot: the host pushes the context (kind + the addressed tab's
   // posture); the demo lane reads it from the query for review.
   useEffect(() => {
@@ -235,40 +275,35 @@ export function PopupApp() {
       });
       return;
     }
+    // The document's own first load: the ONE boot path (reboot) — the
+    // host's state already stands (the boot order law), so this read
+    // answers with the popup this webview was born to serve.
+    void reboot();
+    // THE PERSISTENT OVERLAY'S SHOW LANE: every later open rides the
+    // host's `shell://popup-boot` event (shell_popup emits it after the
+    // state lands and the webview shows). The listener is attached for
+    // the document's whole life — a hidden overlay still hears it, which
+    // is exactly the point: the show IS the re-boot. SCOPED to THIS
+    // webview (the emit_to target): a global listener would hear every
+    // window's overlay boots — with the persistent overlay there is
+    // exactly one per window, and cross-talk would re-boot a sibling
+    // window's menu with another's items.
+    if (!isTauri()) return;
     let disposed = false;
+    const offs: Array<() => void> = [];
     void (async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
-      try {
-        const context = await invoke<PopupContext>("shell_popup_boot");
-        // The closure-set flag reads through a box: the lint's flow
-        // analysis can't see the cleanup's write, and the overlay's
-        // unmount must not win a race with the boot's reply.
-        if (!(disposed as boolean)) setCtx(context);
-        // THE FOCUS LAW (the founder's 100% right-click crash): the host
-        // births every popup UNfocused — a fresh WebView2 controller's
-        // focus race is the native crash class the crash lives in. The
-        // menu asks for the focus from its own first painted frame
-        // instead: one rAF after the boot lands, the composition is a
-        // real, painted surface and the request cannot race creation.
-        // The hover card never asks — upstream's SetCanActivate(false):
-        // the card only paints, it never holds the focus, so no key
-        // ever reaches it.
-        if (isTauri() && context.kind !== "hover-card") {
-          requestAnimationFrame(() => {
-            if (!(disposed as boolean)) {
-              void invoke("shell_popup_focus").catch(() => {});
-            }
-          });
-        }
-      } catch {
-        // The popup died before its boot answered; the host tears it
-        // down, nothing to render.
-      }
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      const offBoot = await getCurrentWebview().listen("shell://popup-boot", () => {
+        if (disposed) return;
+        void reboot();
+      });
+      offs.push(offBoot);
     })();
     return () => {
       disposed = true;
+      offs.forEach((off) => off());
     };
-  }, []);
+  }, [reboot]);
 
   const kind = groupKind ? "new-group" : (ctx?.kind ?? "tab-menu");
 
@@ -283,13 +318,19 @@ export function PopupApp() {
     let disposed = false;
     const offs: Array<() => void> = [];
     void (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      const offUpdate = await listen<HoverCardPayload>("shell://popup-update", (event) => {
-        if (disposed) return;
-        setCardFading(false);
-        setCtx((cur) => (cur ? { ...cur, card: event.payload } : cur));
-      });
-      const offFade = await listen("shell://popup-fade", () => {
+      // SCOPED to this overlay webview (the emit_to target — the same
+      // law the boot lane above states): update/fade orders addressed to
+      // THIS overlay land only here, never in a sibling window's card.
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      const offUpdate = await getCurrentWebview().listen<HoverCardPayload>(
+        "shell://popup-update",
+        (event) => {
+          if (disposed) return;
+          setCardFading(false);
+          setCtx((cur) => (cur ? { ...cur, card: event.payload } : cur));
+        },
+      );
+      const offFade = await getCurrentWebview().listen("shell://popup-fade", () => {
         if (disposed) return;
         setCardFading(true);
       });

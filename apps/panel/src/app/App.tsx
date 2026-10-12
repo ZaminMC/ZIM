@@ -27,6 +27,7 @@ import { FleetPage } from "./FleetPage";
 import { MissingPage } from "./browser/MissingPage";
 import { NewTabPage } from "./browser/NewTabPage";
 import { TabBoundary } from "./browser/TabCrash";
+import { AppearanceStudio } from "./browser/AppearanceStudio";
 import styles from "./App.module.css";
 
 // Modals are operator-invoked overlays, not boot surfaces (lazy as
@@ -336,6 +337,11 @@ export function App() {
 
   return (
     <div className={styles.content}>
+      {/* The Arix stage (the theme port): the fixed background layer the
+          glass surfaces blur — the ground plus the preset image, fading in
+          below the frame band's matching ground so the seam is invisible.
+          The class is the global glass layer's own (theme/arix.css). */}
+      <div className="arix-bg" aria-hidden />
       {wireStatus !== "ready" && wireDwelled ? (
         <div className={styles.wireBanner} role="status" data-state={wireStatus}>
           <span className={styles.wireDot} aria-hidden />
@@ -363,7 +369,7 @@ export function App() {
               atomic commit, no blank beat — the old page's paint stands
               until the new page's lands. */}
           <div
-            className={styles.page}
+            className={`${styles.page} page-enter`}
             key={`${tabKey(destination)}:${reloadToken}`}
           >
             <DestinationView destination={destination} />
@@ -375,6 +381,10 @@ export function App() {
         {paletteOpen ? <Palette /> : null}
         <ConnectionsModal />
       </Suspense>
+      {/* The customization studio (the Arix theme port): the new tab's
+          bottom-right icon opens it; it renders on every destination so a
+          theme change never depends on which page is showing. */}
+      <AppearanceStudio />
     </div>
   );
 }

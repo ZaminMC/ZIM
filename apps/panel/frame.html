@@ -4,12 +4,140 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ZIM</title>
-    <!-- Strip gray before the CSS lands (the official white theme's
-         band color): the frame webview must never flash the wrong
-         ground on boot or on a new tab's first paint. -->
-    <style>html { background: #dee1e6; }</style>
+    <!-- THE THEME BOOT (before first paint): same law as index.html — the
+         saved theme's ground lands on <html> before the band paints, so
+         the shell's first pixel is the theme's own. The frame band paints
+         the gray800 ground both themes share at the seam; the content
+         webview's aurora rises below it. -->
+    <script>
+      (function () {
+        var d = document.documentElement;
+        try {
+          var raw = localStorage.getItem("zim.theme.v1");
+          var t = raw ? JSON.parse(raw) : {};
+          d.dataset.mode = t.mode === "light" ? "light" : "dark";
+          if (typeof t.glass === "boolean") d.dataset.glass = t.glass ? "on" : "off";
+          if (typeof t.background === "string") d.dataset.background = t.background;
+          if (typeof t.primary === "string" && /^#[0-9a-fA-F]{6}$/.test(t.primary))
+            d.style.setProperty("--primary", t.primary);
+          var num = function (v, min, max) {
+            var n = Number(v);
+            return isFinite(n) ? Math.min(max, Math.max(min, n)) : null;
+          };
+          var op = num(t.glassOpacity, 40, 100);
+          if (op !== null) d.style.setProperty("--glass-opacity", op + "%");
+          var bl = num(t.glassBlur, 0, 40);
+          if (bl !== null) d.style.setProperty("--glass-blur", bl + "px");
+          var rb = num(t.radiusBox, 0, 24);
+          if (rb !== null) d.style.setProperty("--radius-box", rb + "px");
+          var ri = num(t.radiusInput, 0, 16);
+          if (ri !== null) d.style.setProperty("--radius-input", ri + "px");
+          var base = {
+            aurora: "/backgrounds/aurora",
+            mesh: "/backgrounds/mesh",
+            ribbon: "/backgrounds/ribbon",
+          }[t.background];
+          d.style.setProperty(
+            "--background-image",
+            base
+              ? 'url("' + base + (t.mode === "light" ? "-light" : "") + '.jpg")'
+              : "none",
+          );
+        } catch (e) {
+          d.dataset.mode = "dark";
+        }
+        d.style.setProperty(
+          "--boot-ground",
+          d.dataset.mode === "light" ? "#f0f1f5" : "#0b0d2a",
+        );
+      })();
+    </script>
+    <style>
+      html {
+        background: var(--boot-ground, #0b0d2a);
+      }
+      .boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: var(--boot-ground, #0b0d2a);
+        color: var(--text, #f4f4f4);
+        font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+      }
+      .boot-splash svg {
+        width: 44px;
+        height: 44px;
+      }
+      .boot-splash .boot-word {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.42em;
+        text-indent: 0.42em;
+        color: var(--text-muted, #b2b2c1);
+        text-transform: uppercase;
+      }
+      .boot-splash .boot-line {
+        position: relative;
+        width: 148px;
+        height: 2px;
+        border-radius: 1px;
+        overflow: hidden;
+        background: rgba(128, 130, 164, 0.4);
+      }
+      .boot-splash .boot-line::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 40%;
+        border-radius: 1px;
+        background: var(--primary, #4a35cf);
+        animation: boot-slide 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+      @keyframes boot-slide {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-splash .boot-line::after {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot" aria-hidden="true">
+      <div class="boot-splash">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect
+            x="5"
+            y="5"
+            width="38"
+            height="38"
+            rx="9"
+            stroke="rgba(178,178,193,0.35)"
+            stroke-width="2"
+          />
+          <path
+            d="M17.5 19h13l-13 10h13"
+            stroke="var(--primary, #4a35cf)"
+            stroke-width="2.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span class="boot-word">ZIM</span>
+        <span class="boot-line"></span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/frame/main.tsx"></script>
   </body>

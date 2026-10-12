@@ -16,7 +16,7 @@ import { useUi } from "../../state/ui";
 import { Button } from "../../ui/Button";
 import { StatusChip } from "../../ui/StatusChip";
 import { StatusDot } from "../../ui/StatusDot";
-import { IconPlus, IconServer } from "../../ui/icons";
+import { IconPalette, IconPlus, IconServer } from "../../ui/icons";
 import { MachineDiscovery, slugFromPath } from "./machineDiscovery";
 import { describeError } from "../../state/errors";
 import { ErrorNote } from "../../ui/ErrorNote";
@@ -61,6 +61,7 @@ export function NewTabPage() {
   const query = useTabs((s) => s.discoveryQuery);
   const setDiscoveryQuery = useTabs((s) => s.setDiscoveryQuery);
   const setNewServerOpen = useUi((s) => s.setNewServerOpen);
+  const setStudioOpen = useUi((s) => s.setStudioOpen);
   const serverMap = useServers((s) => s.servers);
   const entries = sortedServers(serverMap);
   // This window's reach (§22): the box the active connection profile
@@ -212,6 +213,19 @@ export function NewTabPage() {
         ) : null}
         <MachineDiscovery query={filter} onOpen={(candidate) => void openCandidate(candidate)} />
       </div>
+
+      {/* The Appearance Studio's door (the Arix theme port): the
+          bottom-right glass icon. The sidebar itself mounts at the app
+          root, so it survives navigation once open. */}
+      <button
+        type="button"
+        className={styles.studioTrigger}
+        onClick={() => setStudioOpen(true)}
+        aria-label="Customize appearance"
+        title="Customize appearance"
+      >
+        <IconPalette size={18} />
+      </button>
     </div>
   );
 }

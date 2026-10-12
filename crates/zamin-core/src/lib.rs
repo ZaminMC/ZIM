@@ -11,6 +11,7 @@
 pub mod backup;
 pub mod cache;
 pub mod config;
+pub mod crash;
 pub mod discovery;
 pub mod error;
 pub mod extensions;

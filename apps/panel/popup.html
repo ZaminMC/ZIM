@@ -5,7 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ZIM</title>
     <!-- The popup overlay floats transparent over the content: the body
-         itself stays clear so only the menu's own surface paints. -->
+         itself stays clear so only the menu's own surface paints. The
+         theme boot still runs — the menu's tokens must match the theme
+         from its first frame, and no popup may flash a wrong ground. -->
+    <script>
+      (function () {
+        var d = document.documentElement;
+        try {
+          var raw = localStorage.getItem("zim.theme.v1");
+          var t = raw ? JSON.parse(raw) : {};
+          d.dataset.mode = t.mode === "light" ? "light" : "dark";
+          if (typeof t.glass === "boolean") d.dataset.glass = t.glass ? "on" : "off";
+          if (typeof t.background === "string") d.dataset.background = t.background;
+          if (typeof t.primary === "string" && /^#[0-9a-fA-F]{6}$/.test(t.primary))
+            d.style.setProperty("--primary", t.primary);
+          var num = function (v, min, max) {
+            var n = Number(v);
+            return isFinite(n) ? Math.min(max, Math.max(min, n)) : null;
+          };
+          var op = num(t.glassOpacity, 40, 100);
+          if (op !== null) d.style.setProperty("--glass-opacity", op + "%");
+          var bl = num(t.glassBlur, 0, 40);
+          if (bl !== null) d.style.setProperty("--glass-blur", bl + "px");
+          var rb = num(t.radiusBox, 0, 24);
+          if (rb !== null) d.style.setProperty("--radius-box", rb + "px");
+          var ri = num(t.radiusInput, 0, 16);
+          if (ri !== null) d.style.setProperty("--radius-input", ri + "px");
+          var base = {
+            aurora: "/backgrounds/aurora",
+            mesh: "/backgrounds/mesh",
+            ribbon: "/backgrounds/ribbon",
+          }[t.background];
+          d.style.setProperty(
+            "--background-image",
+            base
+              ? 'url("' + base + (t.mode === "light" ? "-light" : "") + '.jpg")'
+              : "none",
+          );
+        } catch (e) {
+          d.dataset.mode = "dark";
+        }
+      })();
+    </script>
     <style>html { background: transparent; }</style>
   </head>
   <body>

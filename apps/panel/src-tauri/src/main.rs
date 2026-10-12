@@ -500,7 +500,8 @@ fn main() {
             shell::host::shell_popup_close,
             shell::host::shell_popup_update,
             shell::host::shell_popup_fade,
-            shell::host::shell_popup_dismiss
+            shell::host::shell_popup_dismiss,
+            shell::host::shell_theme_broadcast
         ])
         // The run loop owns two more tray laws: with the window hidden the
         // OS never sees a "last window closed" moment, but a hidden window

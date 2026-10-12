@@ -34,10 +34,14 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Minus,
+  Moon,
   Network,
+  Palette,
   Pin,
   Plus,
   Puzzle,
+  SlidersHorizontal,
+  Sun,
   Rocket,
   RotateCcw,
   RotateCw,
@@ -124,6 +128,10 @@ export const IconPlayers = from(Users);
 export const IconUngroup = from(Ungroup);
 export const IconPin = from(Pin);
 export const IconPlus = from(Plus);
+export const IconPalette = from(Palette);
+export const IconSliders = from(SlidersHorizontal);
+export const IconSun = from(Sun);
+export const IconMoon = from(Moon);
 export const IconPuzzle = from(Puzzle);
 export const IconReload = from(RotateCw);
 export const IconRocket = from(Rocket);

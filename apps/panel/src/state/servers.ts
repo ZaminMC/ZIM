@@ -25,6 +25,10 @@ export interface CrashInfo {
   phase: CrashClassification["phase"];
   exitCode?: number;
   evidence?: string;
+  /** The daemon's pattern-matched failure family — present only when
+   *  the evidence named a known cause (a vanilla-jar DNS failure, a
+   *  port conflict, a heap shortfall). */
+  diagnosis?: CrashClassification["diagnosis"];
   error?: ProtocolErrorObject;
   /** True once a later transition proves the crash card stale. */
   resolved: boolean;

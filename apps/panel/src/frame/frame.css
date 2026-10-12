@@ -2,11 +2,15 @@
    omnibox, bookmarks bar), rebuilt to the ported law (shell/layout.rs
    cites each constant's upstream Chromium file).
 
-   2026-10-10: the band wears the official WHITE theme (tokens.css) —
-   Chromium's light ladder: the gray strip, the white active tab melting
-   into the white toolbar, the quiet gray omnibox field that lights on
-   focus. Every color here is a token; nothing in this sheet knows what
-   theme is in force. */
+   2026-10-12: the band wears the official ARIX GLASS theme (the theme
+   port) — the dark ladder through tokens.css: the gray800 ground, the
+   translucent gray700 strip surfaces, the gray700 omnibox field that
+   lights on focus, the primary as the frame accent. The band is its
+   own webview (it cannot blur the content below it), so its glass is
+   the token translucency over its own opaque ground — and its bottom
+   melts into the content webview's matching --bg at the seam, where
+   the content's aurora rises below the fade. Every color here is a
+   token; nothing in this sheet knows what theme is in force. */
 
 /* The band's palette is NOT here: every frame, popup, and group-color
    token lives in tokens.css (the theme-token layer) — restyling the
