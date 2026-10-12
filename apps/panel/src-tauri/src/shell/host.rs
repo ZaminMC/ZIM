@@ -1745,7 +1745,18 @@ pub async fn shell_bookmark_add(
                 let title = destination.label();
                 inner.bookmarks.add(destination, title)
             }
-            AddressRequest::Join { host, port } => {
+            // The join's typed page/file path (host:port/console) cannot
+            // ride an UNRESOLVED join destination — the same law as
+            // land()'s None arm: only a fleet-resolved server destination
+            // carries pages. The bar has no fleet at the drop door, so
+            // the bookmark is the join itself and the Join page resolves
+            // the address when the node is opened.
+            AddressRequest::Join {
+                host,
+                port,
+                page: _,
+                file_path: _,
+            } => {
                 let destination = Destination::Join { host, port };
                 let title = destination.label();
                 inner.bookmarks.add(destination, title)
